@@ -1,0 +1,7 @@
+# Offline check that the core loads the bundled geo databases (see scripts/prepare-geodata.py).
+geodata-loader: memconservative
+geo-auto-update: false
+rules:
+  - GEOIP,CN,DIRECT
+  - GEOSITE,cn,DIRECT
+  - MATCH,DIRECT

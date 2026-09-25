@@ -56,7 +56,7 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
 | **P2** | 从 `wireguard.rs` 抽出 `egress_policy`（设备、标记位、路由表参数化）；WG 行为不变；互斥切换事务与回滚 | 否 | 完成（互斥切换在 P3 实现） |
 | **P3** | `clash.rs`：进程监管、订阅子模块、配置合成、Unix socket 控制客户端、策略应用、revision/409 | 否（mock） | 完成（netns 数据面测试通过），等实机 |
 | **P4** | 网页「代理」分组：概览 / 订阅 / 节点组 / 设备分流 / 连接 / 日志 / 高级设置；`api.ts`、`mock_agent.py`、契约检查 | 否 | 完成（mock + 浏览器走查），等实机 |
-| **P5** | `deploy-components.py --mihomo`、`transaction.sh` 快照目标、geo 数据打包 | 否 | 待开始 |
+| **P5** | `deploy-components.py --mihomo`、`transaction.sh` 快照目标、geo 数据打包 | 否 | 完成（离线 geo 加载已验证），等实机 |
 | **P6** | B31 实机验证：吞吐、DNS/IPv6/kill-switch 泄漏、防火墙重载/重启/WAN 重连恢复、72 h 内存浸泡、WG↔Clash 切换 | 是 | 待开始 |
 | **P7** | DevUI 小屏：后端状态、Clash 开关/模式/节点 | 否（预览） | 可选 |
 | **P8** | 移植原作功能：端口转发、DMZ、SIM PIN/PUK、访客 Wi-Fi、飞行模式/数据开关、网络搜索；TLS 类（短信转发/测速）借 mihomo mixed-port | 否 | 可选 |
@@ -127,3 +127,18 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
 - 设备名单编辑沿用 WG 的"编辑时的 revision"，别处改过会得到 409 而不是静默覆盖。
 - 走查：Playwright（容器）对 mock 跑完整流程——登录、添加订阅（确认 token 不回显）、WG→Clash 接管确认、模式切换、选节点、测速、
   设备保存、连接关闭、日志、手机宽度——无控制台错误。
+
+### 2026-09-25 — P5 部署
+- `scripts/prepare-geodata.py`：下载 MetaCubeX 的 `geoip.metadb`、`GeoSite.dat`（`--asn` 另加 `ASN.mmdb`），
+  逐个对照上游发布的 `.sha256sum`，结果写入 `SHA256SUMS`。上游每天重建、无版本标签，所以不固定哈希，只保证与发布一致；
+  `--base` 可换 HTTPS 镜像。
+- `deploy-components.py`：`--mihomo`（aarch64 ELF + 固定 sha256 + 版本串，`--allow-unpinned-mihomo` 放宽哈希）、
+  `--mihomo-geodata`（只接受白名单文件名，逐个核对 `SHA256SUMS`）。设备上：内核推到 `mihomo.staged`，`-v` 核对版本串后再替换；
+  geo 放 `/data/share/mihomo/`；替换后停掉正在跑的内核，由 agent 看门狗重启（期间 kill-switch 挡住代理设备）。
+  顺手修了 wg/屏幕程序安装命令缺 `set -e`、自检失败仍会替换的问题。
+- `transaction.sh` 快照新增 `data/bin/mihomo`、`data/share/mihomo`；预检的空间估算包含 `/data/share/mihomo`。
+- agent：每次准备目录时把 `/data/share/mihomo` 里的 geo 文件软链接进内核 home（覆盖内核以前自己下载的），状态新增 `geodata`；
+  网页概览在缺 geo 数据时提示。
+- 验证：`unshare -n`（无网络）下内核通过软链接加载 GEOIP/GEOSITE 成功，缺文件时尝试访问 GitHub 并失败——已加入 `mihomo.yml` CI。
+  新增部署/快照单元测试（伪造 transport 检查推送路径、命令顺序、篡改/越界文件名被拒）。
+- 文档：`docs/CLASH.md`。

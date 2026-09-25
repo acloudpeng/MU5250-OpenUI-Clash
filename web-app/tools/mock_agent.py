@@ -541,7 +541,7 @@ STATE["wireguard"] = {"profiles": [], "active_profile": None, "max_profiles": 5,
 
 STATE["clash"] = {"revision": 0, "enabled": False, "mode": "all", "macs": [], "proxy_mode": "rule", "log_level": "warning",
       "stack": "system", "dns_mode": "fake-ip", "subscriptions": [], "active_subscription": None, "max_subscriptions": 5,
-      "core_installed": True, "tun_supported": True, "running": False, "pid": None, "uptime": 0, "version": "",
+      "core_installed": True, "geodata": ["geoip.metadb", "GeoSite.dat"], "tun_supported": True, "running": False, "pid": None, "uptime": 0, "version": "",
       "memory_kib": 0, "interface_up": False, "connected": False, "error": None, "wireguard_enabled": False,
       "ipv6_policy": "blocked_for_proxy_devices"}
 STATE["clash_proxies"] = {

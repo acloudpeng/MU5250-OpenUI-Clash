@@ -285,9 +285,45 @@ def prepare_only(args):
     print('All deployment dependencies prepared.')
 
 
+GEODATA = ('geoip.metadb', 'GeoSite.dat', 'ASN.mmdb')
+
+
+def load_script(name):
+    spec = importlib.util.spec_from_file_location(name.replace('-', '_'), ROOT / 'scripts' / f'{name}.py')
+    module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+    return module
+
+
+def prepare_mihomo(path, allow_unpinned):
+    data = read_limited(path)
+    if len(data) < 64 or data[:6] != b'\x7fELF\x02\x01' or int.from_bytes(data[18:20], 'little') != 183:
+        raise ValueError('Clash core must be an aarch64 ELF64 executable')
+    pinned = load_script('prepare-mihomo')
+    if hashlib.sha256(data).hexdigest() != pinned.SHA256 and not allow_unpinned:
+        raise ValueError('Clash core does not match the pinned FlClash build; rebuild with scripts/prepare-mihomo.py')
+    if pinned.VERSION.encode() not in data: raise ValueError('Clash core was not built by scripts/prepare-mihomo.py')
+    return data, pinned.VERSION
+
+
+def prepare_geodata(directory):
+    # Only files listed in the preparer's SHA256SUMS, under the names the core looks for.
+    root = Path(directory)
+    files = {}
+    for line in (root / 'SHA256SUMS').read_text().splitlines():
+        checksum, name = line.split()
+        if name not in GEODATA or name in files: raise ValueError(f'Unexpected geo data file: {name}')
+        data = read_limited(root / name)
+        if len(data) > 32 * 1024 * 1024 or hashlib.sha256(data).hexdigest() != checksum:
+            raise ValueError(f'Geo data {name} does not match SHA256SUMS')
+        files[f'geo/{name}'] = data
+    if not files: raise ValueError('Geo data directory is empty')
+    return files
+
+
 def deploy(args):
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.-]{0,252}', args.gateway): raise ValueError('Invalid gateway')
-    if not any((args.agent, args.dashboard, args.harden, getattr(args, 'screen', None), getattr(args, 'wireguard_tools', None))):
+    if not any((args.agent, args.dashboard, args.harden, getattr(args, 'screen', None), getattr(args, 'wireguard_tools', None),
+                getattr(args, 'mihomo', None), getattr(args, 'mihomo_geodata', None))):
         raise ValueError('Select at least one component')
     # Finish all local preparation before contacting or mutating a device.
     prepared = {}
@@ -319,6 +355,10 @@ def deploy(args):
         if len(panel) < 64 or panel[:6] != b'\x7fELF\x02\x01' or int.from_bytes(panel[18:20], 'little') != 183:
             raise ValueError('Screen tool must be an aarch64 ELF64 executable')
         programs['openui-screen'] = panel
+    if getattr(args, 'mihomo', None):
+        programs['mihomo'], mihomo_version = prepare_mihomo(args.mihomo, getattr(args, 'allow_unpinned_mihomo', False))
+    if getattr(args, 'mihomo_geodata', None):
+        programs.update(prepare_geodata(args.mihomo_geodata))
     if args.auto_adb and not args.adb_serial:
         devices = [line.split()[0] for line in run(['adb', 'devices']).splitlines()[1:] if line.endswith('\tdevice')]
         if len(devices) > 1: raise RuntimeError('Multiple ADB devices connected; select one with --adb-serial')
@@ -334,7 +374,7 @@ def deploy(args):
                                 "test ! -e /data/local/tmp/open-u60-transactions/active; test ! -d /data/local/tmp/open-u60-transactions/lock; "
                                 "df -Pk /data | awk 'END {print $4}'; "
                                 "df -Pk /tmp | awk 'END {print $4}'; df -Pk /etc | awk 'END {print $4}'; "
-                                "(du -sk /data/zte-agent /data/www /data/www.current /data/bin /data/dropbear /data/local/tmp/start_*.sh /etc/dropbear /etc/rc.local /etc/config/uhttpd 2>/dev/null || true) | awk '{n+=$1} END {print n+0}'")
+                                "(du -sk /data/zte-agent /data/www /data/www.current /data/bin /data/share/mihomo /data/dropbear /data/local/tmp/start_*.sh /etc/dropbear /etc/rc.local /etc/config/uhttpd 2>/dev/null || true) | awk '{n+=$1} END {print n+0}'")
     free, tmp_free, etc_free, backup = map(int, preflight.splitlines())
     payload = sum(map(len, prepared.values())) + sum(map(len, programs.values()))
     required = payload + expanded + 2 * backup * 1024 + 16 * 1024 * 1024
@@ -360,13 +400,26 @@ def deploy(args):
         if 'wg' in programs:
             transport.shell('mkdir -p /data/bin')
             transport.push(programs['wg'], '/data/bin/wg.staged', True)
-            transport.shell('/data/bin/wg.staged --version >/dev/null; mv /data/bin/wg.staged /data/bin/wg')
+            transport.shell('set -e; /data/bin/wg.staged --version >/dev/null; mv /data/bin/wg.staged /data/bin/wg')
         if 'openui-screen' in programs:
             transport.shell('test ! -e /tmp/openui-screen/owner; mkdir -p /data/bin /data/local/tmp/openui-screen-licenses')
             transport.push(programs['openui-screen'], '/data/bin/openui-screen.staged', True)
-            transport.shell('/data/bin/openui-screen.staged --version >/dev/null; rm -f /data/local/tmp/openui-screen-verified; mv /data/bin/openui-screen.staged /data/bin/openui-screen')
+            transport.shell('set -e; /data/bin/openui-screen.staged --version >/dev/null; rm -f /data/local/tmp/openui-screen-verified; mv /data/bin/openui-screen.staged /data/bin/openui-screen')
             for name in ('LICENSE', 'NOTICE', 'FONT-LICENSE', 'FONT-COPYING', 'THIRD-PARTY-LICENSES'):
                 transport.push((ROOT / 'screen' / name).read_bytes(), '/data/local/tmp/openui-screen-licenses/' + name)
+        if 'mihomo' in programs:
+            transport.shell('mkdir -p /data/bin')
+            transport.push(programs['mihomo'], '/data/bin/mihomo.staged', True)
+            transport.shell(f'set -e; /data/bin/mihomo.staged -v | grep -qF {q(mihomo_version)}; mv /data/bin/mihomo.staged /data/bin/mihomo')
+        geodata = [name for name in programs if name.startswith('geo/')]
+        if geodata:
+            transport.shell('mkdir -p /data/share/mihomo')
+            for name in geodata: transport.push(programs[name], '/data/share/mihomo/' + name[4:])
+        if 'mihomo' in programs or geodata:
+            # A running core keeps the old files open; stop it and the agent restarts it
+            # (the egress kill-switch holds client traffic meanwhile).
+            transport.shell("pid=$(cat /data/local/tmp/openui-clash/mihomo.pid 2>/dev/null) || exit 0; "
+                            "case \"$(readlink /proc/$pid/exe 2>/dev/null)\" in /data/bin/mihomo*) kill \"$pid\" 2>/dev/null || true;; esac")
         if args.agent:
             # Complete and hash-check both staged files before stopping the process.
             transport.push(prepared['agent'], '/data/zte-agent.staged', True)
@@ -418,6 +471,9 @@ def main():
     parser.add_argument('--ssh-key', help='SSH private key for the existing installation')
     parser.add_argument('--screen', help='aarch64 openui-screen binary; web entry remains gated until recovery verification')
     parser.add_argument('--wireguard-tools', help='Verified aarch64 wg binary to include in the deployment snapshot')
+    parser.add_argument('--mihomo', help='aarch64 Clash core built by scripts/prepare-mihomo.py')
+    parser.add_argument('--mihomo-geodata', help='Geo data directory prepared by scripts/prepare-geodata.py')
+    parser.add_argument('--allow-unpinned-mihomo', action='store_true', help='accept a core whose checksum differs from the pinned build')
     parser.add_argument('--prepare-only', action='store_true')
     parser.add_argument('--bundle-output')
     parser.add_argument('--release-agent')

@@ -28,10 +28,12 @@ export default function OverviewTab() {
             <div className="flex flex-wrap gap-2">
               <Chip tone={status.core_installed ? 'ok' : 'warn'}>Core {status.core_installed ? 'installed' : 'missing'}</Chip>
               <Chip tone={status.tun_supported ? 'ok' : 'warn'}>TUN {status.tun_supported ? 'ready' : 'unavailable'}</Chip>
+              <Chip tone={status.geodata.length ? 'ok' : 'warn'}>{status.geodata.length ? 'Geo data installed' : 'Geo data missing'}</Chip>
               {status.wireguard_enabled && <Chip tone="accent">WireGuard is on</Chip>}
               {!active && <Chip tone="warn">No subscription selected</Chip>}
               {active && !active.downloaded && <Chip tone="warn">Subscription not downloaded</Chip>}
             </div>
+            {!status.geodata.length && <p className="text-xs text-ink2">GEOIP and GEOSITE rules make the core download its databases from GitHub, which often fails here. Deploy them with <code>--mihomo-geodata</code>.</p>}
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
               <Stat label="Subscription" value={active?.name ?? '—'} sub={active ? `${active.proxies} nodes · ${active.rules} rules` : undefined} />
               <Stat label="Uptime" value={status.running ? formatUptime(status.uptime) : '—'} />

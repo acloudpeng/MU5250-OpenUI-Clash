@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - scripts/prepare-mihomo.py
+      - scripts/prepare-geodata.py
       - scripts/mihomo-patches/**
       - tests/mihomo/**
       - tests/clash-netns.sh
@@ -13,6 +14,7 @@ on:
   pull_request:
     paths:
       - scripts/prepare-mihomo.py
+      - scripts/prepare-geodata.py
       - scripts/mihomo-patches/**
       - tests/mihomo/**
       - tests/clash-netns.sh
@@ -33,9 +35,15 @@ jobs:
       - name: Smoke test under qemu
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq qemu-user
-          qemu-aarch64 build/mihomo/mihomo -v | tee /dev/stderr | grep -q 'linux arm64'
+          qemu-aarch64 build/mihomo/mihomo -v | tee /dev/stderr | grep 'linux arm64' | grep -qF "$(python3 -c 'import runpy; print(runpy.run_path("scripts/prepare-mihomo.py")["VERSION"])')"
           mkdir -p build/smoke && cp tests/mihomo/smoke.yaml build/smoke/config.yaml
           qemu-aarch64 build/mihomo/mihomo -d build/smoke -t -f build/smoke/config.yaml
+      - name: Bundled geo data loads offline through home symlinks
+        run: |
+          python3 scripts/prepare-geodata.py --output build/geo
+          mkdir -p build/geo-home && cp tests/mihomo/geo.yaml build/geo-home/config.yaml
+          ln -s "$PWD/build/geo/geoip.metadb" "$PWD/build/geo/GeoSite.dat" build/geo-home/
+          sudo unshare -n qemu-aarch64 build/mihomo/mihomo -d build/geo-home -t -f build/geo-home/config.yaml
       - uses: dtolnay/rust-toolchain@stable
       - name: Data path in network namespaces (agent policies + real core)
         run: |

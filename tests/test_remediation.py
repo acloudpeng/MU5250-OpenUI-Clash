@@ -95,6 +95,15 @@ class Transactions(unittest.TestCase):
         self.assertEqual((self.root / 'data/bin/openui-screen').read_text(), 'old screen')
         self.assertEqual((self.root / 'data/local/tmp/openui-screen-verified').read_text(), 'old verification')
 
+    def test_clash_core_and_geo_data_are_restored_together(self):
+        self.write('data/bin/mihomo', 'old core')
+        self.action('begin')
+        self.write('data/bin/mihomo', 'new core')
+        self.write('data/share/mihomo/geoip.metadb', 'new geo data')
+        self.action('restore')
+        self.assertEqual((self.root / 'data/bin/mihomo').read_text(), 'old core')
+        self.assertFalse((self.root / 'data/share/mihomo').exists())
+
     def test_legacy_snapshot_does_not_delete_untracked_new_components(self):
         self.action('begin')
         # Historical snapshots have no per-snapshot target inventory.
@@ -216,6 +225,53 @@ class TerminalDeployment(unittest.TestCase):
                 identity = Path(temp) / 'identity.json'; identity.write_text('{}'); args.identity_file = str(identity)
                 with self.assertRaisesRegex(RuntimeError, 'not the modem selected'): self.module.deploy(args)
             self.assertEqual(fake.pushes, [])
+
+    def test_clash_core_and_geo_data_are_checked_then_staged(self):
+        import hashlib
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        version = self.module.load_script('prepare-mihomo').VERSION
+        class Fake:
+            def __init__(self, *_): self.log = []
+            def identity(self): return {'model': 'ZTE MU5250', 'firmware': 'test', 'fingerprint': 'aabb'}
+            def shell(self, command):
+                self.log.append(('shell', command))
+                return '1000000\n1000000\n1000000\n100' if 'df -Pk' in command else ''
+            def push(self, data, destination, executable=False): self.log.append(('push', destination))
+        with tempfile.TemporaryDirectory() as temp:
+            core = Path(temp) / 'mihomo'
+            header = bytearray(64); header[:6] = b'\x7fELF\x02\x01'; header[18:20] = (183).to_bytes(2, 'little')
+            core.write_bytes(bytes(header) + version.encode())
+            geo = Path(temp) / 'geo'; geo.mkdir()
+            (geo / 'geoip.metadb').write_bytes(b'geoip')
+            (geo / 'SHA256SUMS').write_text(f"{hashlib.sha256(b'geoip').hexdigest()}  geoip.metadb\n")
+            args = SimpleNamespace(agent=None, dashboard=None, harden=False, auto_adb=False, bundle=None, gateway='192.168.0.1',
+                adb_serial=None, dry_run=False, identity_file=None, mihomo=str(core), mihomo_geodata=str(geo), allow_unpinned_mihomo=False)
+            with self.assertRaisesRegex(ValueError, 'pinned FlClash build'): self.module.deploy(args)
+            args.allow_unpinned_mihomo = True
+            core.write_bytes(bytes(header))
+            with self.assertRaisesRegex(ValueError, 'not built by'): self.module.deploy(args)
+            core.write_bytes(bytes(header) + version.encode())
+            (geo / 'geoip.metadb').write_bytes(b'tampered')
+            with self.assertRaisesRegex(ValueError, 'does not match SHA256SUMS'): self.module.deploy(args)
+            (geo / 'geoip.metadb').write_bytes(b'geoip')
+            (geo / 'SHA256SUMS').write_text((geo / 'SHA256SUMS').read_text() + f"{'0' * 64}  ../evil\n")
+            with self.assertRaisesRegex(ValueError, 'Unexpected geo data file'): self.module.deploy(args)
+            (geo / 'SHA256SUMS').write_text(f"{hashlib.sha256(b'geoip').hexdigest()}  geoip.metadb\n")
+            fake = Fake()
+            with patch.object(self.module, 'Transport', return_value=fake): self.module.deploy(args)
+        pushes = [target for kind, target in fake.log if kind == 'push']
+        self.assertIn('/data/bin/mihomo.staged', pushes)
+        self.assertIn('/data/share/mihomo/geoip.metadb', pushes)
+        commands = [command for kind, command in fake.log if kind == 'shell']
+        install = next(i for i, c in enumerate(commands) if 'mv /data/bin/mihomo.staged' in c)
+        self.assertIn(f'grep -qF {version}', commands[install])
+        self.assertTrue(commands[install].startswith('set -e;'))
+        self.assertIn('/data/share/mihomo', next(c for c in commands if 'df -Pk' in c))
+        restart = next(i for i, c in enumerate(commands) if 'mihomo.pid' in c)
+        complete = next(i for i, c in enumerate(commands) if ' complete ' in c)
+        self.assertLess(install, restart)
+        self.assertLess(restart, complete)
 
 
 class ListenerSelection(unittest.TestCase):

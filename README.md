@@ -1,7 +1,8 @@
 > **MU5250-OpenUI-Clash** — private fork of
 > [czwstc/MU5250-Wireguard](https://github.com/czwstc/MU5250-Wireguard) targeting
 > CN B31, adding a Clash.Meta (FlClash branch) proxy backend that is mutually
-> exclusive with WireGuard. Development plan: [docs/PLAN.md](docs/PLAN.md).
+> exclusive with WireGuard. Development plan: [docs/PLAN.md](docs/PLAN.md);
+> building and deploying the core: [docs/CLASH.md](docs/CLASH.md).
 > Everything below is the upstream README.
 
 # MU5250-OpenUI-Wireguard

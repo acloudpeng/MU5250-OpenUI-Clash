@@ -30,6 +30,9 @@ const HOME: &str = "/data/local/tmp/openui-clash/home";
 const PROFILE: &str = "/data/local/tmp/openui-clash/home/config.yaml";
 const SOCKET: &str = "/data/local/tmp/openui-clash/home/mihomo.sock";
 const MIHOMO: &str = "/data/bin/mihomo";
+/// Geo data deployed beside the core; linked into HOME so the core never downloads it.
+const GEODATA: &str = "/data/share/mihomo";
+const GEO_FILES: &[&str] = &["geoip.metadb", "GeoSite.dat", "ASN.mmdb"];
 const IFACE: &str = "ou-clash0";
 /// Marked clients' DNS is redirected here; it routes into the TUN and is hijacked.
 /// Outside the TUN /30 (whose second address the system stack uses for NAT).
@@ -464,9 +467,35 @@ fn ensure_dirs() -> Result<(), String> {
     for d in [DIR, SUBS, HOME] {
         fs::create_dir_all(d).map_err(|_| "Cannot create Clash state directory")?;
     }
+    link_geodata(Path::new(GEODATA), Path::new(HOME));
     // The controller socket has no authentication; this directory is its only guard.
     fs::set_permissions(DIR, fs::Permissions::from_mode(0o700))
         .map_err(|_| "Cannot protect Clash state directory".into())
+}
+/// Points the core's geo files at the deployed copies, replacing any it downloaded.
+/// Files that were not deployed are left alone.
+fn link_geodata(share: &Path, home: &Path) {
+    for name in GEO_FILES {
+        let source = share.join(name);
+        let target = home.join(name);
+        if !source.is_file() || fs::read_link(&target).is_ok_and(|p| p == source) {
+            continue;
+        }
+        let staged = home.join(format!(".{name}.link"));
+        let _ = fs::remove_file(&staged);
+        if std::os::unix::fs::symlink(&source, &staged).is_err()
+            || fs::rename(&staged, &target).is_err()
+        {
+            let _ = fs::remove_file(&staged);
+        }
+    }
+}
+fn geodata_installed() -> Vec<&'static str> {
+    GEO_FILES
+        .iter()
+        .copied()
+        .filter(|n| Path::new(GEODATA).join(n).is_file())
+        .collect()
 }
 
 // ---------- Core process ----------
@@ -807,7 +836,7 @@ fn response(s: &Settings) -> Value {
     json!({"revision":s.revision,"enabled":s.enabled,"mode":s.mode,"macs":s.macs,
         "proxy_mode":s.proxy_mode,"log_level":s.log_level,"stack":s.stack,"dns_mode":s.dns_mode,
         "subscriptions":subscription_status(s),"active_subscription":s.active_subscription,
-        "max_subscriptions":MAX_SUBSCRIPTIONS,"core_installed":Path::new(MIHOMO).exists(),
+        "max_subscriptions":MAX_SUBSCRIPTIONS,"core_installed":Path::new(MIHOMO).exists(),"geodata":geodata_installed(),
         "tun_supported":Path::new("/dev/net/tun").exists(),"running":running,"pid":running.then_some(pid),
         "uptime":uptime,"version":version,"memory_kib":if running { rss_kib(pid) } else { 0 },
         "interface_up":interface,"connected":s.enabled && healthy && interface,"error":error,
@@ -1455,6 +1484,33 @@ mod tests {
         assert_eq!(v["groups"][1]["selectable"], json!(false));
         assert_eq!(v["nodes"]["B"]["delay"], json!(120));
         assert_eq!(v["nodes"]["A"]["delay"], Value::Null);
+    }
+    #[test]
+    fn geodata_links_replace_downloads_and_skip_missing_files() {
+        let root = std::env::temp_dir().join(format!("openui-geo-{}", std::process::id()));
+        let (share, home) = (root.join("share"), root.join("home"));
+        fs::create_dir_all(&share).unwrap();
+        fs::create_dir_all(&home).unwrap();
+        fs::write(share.join("geoip.metadb"), "bundled").unwrap();
+        fs::write(home.join("geoip.metadb"), "downloaded").unwrap();
+        fs::write(home.join("GeoSite.dat"), "downloaded").unwrap();
+        link_geodata(&share, &home);
+        link_geodata(&share, &home);
+        assert_eq!(
+            fs::read_link(home.join("geoip.metadb")).unwrap(),
+            share.join("geoip.metadb")
+        );
+        assert_eq!(
+            fs::read_to_string(home.join("geoip.metadb")).unwrap(),
+            "bundled"
+        );
+        assert_eq!(
+            fs::read_to_string(home.join("GeoSite.dat")).unwrap(),
+            "downloaded"
+        );
+        assert!(!home.join("ASN.mmdb").exists());
+        assert!(!home.join(".geoip.metadb.link").exists());
+        fs::remove_dir_all(&root).unwrap();
     }
     #[test]
     fn export_integration_policies() {

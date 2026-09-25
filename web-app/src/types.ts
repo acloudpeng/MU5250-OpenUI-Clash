@@ -486,6 +486,8 @@ export interface ClashStatus {
   active_subscription: number | null
   max_subscriptions: number
   core_installed: boolean
+  /** Deployed geo databases (geoip.metadb, GeoSite.dat, ASN.mmdb). */
+  geodata: string[]
   tun_supported: boolean
   running: boolean
   pid: number | null

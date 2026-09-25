@@ -28,6 +28,8 @@ data/dropbear
 etc/config/uhttpd'
 targets="$legacy_targets
 data/bin/wg
+data/bin/mihomo
+data/share/mihomo
 data/bin/openui-screen
 data/local/tmp/openui-screen-verified
 data/local/tmp/openui-screen-licenses"
