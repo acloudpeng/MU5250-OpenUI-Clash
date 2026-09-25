@@ -1,3 +1,9 @@
+> **MU5250-OpenUI-Clash** — private fork of
+> [czwstc/MU5250-Wireguard](https://github.com/czwstc/MU5250-Wireguard) targeting
+> CN B31, adding a Clash.Meta (FlClash branch) proxy backend that is mutually
+> exclusive with WireGuard. Development plan: [docs/PLAN.md](docs/PLAN.md).
+> Everything below is the upstream README.
+
 # MU5250-OpenUI-Wireguard
 
 **OpenUI with WireGuard for the ZTE U60 Pro (MU5250).**
