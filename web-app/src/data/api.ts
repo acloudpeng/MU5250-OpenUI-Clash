@@ -11,6 +11,10 @@ import type {
   ScreenStatus,
   DevUISettings,
   WireGuardUpdate,
+  ClashConnections,
+  ClashProxies,
+  ClashStatus,
+  ClashUpdate,
   BatteryBspInfo,
   BatteryDetail,
   BatteryInfo,
@@ -627,6 +631,16 @@ export const api = {
   screenClose: () => req('DELETE', '/api/screen'),
   wireguard: () => get('/api/wireguard').then(d => d as unknown as WireGuardStatus),
   wireguardSet: (body: WireGuardUpdate) => req('PUT', '/api/wireguard', body, undefined, 120_000).then(d => d as unknown as WireGuardStatus),
+  // Clash — downloads and core restarts can take a while
+  clash: () => get('/api/clash').then(d => d as unknown as ClashStatus),
+  clashSet: (body: ClashUpdate) => req('PUT', '/api/clash', body, undefined, 180_000).then(d => d as unknown as ClashStatus),
+  clashRefresh: (id: number) => req('POST', '/api/clash/subscription/refresh', { id }, undefined, 120_000).then(d => d as unknown as ClashStatus),
+  clashProxies: () => get('/api/clash/proxies').then(d => d as unknown as ClashProxies),
+  clashSelect: (group: string, name: string) => req('PUT', '/api/clash/proxies', { group, name }).then(d => d as unknown as ClashProxies),
+  clashDelay: (name: string, group = false) => req('POST', '/api/clash/delay', { name, group }, undefined, 30_000).then(d => d as unknown as Record<string, number>),
+  clashConnections: () => get('/api/clash/connections').then(d => d as unknown as ClashConnections),
+  clashCloseConnections: () => req('DELETE', '/api/clash/connections'),
+  clashLogs: () => get('/api/clash/logs').then(d => d as unknown as { lines: string[] }),
   // Home — single batched request
   home: () => get('/api/dashboard').then(mapHome),
 

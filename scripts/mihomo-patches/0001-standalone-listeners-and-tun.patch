@@ -1,0 +1,23 @@
+Run the FlClash core as a standalone daemon.
+
+The FlClash branch is embedded in the FlClash app, whose own Go glue starts the
+inbound listeners and the TUN device; ApplyConfig therefore skips both. Upstream
+mihomo (ab405ba, the closest Alpha commit) calls them here. Restoring the two calls
+makes 'mixed-port' and 'tun' in the -f profile take effect on start and reload.
+Nothing else in the core changes.
+
+diff --git a/hub/executor/executor.go b/hub/executor/executor.go
+index dc7c66b..ad7c079 100644
+--- a/hub/executor/executor.go
++++ b/hub/executor/executor.go
+@@ -104,8 +104,8 @@ func ApplyConfig(cfg *config.Config, force bool) {
+ 	updateGeneral(cfg.General, true)
+ 	updateDNS(cfg.DNS, cfg.General.IPv6)
+ 	updateNTP(cfg.NTP) // initialize NTP after DNS because an NTP server may be a hostname.
+-	//updateListeners(cfg.General, cfg.Listeners, force)
+-	//updateTun(cfg.General) // tun should not care "force"
++	updateListeners(cfg.General, cfg.Listeners, force)
++	updateTun(cfg.General) // tun should not care "force"
+ 	updateIPTables(cfg)
+ 	updateTunnels(cfg.Tunnels)
+ 

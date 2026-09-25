@@ -20,6 +20,9 @@ pub struct Egress {
     /// Source-NAT forwarded traffic leaving the device. A userspace TUN proxy keeps
     /// real LAN sources instead, so its rules and connection view can match them.
     pub masquerade: bool,
+    /// Accept input from the device itself. The mihomo system stack loops forwarded
+    /// connections back into the kernel through it, and fw3 has no zone for it.
+    pub accept_input: bool,
 }
 
 pub fn run(program: &str, args: &[&str]) -> Result<String, String> {
@@ -61,6 +64,13 @@ impl Egress {
             })
             .collect::<Vec<_>>()
             .join(" ")
+    }
+    /// Removes owned firewall hooks, the rule and the table but leaves the device, for
+    /// backends whose device belongs to a running process (the Clash TUN).
+    pub fn cleanup_policy(&self) -> String {
+        let cleanup = self.cleanup();
+        let link = format!("ip link del {} 2>/dev/null || true\n", self.iface);
+        cleanup.strip_suffix(&link).unwrap().into()
     }
     // Literal script is never combined with unvalidated configuration or arbitrary shell hooks.
     pub fn cleanup(&self) -> String {
@@ -163,6 +173,9 @@ ip link del {iface} 2>/dev/null || true
                     out.push_str(&format!("ip6tables -w 2 -A {p}_DNS6 -m mac --mac-source {m} -p {proto} --dport 53 -j REJECT\n"));
                 }
             }
+        }
+        if self.accept_input {
+            out.push_str(&format!("iptables -w 2 -A {p}_DNS4 -i {iface} -j ACCEPT\n"));
         }
         for proto in ["tcp", "udp"] {
             out.push_str(&format!("iptables -w 2 -A {p}_DNS4 -i br-lan -m mark --mark {mark}/{mark} -p {proto} --dport 53 -j REJECT\n"));

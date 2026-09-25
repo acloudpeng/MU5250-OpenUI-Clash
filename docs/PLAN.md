@@ -22,24 +22,30 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
    - 两个后端**各自保存设备选择名单**，各自的配置档互不影响。
 3. **mihomo 构建**：`GOOS=linux GOARCH=arm64 CGO_ENABLED=0`，tags
    `with_gvisor,with_low_memory,no_tailscale,no_zerotier,no_easytier`。**禁止 `GOOS=android`**（会进入嵌入模式，禁用配置重载）。
+   - FlClash 分支是给 App 嵌入用的：`hub/executor/executor.go` 里 `updateListeners` / `updateTun` 被注释掉（由 App 的 Go 胶水自己启动），
+     单独运行时 **`tun:` 和 `mixed-port` 都不生效**。`scripts/mihomo-patches/0001-standalone-listeners-and-tun.patch` 恢复这两行，
+     构建时自动打补丁。其余差异（订阅 provider 异步加载、hook、DNS 追踪）对独立运行无害。
 4. **不用 mihomo 的 auto-route / auto-redirect**：固件是 fw3 + iptables-legacy（B27 数据，B31 待确认），auto-redirect 依赖 nftables。
    改用 WireGuard 分叉已验证的方案：`br-lan` 上按 MAC 打 fwmark → `ip rule` → 独立路由表 → `ou-clash0`（TUN，`auto-route: false`）。
    kill-switch、HOLD/RELEASE、revision/409、30 s 看门狗全部复用。
 5. **mihomo 由 agent 作为子进程监管**，不新增 rc.local 行（遵守 SAFETY.md）。参考原作 Tailscale 模块：等 WAN、退避重启、WAN 重连事件、wakelock、`GOMEMLIMIT`。
-6. **控制接口**走 `external-controller-unix` + 随机 secret，不在局域网开放端口；网页只经 agent 的 `/api/clash/*` 访问。
+6. **控制接口**走 `external-controller-unix`，不在局域网开放端口；网页只经 agent 的 `/api/clash/*` 访问。
+   mihomo 的 unix socket **不校验 secret** 且 chmod 0666，所以安全性靠 socket 所在目录 0700（仅 root），不再设 secret。
 7. **订阅 = URL 下载完整 Clash YAML**：
    - agent 调用设备自带 `/usr/bin/curl` 下载（不给 agent 引入 TLS 依赖）；UA 默认 `clash.meta`，30 s，上限 8 MiB。
    - 读取 `subscription-userinfo`（流量/到期）、`profile-update-interval`（自动更新）、`content-disposition`（默认名）。
    - base64 节点列表第一版直接报错。
    - 合成：保留 `proxies / proxy-groups / rules / *-providers / dns 上游 / sniffer`；
      强制覆盖 `tun`、端口（仅 127.0.0.1 mixed-port）、`allow-lan: false`、`dns.listen/enhanced-mode(fake-ip)/fake-ip-range`、
-     `external-controller-unix + secret`、删除 `external-ui / iptables / interface-name / routing-mark`、
+     `external-controller-unix`、删除 `external-ui / iptables / interface-name / routing-mark`、
      `find-process-mode: off`、`geodata-loader: memconservative`、`profile.store-selected: true`。
    - `mihomo -t` 校验通过才替换，失败保留上一份可用配置；`PUT /configs` 热重载。
    - 手动更新、按间隔自动更新、可选"通过代理更新"（curl 走 127.0.0.1 mixed-port）。
    - 最多 5 个订阅；订阅 URL 视为密钥，API 只返回打码值。
    - geo 数据随部署包推送（国内首启无法从 GitHub 下载）；`geox-url` 可配镜像。
-8. **DNS / IPv6**：被选设备的 53 端口 DNAT 到 mihomo DNS；IPv6 先阻断（与 WG 一致）。未选设备与路由器自身不受影响，dnsmasq 不做持久修改。
+8. **DNS / IPv6**：被选设备的 53 端口（UDP/TCP，任意目标）DNAT 到 `198.19.0.53`，该地址经标记路由进入 `ou-clash0`，
+   由 TUN 的 `dns-hijack: [any:53, tcp://any:53]` 接管；mihomo 自身 DNS 只听 `127.0.0.1:1053`。
+   INPUT 放行 `-i ou-clash0`（回包）。IPv6 先阻断（与 WG 一致）。未选设备与路由器自身不受影响，dnsmasq 不做持久修改。
 
 ## 阶段
 
@@ -47,9 +53,9 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
 |---|---|---|---|
 | **P0** | 解锁（`zunlock.py --dry-run` 先行，需 backup-key 后缀）→ OpenUI `setup.sh` 装基础 + SSH → 只读探测脚本 → `docs/B31-PROBE.md` | 是（**等后缀**） | `scripts/device/probe-clash.sh` 已就绪，等设备 |
 | **P1** | mihomo 交叉编译（CI + 本地 Docker）、`prepare-mihomo.py`、sha256 固定；实机基准（内存/CPU/吞吐） | 基准需要 | 构建完成，等实机基准 |
-| **P2** | 从 `wireguard.rs` 抽出 `egress_policy`（设备、标记位、路由表参数化）；WG 行为不变；互斥切换事务与回滚 | 否 | 策略已抽出（`agent/src/egress.rs`），互斥切换随 P3 |
-| **P3** | `clash.rs`：进程监管、订阅子模块、配置合成、Unix socket 控制客户端、策略应用、revision/409 | 否（mock） | 待开始 |
-| **P4** | 网页「代理」分组：概览 / 订阅 / 节点组 / 设备分流 / 连接 / 日志 / 高级设置；`api.ts`、`mock_agent.py`、契约检查 | 否 | 待开始 |
+| **P2** | 从 `wireguard.rs` 抽出 `egress_policy`（设备、标记位、路由表参数化）；WG 行为不变；互斥切换事务与回滚 | 否 | 完成（互斥切换在 P3 实现） |
+| **P3** | `clash.rs`：进程监管、订阅子模块、配置合成、Unix socket 控制客户端、策略应用、revision/409 | 否（mock） | 完成（netns 数据面测试通过），等实机 |
+| **P4** | 网页「代理」分组：概览 / 订阅 / 节点组 / 设备分流 / 连接 / 日志 / 高级设置；`api.ts`、`mock_agent.py`、契约检查 | 否 | `api.ts` / 类型 / mock 已随 P3 完成，页面待开始 |
 | **P5** | `deploy-components.py --mihomo`、`transaction.sh` 快照目标、geo 数据打包 | 否 | 待开始 |
 | **P6** | B31 实机验证：吞吐、DNS/IPv6/kill-switch 泄漏、防火墙重载/重启/WAN 重连恢复、72 h 内存浸泡、WG↔Clash 切换 | 是 | 待开始 |
 | **P7** | DevUI 小屏：后端状态、Clash 开关/模式/节点 | 否（预览） | 可选 |
@@ -95,3 +101,19 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
 - Clash 将用 `OUCL`、`0x20000000`、表 `10421`、`ou-clash0`、`masquerade: false`（mihomo 需看到真实 LAN 源地址）。
 - 顺带修复上游 `screen_shortcut.rs` 在新版 clippy 下的 `useless_conversion`（CI 失败原因）。
 - 探测脚本增加已占用 fwmark 列表，确认两个标记位与固件无冲突。
+
+### 2026-09-25 — P3 agent 后端
+- **FlClash 内核问题**：单独运行时 TUN 不起、mixed-port 不监听。原因见决定 3；加补丁后重新构建，
+  版本串 `flclash-d0c8d44-openui`，sha256 更新为 `330642b1…a79f77`（两次构建一致）。
+- `agent/src/clash.rs`：设置（revision/409）、最多 5 个订阅（下载→`mihomo -t`→原子替换，失败保留旧档，URL 打码）、
+  子进程监管（pidfile、`GOMEMLIMIT=128MiB`、日志环形缓冲、5 s 看门狗、5 s→300 s 退避、到期自动更新订阅，失败 1 h 后重试）、
+  代理模式 / 日志级别走 `PATCH /configs` 热更新，其余改动 `PUT /configs?force=true` 重载。
+- 策略复用 `egress.rs`：`OUCL`、`0x20000000`、表 `10421`、不做 masquerade（保留 LAN 源地址）、`accept_input`。
+- **WG↔Clash 互斥**：两边 `update` 都要求 `takeover: true` 才能在另一边开着时打开；锁顺序固定为先 WG 后 Clash；
+  切换在 HOLD 内完成（停旧 → 建新 → 持久化），任何一步失败回滚到旧后端。两边看门狗发现另一方也开着时只报错不动作。
+- API：`GET/PUT /api/clash`、`POST /api/clash/subscription/refresh`、`GET/PUT /api/clash/proxies`、`POST /api/clash/delay`、
+  `GET/DELETE /api/clash/connections`、`GET /api/clash/logs`；`api.ts`、`types.ts`、`mock_agent.py` 同步，契约检查通过。
+- 测试：新增 8 个单元测试；`live_controller`（`OPENUI_CLASH_TEST_SOCKET`）对真实内核通过；
+  `tests/clash-netns.sh`：导出的 agent 策略 + qemu 下的真实内核，在 netns 中验证 all/selected/excluded 分流、
+  UDP/TCP 任意 DNS 被接管、内核停止时断网断 DNS 且管理口可达、重启恢复、关闭后直连、HOLD/RELEASE。已加入 `mihomo.yml` CI。
+- WG 七份导出脚本与重构前逐字节一致。

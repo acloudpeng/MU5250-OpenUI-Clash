@@ -4,6 +4,10 @@ mod auth;
 mod cache;
 mod cell;
 mod charge_policy;
+mod clash;
+mod clash_config;
+mod clash_ctl;
+mod clash_sub;
 mod connection_logger;
 mod csv_utils;
 mod device_ext;
@@ -80,6 +84,7 @@ fn main() {
         .bounded_output();
 
     wireguard::start();
+    clash::start();
     screen::start(state.clone());
 
     usb::enforce_usb_mode_on_boot();

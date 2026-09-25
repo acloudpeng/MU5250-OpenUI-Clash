@@ -2,6 +2,7 @@
 """Build mihomo from the pinned Clash.Meta FlClash commit as a static linux/arm64 binary.
 
 Never builds with GOOS=android: that enables embed mode, which disables config reload.
+Applies scripts/mihomo-patches/*.patch (standalone-daemon fixes; see each header).
 Uses a local Go toolchain matching GO_VERSION, otherwise the golang Docker image.
 Does not contact or change the modem.
 """
@@ -17,9 +18,10 @@ REPO = 'https://github.com/chen08209/Clash.Meta.git'
 COMMIT = 'd0c8d443298ce26e292a63f0f1016313dda599ac'
 GO_VERSION = '1.26.8'
 TAGS = 'with_gvisor,with_low_memory,no_tailscale,no_zerotier,no_easytier,no_fake_tcp'
-VERSION = f'flclash-{COMMIT[:7]}'
+PATCHES = sorted((Path(__file__).resolve().parent / 'mihomo-patches').glob('*.patch'))
+VERSION = f'flclash-{COMMIT[:7]}-openui'
 # Reproducible with the pinned commit, tags and Go version; any change must update this.
-SHA256 = 'fc1bdfeb887119fcb663e5a42f0da5f2ba3a130e396a589d7b3979922a874305'
+SHA256 = '330642b16e0fc2fc60d31cf165560a57e2ca46fc3b670f3eb8a2f44496a79f77'
 LDFLAGS = f'-s -w -buildid= -X github.com/metacubex/mihomo/constant.Version={VERSION}'
 BUILD_ENV = {'CGO_ENABLED': '0', 'GOOS': 'linux', 'GOARCH': 'arm64'}
 BUILD_ARGS = ['go', 'build', '-mod=readonly', '-trimpath', '-tags', TAGS, '-ldflags', LDFLAGS, '-o']
@@ -37,6 +39,8 @@ def fetch(source):
                           check=True, capture_output=True, text=True).stdout.strip()
     if head != COMMIT:
         raise SystemExit(f'mihomo source commit mismatch: {head}')
+    for patch in PATCHES:
+        run(['git', '-C', str(source), 'apply', '--whitespace=nowarn', str(patch)])
 
 
 def local_go():

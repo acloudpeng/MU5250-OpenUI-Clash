@@ -7,16 +7,18 @@ mode: rule
 find-process-mode: off
 geodata-loader: memconservative
 external-controller-unix: mihomo.sock
-secret: smoke
 tun:
   enable: true
   device: ou-clash0
   stack: system
   auto-route: false
+  auto-redirect: false
   auto-detect-interface: false
+  strict-route: false
+  dns-hijack: [any:53, tcp://any:53]
 dns:
   enable: true
-  listen: 0.0.0.0:1053
+  listen: 127.0.0.1:1053
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16
   nameserver: [223.5.5.5]

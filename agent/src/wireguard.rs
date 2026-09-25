@@ -1,6 +1,7 @@
 //! One managed kernel tunnel, with MAC-based LAN policy. Never changes main routes,
 //! stock firewall chains, init.d, or UCI. Private keys are never returned by the API.
 use crate::{
+    clash,
     egress::{run, Egress},
     storage,
 };
@@ -10,7 +11,7 @@ use std::{
     fs,
     net::Ipv4Addr,
     path::Path,
-    sync::Mutex,
+    sync::{Mutex, MutexGuard},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -27,6 +28,7 @@ const EGRESS: Egress = Egress {
     dir: DIR,
     owner: "openui-wireguard-v1",
     masquerade: true,
+    accept_input: false,
 };
 static LOCK: Mutex<()> = Mutex::new(());
 static ERROR: Mutex<Option<String>> = Mutex::new(None);
@@ -188,6 +190,8 @@ struct Update {
     expected_revision: Option<u64>,
     devices: Option<Vec<DeviceChoice>>,
     profile: Option<ProfileAction>,
+    /// Turn Clash off in the same transaction when enabling WireGuard.
+    takeover: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -308,7 +312,7 @@ fn endpoint(s: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
         && port.parse::<u16>().is_ok_and(|p| p > 0)
 }
-fn mac(s: &str) -> bool {
+pub(crate) fn mac(s: &str) -> bool {
     s.len() == 17
         && s.split(':').count() == 6
         && s.split(':')
@@ -565,9 +569,14 @@ fn commit_change(
 pub fn update(body: &[u8]) -> (u16, Value) {
     let result = (|| -> Result<Value, String> {
         let u: Update = serde_json::from_slice(body).map_err(|_| "Invalid WireGuard request")?;
+        let takeover = u.takeover == Some(true);
         let _guard = LOCK.lock().unwrap();
         let old = load()?;
         let next = edited(&old, u)?;
+        let clash_on = next.enabled && clash::stored_enabled();
+        if clash_on && !takeover {
+            return Err("Clash is on; turn it off or confirm switching to WireGuard".into());
+        }
         fs::create_dir_all(DIR).map_err(|_| "Cannot create WireGuard state directory")?;
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(DIR, fs::Permissions::from_mode(0o700))
@@ -589,15 +598,36 @@ pub fn update(body: &[u8]) -> (u16, Value) {
         if changing_network {
             EGRESS.script(&EGRESS.hold())?;
         }
+        // Clash goes down under our guard; it comes back before the guard lifts if
+        // the switch fails.
+        let suspended = std::cell::RefCell::new(None);
+        if clash_on {
+            match clash::suspend() {
+                Ok(s) => *suspended.borrow_mut() = s,
+                Err(e) => {
+                    let _ = EGRESS.script(&EGRESS.release());
+                    *ERROR.lock().unwrap() = Some(e.clone());
+                    return Err(e);
+                }
+            }
+        }
+        let committed = std::cell::Cell::new(false);
         if let Err(e) = commit_change(
             &old,
             &next,
             apply,
             |s| {
                 storage::atomic_write(Path::new(CONFIG), &serde_json::to_vec(s).unwrap())
-                    .map_err(|_| "Cannot persist configuration".into())
+                    .map_err(|_| "Cannot persist configuration".to_string())?;
+                committed.set(true);
+                Ok(())
             },
             || {
+                if !committed.get() {
+                    if let Some(s) = suspended.borrow_mut().take() {
+                        clash::resume(s)?;
+                    }
+                }
                 if changing_network {
                     EGRESS.script(&EGRESS.release())
                 } else {
@@ -626,6 +656,43 @@ pub fn update(body: &[u8]) -> (u16, Value) {
 fn policy_healthy() -> bool {
     EGRESS.healthy()
 }
+/// The WireGuard configuration lock. Lock order: this before Clash's lock.
+pub(crate) fn lock() -> MutexGuard<'static, ()> {
+    LOCK.lock().unwrap()
+}
+/// Whether WireGuard is saved as on. Read without the lock (atomic file replacement).
+pub(crate) fn stored_enabled() -> bool {
+    load().is_ok_and(|s| s.enabled)
+}
+pub(crate) struct Suspended(Settings);
+/// Turns WireGuard off for a switch to Clash. The caller holds `lock()` and its own
+/// transition guard; `resume` restores WireGuard if that switch fails.
+pub(crate) fn suspend() -> Result<Option<Suspended>, String> {
+    let old = load()?;
+    if !old.enabled {
+        return Ok(None);
+    }
+    let mut next = old.clone();
+    next.enabled = false;
+    next.revision = old.revision.saturating_add(1);
+    apply(&next)?;
+    if let Err(e) = persist(&next) {
+        let _ = EGRESS.claim().and_then(|_| apply(&old));
+        return Err(e);
+    }
+    Ok(Some(Suspended(old)))
+}
+pub(crate) fn resume(saved: Suspended) -> Result<(), String> {
+    let mut s = saved.0;
+    s.revision = load()?.revision.saturating_add(1);
+    EGRESS.claim()?;
+    apply(&s)?;
+    persist(&s)
+}
+fn persist(s: &Settings) -> Result<(), String> {
+    storage::atomic_write(Path::new(CONFIG), &serde_json::to_vec(s).unwrap())
+        .map_err(|_| "Cannot persist WireGuard configuration".into())
+}
 pub fn start() {
     std::thread::spawn(|| {
         let mut first = true;
@@ -633,7 +700,12 @@ pub fn start() {
             {
                 let _guard = LOCK.lock().unwrap();
                 if let Ok(s) = load() {
-                    if s.enabled
+                    if s.enabled && clash::stored_enabled() {
+                        *ERROR.lock().unwrap() = Some(
+                            "Clash is also on; WireGuard stays as is until one is turned off"
+                                .into(),
+                        );
+                    } else if s.enabled
                         && (first
                             || !Path::new(&format!("/sys/class/net/{IFACE}")).exists()
                             || !policy_healthy())

@@ -435,6 +435,119 @@ export interface WireGuardUpdate {
   mode?: 'all' | 'selected'
   macs?: string[]
   config_text?: string
+  /** Required to enable WireGuard while Clash is on; turns Clash off. */
+  takeover?: boolean
+}
+
+export interface ClashUsage {
+  upload: number
+  download: number
+  total: number
+  expire: number
+}
+export interface ClashSubscription {
+  id: number
+  name: string
+  /** Scheme and host only; the full URL never leaves the device. */
+  url: string
+  user_agent: string
+  interval_hours: number
+  via_proxy: boolean
+  updated_at: number
+  usage: ClashUsage | null
+  proxies: number
+  groups: number
+  rules: number
+  providers: number
+  error: string | null
+  downloaded: boolean
+}
+export type ClashSubscriptionAction =
+  | { action: 'add'; url: string; name?: string; user_agent?: string; interval_hours?: number; via_proxy?: boolean }
+  | { action: 'edit'; id: number; url?: string; name?: string; user_agent?: string; interval_hours?: number; via_proxy?: boolean }
+  | { action: 'activate'; id: number }
+  | { action: 'delete'; id: number }
+export type ClashProxyMode = 'rule' | 'global' | 'direct'
+export type ClashLogLevel = 'silent' | 'error' | 'warning' | 'info' | 'debug'
+export type ClashStack = 'system' | 'gvisor' | 'mixed'
+export type ClashDnsMode = 'fake-ip' | 'redir-host'
+export interface ClashStatus {
+  revision: number
+  enabled: boolean
+  mode: 'all' | 'selected'
+  macs: string[]
+  proxy_mode: ClashProxyMode
+  log_level: ClashLogLevel
+  stack: ClashStack
+  dns_mode: ClashDnsMode
+  subscriptions: ClashSubscription[]
+  active_subscription: number | null
+  max_subscriptions: number
+  core_installed: boolean
+  tun_supported: boolean
+  running: boolean
+  pid: number | null
+  uptime: number
+  version: string
+  memory_kib: number
+  interface_up: boolean
+  connected: boolean
+  error: string | null
+  wireguard_enabled: boolean
+  ipv6_policy: string
+}
+export interface ClashUpdate {
+  expected_revision: number
+  enabled?: boolean
+  /** Required to enable Clash while WireGuard is on; turns WireGuard off. */
+  takeover?: boolean
+  mode?: 'all' | 'selected'
+  macs?: string[]
+  devices?: { mac: string; selected: boolean }[]
+  proxy_mode?: ClashProxyMode
+  log_level?: ClashLogLevel
+  stack?: ClashStack
+  dns_mode?: ClashDnsMode
+  subscription?: ClashSubscriptionAction
+}
+export interface ClashGroup {
+  name: string
+  type: string
+  now: string | null
+  all: string[]
+  hidden: boolean
+  selectable: boolean
+}
+export interface ClashNode {
+  type: string
+  delay: number | null
+  udp: boolean | null
+  alive: boolean | null
+}
+export interface ClashProxies {
+  groups: ClashGroup[]
+  nodes: Record<string, ClashNode>
+}
+export interface ClashConnection {
+  id: string
+  network: string
+  source: string
+  host: string
+  destination: string
+  port: string
+  sniff_host: string
+  rule: string
+  rule_payload: string
+  chains: string[]
+  upload: number
+  download: number
+  start: string
+}
+export interface ClashConnections {
+  upload_total: number
+  download_total: number
+  memory: number
+  connections: ClashConnection[]
 }
 
 export type DevUIPageId = 'overview' | 'wireguard' | 'profiles' | 'devices'

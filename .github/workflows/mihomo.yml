@@ -4,12 +4,20 @@ on:
     branches: [main]
     paths:
       - scripts/prepare-mihomo.py
+      - scripts/mihomo-patches/**
       - tests/mihomo/**
+      - tests/clash-netns.sh
+      - agent/src/clash*.rs
+      - agent/src/egress.rs
       - .github/workflows/mihomo.yml
   pull_request:
     paths:
       - scripts/prepare-mihomo.py
+      - scripts/mihomo-patches/**
       - tests/mihomo/**
+      - tests/clash-netns.sh
+      - agent/src/clash*.rs
+      - agent/src/egress.rs
       - .github/workflows/mihomo.yml
   workflow_dispatch:
 permissions:
@@ -28,6 +36,13 @@ jobs:
           qemu-aarch64 build/mihomo/mihomo -v | tee /dev/stderr | grep -q 'linux arm64'
           mkdir -p build/smoke && cp tests/mihomo/smoke.yaml build/smoke/config.yaml
           qemu-aarch64 build/mihomo/mihomo -d build/smoke -t -f build/smoke/config.yaml
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Data path in network namespaces (agent policies + real core)
+        run: |
+          sudo apt-get install -y -qq bind9-dnsutils
+          OPENUI_CLASH_TEST_POLICIES=/tmp/openui-clash-check cargo test -q -p zte-agent --locked clash::tests::export
+          cp build/mihomo/mihomo /tmp/openui-clash-check/
+          sudo BASE=/tmp/openui-clash-check MIHOMO_RUNNER=qemu-aarch64 sh tests/clash-netns.sh
       - uses: actions/upload-artifact@v4
         with:
           name: mihomo-linux-arm64

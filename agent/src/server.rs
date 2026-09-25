@@ -8,6 +8,7 @@ use tiny_http::{Header, Method, Request, Response, Server};
 
 use crate::at_cmd;
 use crate::cell;
+use crate::clash;
 use crate::connection_logger;
 use crate::device_ext;
 use crate::handlers::{self, AppState};
@@ -321,6 +322,15 @@ pub fn route(
         (&Method::Delete, "/api/screen") => screen::close(),
         (&Method::Get, "/api/wireguard") => wireguard::get(),
         (&Method::Put, "/api/wireguard") => wireguard::update(body),
+        (&Method::Get, "/api/clash") => clash::get(),
+        (&Method::Put, "/api/clash") => clash::update(body),
+        (&Method::Post, "/api/clash/subscription/refresh") => clash::refresh(body),
+        (&Method::Get, "/api/clash/proxies") => clash::proxies(),
+        (&Method::Put, "/api/clash/proxies") => clash::select(body),
+        (&Method::Post, "/api/clash/delay") => clash::delay(body),
+        (&Method::Get, "/api/clash/connections") => clash::connections(),
+        (&Method::Delete, "/api/clash/connections") => clash::close_connections(),
+        (&Method::Get, "/api/clash/logs") => clash::logs(),
         (&Method::Post, "/api/system/kill-bloat") => handlers::system_kill_bloat(state, body),
         (&Method::Post, "/api/system/restart-agent") => device_ext::agent_restart(state),
         (&Method::Post, "/api/device/reboot") => device_ext::device_reboot(state),

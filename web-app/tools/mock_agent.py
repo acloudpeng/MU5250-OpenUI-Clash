@@ -442,7 +442,76 @@ def wireguard_set(body):
     return current
 
 
+def clash_set(body):
+    import copy
+    current = copy.deepcopy(STATE["clash"])
+    subs = current["subscriptions"]
+    action = body.get("subscription")
+    if action:
+        kind = action.get("action")
+        picked = next((p for p in subs if p["id"] == action.get("id")), None)
+        if kind == "add":
+            if len(subs) >= 5:
+                raise ValueError("A maximum of 5 subscriptions can be saved; delete one first")
+            url = action.get("url", "")
+            if not url.startswith(("http://", "https://")):
+                raise ValueError("Subscription URL must be an http(s) address without spaces")
+            new_id = max((p["id"] for p in subs), default=0) + 1
+            host = url.split("://", 1)[1].split("/", 1)[0].split("?", 1)[0]
+            # Demo keeps only the masked URL, like the agent's status.
+            subs.append({"id": new_id, "name": action.get("name") or f"Subscription {new_id}",
+                         "url": url.split("://", 1)[0] + "://" + host + "/…", "user_agent": action.get("user_agent") or "clash.meta",
+                         "interval_hours": action.get("interval_hours", 24), "via_proxy": bool(action.get("via_proxy")),
+                         "updated_at": int(time.time()), "usage": {"upload": 1 << 30, "download": 5 << 30, "total": 100 << 30, "expire": int(time.time()) + 30 * 86400},
+                         "proxies": 24, "groups": 6, "rules": 1800, "providers": 0, "error": None, "downloaded": True})
+            if current["active_subscription"] is None:
+                current["active_subscription"] = new_id
+        elif not picked:
+            raise ValueError("Subscription not found")
+        elif kind == "edit":
+            picked.update({k: action[k] for k in ("name", "user_agent", "interval_hours", "via_proxy") if k in action})
+        elif kind == "activate":
+            current["active_subscription"] = picked["id"]
+        elif kind == "delete":
+            if current["active_subscription"] == picked["id"]:
+                if current["enabled"]:
+                    raise ValueError("Switch subscriptions or turn Clash off before deleting the active one")
+                current["active_subscription"] = None
+            subs.remove(picked)
+        else:
+            raise ValueError("Unknown subscription action")
+    current.update({k: body[k] for k in ("enabled", "mode", "macs", "proxy_mode", "log_level", "stack", "dns_mode") if k in body})
+    if current["enabled"] and current["active_subscription"] is None:
+        raise ValueError("Add a subscription first")
+    if current["enabled"] and STATE["wireguard"]["enabled"]:
+        if not body.get("takeover"):
+            raise ValueError("WireGuard is on; turn it off or confirm switching to Clash")
+        STATE["wireguard"].update({"enabled": False, "connected": False, "interface_up": False, "revision": STATE["wireguard"]["revision"] + 1})
+    current["revision"] += 1
+    on = bool(current["enabled"])
+    current.update({"running": on, "interface_up": on, "connected": on, "pid": 4242 if on else None,
+                    "uptime": 0, "version": "mihomo-demo" if on else "", "memory_kib": 38000 if on else 0})
+    STATE["clash"] = current
+    return current
+
+
+def clash_status():
+    value = dict(STATE["clash"])
+    value["wireguard_enabled"] = STATE["wireguard"]["enabled"]
+    return value
+
+
+def clash_select(body):
+    group = next((g for g in STATE["clash_proxies"]["groups"] if g["name"] == body.get("group")), None)
+    if not group or not group["selectable"] or body.get("name") not in group["all"]:
+        raise ValueError("Clash core: Selector update error: proxy not exist")
+    group["now"] = body["name"]
+    return STATE["clash_proxies"]
+
+
 ROUTES_PUT = {
+    "/api/clash": clash_set,
+    "/api/clash/proxies": clash_select,
     "/api/wireguard": wireguard_set,
     "/api/device/charge-control": put_charge_control,
     "/api/ttl/set": put_ttl_set,
@@ -461,11 +530,40 @@ STATE["wireguard"] = {"profiles": [], "active_profile": None, "max_profiles": 5,
       "latest_handshake": 0, "rx_bytes": 0, "tx_bytes": 0, "error": None, "endpoint": None,
       "address": None, "dns": None, "mtu": None, "ipv6_policy": "blocked_for_tunnel_devices"}
 
+STATE["clash"] = {"revision": 0, "enabled": False, "mode": "all", "macs": [], "proxy_mode": "rule", "log_level": "warning",
+      "stack": "system", "dns_mode": "fake-ip", "subscriptions": [], "active_subscription": None, "max_subscriptions": 5,
+      "core_installed": True, "tun_supported": True, "running": False, "pid": None, "uptime": 0, "version": "",
+      "memory_kib": 0, "interface_up": False, "connected": False, "error": None, "wireguard_enabled": False,
+      "ipv6_policy": "blocked_for_proxy_devices"}
+STATE["clash_proxies"] = {
+    "groups": [
+        {"name": "Proxy", "type": "Selector", "now": "Auto", "all": ["Auto", "HK 01", "JP 01", "US 01", "DIRECT"], "hidden": False, "selectable": True},
+        {"name": "Auto", "type": "URLTest", "now": "HK 01", "all": ["HK 01", "JP 01", "US 01"], "hidden": False, "selectable": False},
+        {"name": "GLOBAL", "type": "Selector", "now": "Proxy", "all": ["Proxy", "Auto", "HK 01", "JP 01", "US 01", "DIRECT"], "hidden": False, "selectable": True},
+    ],
+    "nodes": {
+        "HK 01": {"type": "Shadowsocks", "delay": 48, "udp": True, "alive": True},
+        "JP 01": {"type": "Trojan", "delay": 92, "udp": True, "alive": True},
+        "US 01": {"type": "Vmess", "delay": None, "udp": False, "alive": False},
+        "DIRECT": {"type": "Direct", "delay": None, "udp": True, "alive": True},
+        "Proxy": {"type": "Selector", "delay": 48, "udp": True, "alive": True},
+        "Auto": {"type": "URLTest", "delay": 48, "udp": True, "alive": True},
+        "GLOBAL": {"type": "Selector", "delay": 48, "udp": True, "alive": True},
+    },
+}
+
 STATE["screen_settings"] = {"revision": 1, "shortcut_enabled": False, "brightness": 128, "idle_seconds": 120, "home_page": "menu", "menu_items": ["overview", "wireguard", "profiles", "devices"]}
 STATE["screen"] = {"available": True, "verified": True, "running": False, "state": "idle", "settings_revision": 1, "shortcut": {"available": True, "message": "Shortcut disabled"}}
 
 ROUTES_GET = {
     "/api/wireguard": lambda: STATE["wireguard"],
+    "/api/clash": clash_status,
+    "/api/clash/proxies": lambda: STATE["clash_proxies"],
+    "/api/clash/connections": lambda: {"upload_total": 52428800, "download_total": 734003200, "memory": 41943040, "connections": [
+        {"id": "demo-1", "network": "tcp", "source": "192.168.0.101", "host": "www.example.com", "destination": "198.18.0.12",
+         "port": "443", "sniff_host": "", "rule": "Match", "rule_payload": "", "chains": ["HK 01", "Proxy"],
+         "upload": 18234, "download": 912345, "start": "2026-09-25T08:00:00Z"}] if STATE["clash"]["running"] else []},
+    "/api/clash/logs": lambda: {"lines": ["time=\"2026-09-25T08:00:00Z\" level=info msg=\"Start initial Compatible provider default\""]},
     "/api/screen": lambda: STATE["screen"],
     "/api/screen/settings": lambda: STATE["screen_settings"],
     "/api/dashboard": dashboard_batch,
@@ -522,6 +620,10 @@ ROUTES_GET = {
 }
 
 ROUTES_POST = {
+    "/api/clash/subscription/refresh": lambda body: clash_status(),
+    "/api/clash/delay": lambda body: (
+        {n: STATE["clash_proxies"]["nodes"][n]["delay"] or 0 for g in STATE["clash_proxies"]["groups"] if g["name"] == body.get("name") for n in g["all"]}
+        if body.get("group") else {"delay": (STATE["clash_proxies"]["nodes"].get(body.get("name")) or {}).get("delay") or 0}),
     "/api/sms/list": lambda body: sms_list(),
     "/api/system/kill-bloat": lambda body: {
         "killed": [
@@ -608,6 +710,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send({"ok": True, "data": STATE["screen_settings"]})
         if path == "/api/wireguard" and body.get("expected_revision", STATE["wireguard"]["revision"]) != STATE["wireguard"]["revision"]:
             return self._send({"ok": False, "error": "Configuration changed; refresh before saving"}, 409)
+        if path == "/api/clash" and body.get("expected_revision") != STATE["clash"]["revision"]:
+            return self._send({"ok": False, "error": "Configuration changed; refresh before saving"}, 409)
         fn = ROUTES_PUT.get(path)
         if fn:
             try:
@@ -621,6 +725,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/screen":
             STATE["screen"].update({"running": False, "state": "idle"})
             return self._send({"ok": True, "data": STATE["screen"]})
+        if path == "/api/clash/connections":
+            return self._send({"ok": True, "data": {}})
         if path == "/api/ttl/clear":
             STATE["ttl"] = {"active": False, "ipv6_active": False, "ttl_value": 0}
         return self._send({"ok": True, "data": {}})
