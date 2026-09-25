@@ -45,8 +45,8 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
 
 | 阶段 | 内容 | 依赖设备 | 状态 |
 |---|---|---|---|
-| **P0** | 解锁（`zunlock.py --dry-run` 先行，需 backup-key 后缀）→ OpenUI `setup.sh` 装基础 + SSH → 只读探测脚本 → `docs/B31-PROBE.md` | 是（**等后缀**） | 探测脚本可先写 |
-| **P1** | mihomo 交叉编译（CI + 本地 Docker）、`prepare-mihomo.py`、sha256 固定；实机基准（内存/CPU/吞吐） | 基准需要 | 进行中 |
+| **P0** | 解锁（`zunlock.py --dry-run` 先行，需 backup-key 后缀）→ OpenUI `setup.sh` 装基础 + SSH → 只读探测脚本 → `docs/B31-PROBE.md` | 是（**等后缀**） | `scripts/device/probe-clash.sh` 已就绪，等设备 |
+| **P1** | mihomo 交叉编译（CI + 本地 Docker）、`prepare-mihomo.py`、sha256 固定；实机基准（内存/CPU/吞吐） | 基准需要 | 构建完成，等实机基准 |
 | **P2** | 从 `wireguard.rs` 抽出 `egress_policy`（设备、标记位、路由表参数化）；WG 行为不变；互斥切换事务与回滚 | 否 | 待开始 |
 | **P3** | `clash.rs`：进程监管、订阅子模块、配置合成、Unix socket 控制客户端、策略应用、revision/409 | 否（mock） | 待开始 |
 | **P4** | 网页「代理」分组：概览 / 订阅 / 节点组 / 设备分流 / 连接 / 日志 / 高级设置；`api.ts`、`mock_agent.py`、契约检查 | 否 | 待开始 |
@@ -74,3 +74,14 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
 5. B31 解锁流程未经上游验证（上游只验证 HK B04）。
 6. mihomo 与屏幕程序为 GPL-3.0，分发需给出源码 commit。
 7. 用上游 OpenUI 安装器更新会覆盖本仓库新增内容。
+
+## 进展记录
+
+### 2026-09-25 — P1 构建
+- `scripts/prepare-mihomo.py`：固定 commit `d0c8d44` + Go 1.26.8，tags
+  `with_gvisor,with_low_memory,no_tailscale,no_zerotier,no_easytier,no_fake_tcp`（`no_fake_tcp` 去掉会调用 iptables 的 hysteria faketcp）。
+- 静态 aarch64 ELF，**34.7 MiB**，构建**可复现**，sha256 `fc1bdfeb…a874305` 写死在脚本中，不符即失败。
+- qemu 下 `mihomo -v` 为 `linux arm64`（非 android 嵌入模式）；`tests/mihomo/smoke.yaml`（TUN `auto-route: false`、
+  unix 控制接口、fake-ip、wireguard 出站节点）通过 `mihomo -t`。
+- CI：`.github/workflows/mihomo.yml` 构建 + qemu 冒烟 + 上传 artifact。
+- 待实机：RSS/CPU/吞吐基准（P1 剩余部分，需 P0 完成）。

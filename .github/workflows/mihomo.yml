@@ -1,0 +1,35 @@
+name: mihomo core
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/prepare-mihomo.py
+      - tests/mihomo/**
+      - .github/workflows/mihomo.yml
+  pull_request:
+    paths:
+      - scripts/prepare-mihomo.py
+      - tests/mihomo/**
+      - .github/workflows/mihomo.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build pinned mihomo (checksum-verified)
+        run: python3 scripts/prepare-mihomo.py --docker --output build/mihomo/mihomo
+      - name: Smoke test under qemu
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq qemu-user
+          qemu-aarch64 build/mihomo/mihomo -v | tee /dev/stderr | grep -q 'linux arm64'
+          mkdir -p build/smoke && cp tests/mihomo/smoke.yaml build/smoke/config.yaml
+          qemu-aarch64 build/mihomo/mihomo -d build/smoke -t -f build/smoke/config.yaml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mihomo-linux-arm64
+          path: build/mihomo/
+          retention-days: 30

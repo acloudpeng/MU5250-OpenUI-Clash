@@ -1,0 +1,31 @@
+# Minimal config in the shape the agent will generate (docs/PLAN.md). Checked with mihomo -t in CI.
+# Documentation-range addresses and throwaway keys only.
+mixed-port: 7890
+bind-address: 127.0.0.1
+allow-lan: false
+mode: rule
+find-process-mode: off
+geodata-loader: memconservative
+external-controller-unix: mihomo.sock
+secret: smoke
+tun:
+  enable: true
+  device: ou-clash0
+  stack: system
+  auto-route: false
+  auto-detect-interface: false
+dns:
+  enable: true
+  listen: 0.0.0.0:1053
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  nameserver: [223.5.5.5]
+proxies:
+  - {name: demo-ss, type: ss, server: 203.0.113.1, port: 8388, cipher: aes-128-gcm, password: x}
+  - {name: demo-wg, type: wireguard, server: 203.0.113.2, port: 51820, ip: 10.0.0.2, private-key: eCtXsJZ27+4PbhDkHnB923tkUn2Gj59wZw5wFA75MnU=, public-key: Cr8hWlKvtDt7nrvf+f0brNQQzabAqrjfBvas9pmowjo=, udp: true}
+proxy-groups:
+  - {name: PROXY, type: select, proxies: [demo-ss, demo-wg, DIRECT]}
+rules:
+  - DST-PORT,53,DIRECT
+  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+  - MATCH,PROXY
