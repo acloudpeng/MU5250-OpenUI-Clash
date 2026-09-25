@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../data/api'
+import { t, N_ } from '../../i18n'
 import type { ApnProfile } from '../../types'
 import { Button, Field, Input, Select } from '../../ui/controls'
 import { toast, toastError, confirm } from '../../ui/feedback'
 import { Card, Chip, Empty, Skeleton } from '../../ui/primitives'
 
 const PDP_LABELS: Record<number, string> = { 1: 'IPv4', 2: 'IPv6', 3: 'IPv4v6' }
-const AUTH_LABELS: Record<number, string> = { 0: 'None', 1: 'PAP', 2: 'CHAP', 3: 'PAP/CHAP' }
+const AUTH_LABELS: Record<number, string> = { 0: N_('None'), 1: 'PAP', 2: 'CHAP', 3: 'PAP/CHAP' }
 
 // ── APN mode ──────────────────────────────────────────────────────────────────
 
@@ -25,7 +26,7 @@ function ApnMode() {
     try {
       await api.apnModeSet({ apn_mode: newMode })
       setMode(newMode)
-      toast(newMode === 0 ? 'APN set to automatic' : 'APN set to manual')
+      toast(newMode === 0 ? t('APN set to automatic') : t('APN set to manual'))
     } catch (e) {
       toastError(e)
     } finally {
@@ -34,9 +35,9 @@ function ApnMode() {
   }
 
   return (
-    <Card title="APN mode">
+    <Card title={t('APN mode')}>
       <p className="mb-3 text-[12px] text-ink2">
-        Automatic selects the APN from your SIM. Switch to manual to use a custom profile.
+        {t('Automatic selects the APN from your SIM. Switch to manual to use a custom profile.')}
       </p>
       <div className="flex gap-1.5">
         <button
@@ -46,7 +47,7 @@ function ApnMode() {
             mode === 0 ? 'bg-ok/12 text-ok' : 'bg-surface2 text-ink2 hover:bg-line/10'
           }`}
         >
-          Automatic
+          {t('Automatic')}
         </button>
         <button
           onClick={() => apply(1)}
@@ -55,7 +56,7 @@ function ApnMode() {
             mode === 1 ? 'bg-accent text-white' : 'bg-surface2 text-ink2 hover:bg-line/10'
           }`}
         >
-          Manual
+          {t('Manual')}
         </button>
       </div>
     </Card>
@@ -107,12 +108,12 @@ function Profiles() {
         pppAuthMode: form.auth,
         pdpType: form.pdp,
       })
-      toast('APN profile added')
+      toast(t('APN profile added'))
       setAdding(false)
       setForm({ name: '', apn: '', user: '', pass: '', auth: 0, pdp: 3 })
       fetchProfiles()
     } catch (e) {
-      toastError(e, 'Failed to add profile')
+      toastError(e, t('Failed to add profile'))
     } finally {
       setBusy(false)
     }
@@ -121,7 +122,7 @@ function Profiles() {
   async function activateProfile(id: string) {
     try {
       await api.apnActivate({ profileId: id })
-      toast('APN activated — connection may briefly drop')
+      toast(t('APN activated — connection may briefly drop'))
       fetchProfiles()
     } catch (e) {
       toastError(e)
@@ -129,11 +130,11 @@ function Profiles() {
   }
 
   async function deleteProfile(id: string) {
-    const ok = await confirm({ title: 'Delete this APN profile?', confirmLabel: 'Delete', danger: true })
+    const ok = await confirm({ title: t('Delete this APN profile?'), confirmLabel: t('Delete'), danger: true })
     if (!ok) return
     try {
       await api.apnDelete({ profileId: id })
-      toast('Profile deleted')
+      toast(t('Profile deleted'))
       fetchProfiles()
     } catch (e) {
       toastError(e)
@@ -142,11 +143,11 @@ function Profiles() {
 
   return (
     <>
-      <Card title="APN profiles">
+      <Card title={t('APN profiles')}>
         {loading ? (
           <Skeleton className="h-20" />
         ) : profiles.length === 0 ? (
-          <Empty title="No manual APN profiles" body="Add the exact settings supplied by your carrier." />
+          <Empty title={t('No manual APN profiles')} body={t('Add the exact settings supplied by your carrier.')} />
         ) : (
           <div className="space-y-2">
             {profiles.map((p) => (
@@ -159,21 +160,21 @@ function Profiles() {
                 <div className="min-w-0">
                   <p className="flex items-center gap-2 text-[13px] font-semibold text-ink">
                     <span className="truncate">{p.profilename}</span>
-                    {p.isEnable && <Chip tone="ok">Active</Chip>}
+                    {p.isEnable && <Chip tone="ok">{t('Active')}</Chip>}
                   </p>
                   <p className="tnum mt-0.5 truncate text-[12px] text-ink2">
-                    {p.wanapn} — {PDP_LABELS[p.pdpType] ?? '?'} / {AUTH_LABELS[p.pppAuthMode] ?? '?'}
+                    {p.wanapn} — {PDP_LABELS[p.pdpType] ?? '?'} / {t(AUTH_LABELS[p.pppAuthMode] ?? '?')}
                     {p.username ? ` — ${p.username}` : ''}
                   </p>
                 </div>
                 <div className="flex shrink-0 gap-1.5">
                   {!p.isEnable && (
                     <Button size="sm" variant="primary" onClick={() => activateProfile(p.profileId)}>
-                      Activate
+                      {t('Activate')}
                     </Button>
                   )}
-                  <Button size="sm" variant="ghost" disabled={p.isEnable} onClick={() => deleteProfile(p.profileId)} title={p.isEnable ? 'Switch to another APN before deleting this profile' : undefined}>
-                    Delete
+                  <Button size="sm" variant="ghost" disabled={p.isEnable} onClick={() => deleteProfile(p.profileId)} title={p.isEnable ? t('Switch to another APN before deleting this profile') : undefined}>
+                    {t('Delete')}
                   </Button>
                 </div>
               </div>
@@ -183,29 +184,29 @@ function Profiles() {
       </Card>
 
       {adding ? (
-        <Card title="Add APN profile">
+        <Card title={t('Add APN profile')}>
           <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-2">
-            <Field label="Profile name">
-              <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="My Carrier" />
+            <Field label={t('Profile name')}>
+              <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder={t('My Carrier')} />
             </Field>
             <Field label="APN">
-              <Input value={form.apn} onChange={(e) => setForm((f) => ({ ...f, apn: e.target.value }))} placeholder="internet" />
+              <Input value={form.apn} onChange={(e) => setForm((f) => ({ ...f, apn: e.target.value }))} placeholder="internet" /* i18n-ignore: APN name example */ />
             </Field>
-            <Field label="Username">
-              <Input value={form.user} onChange={(e) => setForm((f) => ({ ...f, user: e.target.value }))} placeholder="(optional)" />
+            <Field label={t('Username')}>
+              <Input value={form.user} onChange={(e) => setForm((f) => ({ ...f, user: e.target.value }))} placeholder={t('(optional)')} />
             </Field>
-            <Field label="Password">
-              <Input type="password" autoComplete="new-password" value={form.pass} onChange={(e) => setForm((f) => ({ ...f, pass: e.target.value }))} placeholder="(optional)" />
+            <Field label={t('Password')}>
+              <Input type="password" autoComplete="new-password" value={form.pass} onChange={(e) => setForm((f) => ({ ...f, pass: e.target.value }))} placeholder={t('(optional)')} />
             </Field>
-            <Field label="Authentication">
+            <Field label={t('Authentication')}>
               <Select value={form.auth} onChange={(e) => setForm((f) => ({ ...f, auth: parseInt(e.target.value) }))}>
-                <option value={0}>None</option>
+                <option value={0}>{t('None')}</option>
                 <option value={1}>PAP</option>
                 <option value={2}>CHAP</option>
                 <option value={3}>PAP/CHAP</option>
               </Select>
             </Field>
-            <Field label="PDP type">
+            <Field label={t('PDP type')}>
               <Select value={form.pdp} onChange={(e) => setForm((f) => ({ ...f, pdp: parseInt(e.target.value) }))}>
                 <option value={3}>IPv4v6</option>
                 <option value={1}>IPv4</option>
@@ -215,16 +216,16 @@ function Profiles() {
           </div>
           <div className="mt-3 flex gap-2">
             <Button variant="primary" onClick={addProfile} loading={busy} disabled={!form.name || !form.apn}>
-              Add profile
+              {t('Add profile')}
             </Button>
             <Button variant="ghost" onClick={() => setAdding(false)}>
-              Cancel
+              {t('Cancel')}
             </Button>
           </div>
         </Card>
       ) : (
         <Button variant="primary" onClick={() => setAdding(true)}>
-          Add APN profile
+          {t('Add APN profile')}
         </Button>
       )}
 

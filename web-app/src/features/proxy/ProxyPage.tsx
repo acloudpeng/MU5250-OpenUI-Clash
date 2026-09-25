@@ -7,6 +7,7 @@ import ProxiesTab from './ProxiesTab'
 import DevicesTab from './DevicesTab'
 import ConnectionsTab from './ConnectionsTab'
 import LogsTab from './LogsTab'
+import { t } from '../../i18n'
 
 type Tab = 'overview' | 'subscriptions' | 'proxies' | 'devices' | 'connections' | 'logs'
 
@@ -17,18 +18,18 @@ export default function ProxyPage() {
     <ClashProvider>
       <div className="space-y-4">
         <div>
-          <h1 className="text-xl font-bold text-ink">Proxy</h1>
-          <p className="mt-0.5 text-[13px] text-ink2">Clash.Meta (mihomo) subscriptions, nodes and device routing</p>
+          <h1 className="text-xl font-bold text-ink">{t('Proxy')}</h1>
+          <p className="mt-0.5 text-[13px] text-ink2">{t('Clash.Meta (mihomo) subscriptions, nodes and device routing')}</p>
         </div>
 
         <Tabs
           tabs={[
-            { id: 'overview', label: 'Overview' },
-            { id: 'subscriptions', label: 'Subscriptions' },
-            { id: 'proxies', label: 'Nodes' },
-            { id: 'devices', label: 'Devices' },
-            { id: 'connections', label: 'Connections' },
-            { id: 'logs', label: 'Logs' },
+            { id: 'overview', label: t('Overview') },
+            { id: 'subscriptions', label: t('Subscriptions') },
+            { id: 'proxies', label: t('Nodes') },
+            { id: 'devices', label: t('Devices') },
+            { id: 'connections', label: t('Connections') },
+            { id: 'logs', label: t('Logs') },
           ]}
           active={tab}
           onChange={setTab}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../data/api'
 import { API_BASE } from '../../data/client'
 import { formatUptime } from '../../format'
+import { t, tm, N_ } from '../../i18n'
 import type { DeviceInfo, SimInfo, UsbStatus } from '../../types'
 import { ILogout, IPower, IRefresh, IRestart } from '../../icons'
 import { Button, Toggle } from '../../ui/controls'
@@ -15,21 +16,21 @@ type UsbModeKey = 'rndis' | 'ecm' | 'ncm' | 'debug'
 const USB_MODE_INFO: Record<UsbModeKey, { label: string; description: string; warning?: string }> = {
   rndis: {
     label: 'RNDIS',
-    description: "Microsoft's USB networking. Native on Windows; needs unmaintained drivers on macOS.",
+    description: N_("Microsoft's USB networking. Native on Windows; needs unmaintained drivers on macOS."),
   },
   ecm: {
     label: 'ECM',
-    description: 'CDC-ECM USB Ethernet. Driver-free on macOS, Linux and modern Windows. Best supported mode.',
+    description: N_('CDC-ECM USB Ethernet. Driver-free on macOS, Linux and modern Windows. Best supported mode.'),
   },
   ncm: {
     label: 'NCM',
     description:
-      'CDC-NCM USB Ethernet. Higher throughput in theory. Experimental — ZTE does not wire ncm.0 into the normal USB switch.',
-    warning: 'Experimental',
+      N_('CDC-NCM USB Ethernet. Higher throughput in theory. Experimental — ZTE does not wire ncm.0 into the normal USB switch.'),
+    warning: N_('Experimental'),
   },
   debug: {
-    label: 'Debug (ADB)',
-    description: 'USB debug composition with adbd. Reboot returns to normal tethering.',
+    label: N_('Debug (ADB)'),
+    description: N_('USB debug composition with adbd. Reboot returns to normal tethering.'),
   },
 }
 
@@ -61,15 +62,15 @@ function UsbSection() {
     const isSupported =
       mode === 'debug' || capability?.supported || status?.supported_modes?.includes(mode)
     if (!isSupported) {
-      toast(`${USB_MODE_INFO[mode].label} is not available on this firmware`, 'err')
+      toast(t('{mode} is not available on this firmware', { mode: t(USB_MODE_INFO[mode].label) }), 'err')
       return
     }
     const isExperimentalNcm = mode === 'ncm'
     if (isExperimentalNcm) {
       const ok = await confirm({
-        title: 'Switch to experimental NCM?',
-        body: 'USB will disconnect and re-enumerate. Keep a Wi-Fi management path open.',
-        confirmLabel: 'Switch',
+        title: t('Switch to experimental NCM?'),
+        body: t('USB will disconnect and re-enumerate. Keep a Wi-Fi management path open.'),
+        confirmLabel: t('Switch'),
       })
       if (!ok) return
     }
@@ -79,14 +80,14 @@ function UsbSection() {
       await api.usbMode(mode, isExperimentalNcm ? { confirm_experimental: true } : undefined)
       toast(
         isExperimentalNcm
-          ? 'NCM switch scheduled — USB will re-enumerate shortly'
+          ? t('NCM switch scheduled — USB will re-enumerate shortly')
           : mode === 'ecm' && status?.active_mode === 'ncm'
-            ? 'ECM rollback scheduled — USB will re-enumerate shortly'
-            : `USB mode set to ${mode.toUpperCase()} — reboot to apply`,
+            ? t('ECM rollback scheduled — USB will re-enumerate shortly')
+            : t('USB mode set to {mode} — reboot to apply', { mode: mode.toUpperCase() }),
       )
       fetchStatus()
     } catch (e) {
-      toastError(e, 'Failed to set USB mode')
+      toastError(e, t('Failed to set USB mode'))
     } finally {
       setBusy(false)
     }
@@ -95,19 +96,19 @@ function UsbSection() {
   async function setNcmDefault(enabled: boolean) {
     if (enabled) {
       const ok = await confirm({
-        title: 'Persist NCM after boot?',
-        body: 'NCM will be re-applied automatically after each boot. Keep Wi-Fi management available.',
-        confirmLabel: 'Enable',
+        title: t('Persist NCM after boot?'),
+        body: t('NCM will be re-applied automatically after each boot. Keep Wi-Fi management available.'),
+        confirmLabel: t('Enable'),
       })
       if (!ok) return
     }
     setBusy(true)
     try {
       await api.usbDefaultMode(enabled ? 'ncm' : 'ecm', enabled ? { confirm_experimental: true } : undefined)
-      toast(enabled ? 'NCM will be applied automatically after boot' : 'USB boot default returned to ECM')
+      toast(enabled ? t('NCM will be applied automatically after boot') : t('USB boot default returned to ECM'))
       fetchStatus()
     } catch (e) {
-      toastError(e, 'Failed to set USB boot default')
+      toastError(e, t('Failed to set USB boot default'))
     } finally {
       setBusy(false)
     }
@@ -117,9 +118,9 @@ function UsbSection() {
     try {
       await api.usbPowerbank(on)
       setPowerbank(on)
-      toast(on ? 'Powerbank (OTG) enabled' : 'Powerbank disabled')
+      toast(on ? t('Powerbank (OTG) enabled') : t('Powerbank disabled'))
     } catch (e) {
-      toastError(e, 'Failed to set powerbank')
+      toastError(e, t('Failed to set powerbank'))
     }
   }
 
@@ -129,17 +130,17 @@ function UsbSection() {
   const modes: UsbModeKey[] = ['rndis', 'ecm', 'ncm', 'debug']
 
   return (
-    <Card title="USB mode">
+    <Card title={t('USB mode')}>
       <div className="space-y-3">
         <p className="text-[12px] text-ink2">
-          Switch USB operating mode. Most changes need a reboot to take effect.
+          {t('Switch USB operating mode. Most changes need a reboot to take effect.')}
           {activeMode && (
             <>
-              {' '}Active: <span className="font-bold text-ink">{activeMode.toUpperCase()}</span>.
+              {' '}{t('Active:')} <span className="font-bold text-ink">{activeMode.toUpperCase()}</span>{t('.')}
             </>
           )}
         </p>
-        {status?.ncm_last_error && <p className="text-[12px] text-danger">Last NCM attempt: {status.ncm_last_error}</p>}
+        {status?.ncm_last_error && <p className="text-[12px] text-danger">{t('Last NCM attempt: {error}', { error: tm(status.ncm_last_error) })}</p>}
 
         <div className="flex flex-wrap gap-1.5">
           {modes.map((mode) => {
@@ -152,7 +153,7 @@ function UsbSection() {
                 key={mode}
                 onClick={() => setMode(mode)}
                 disabled={busy || !isSupported}
-                title={info.description}
+                title={t(info.description)}
                 className={`rounded-lg border px-3 py-1.5 text-[12px] font-bold transition-colors disabled:opacity-40 ${
                   isActive
                     ? 'border-ok/30 bg-ok/10 text-ok'
@@ -161,8 +162,8 @@ function UsbSection() {
                       : 'border-line/10 bg-surface text-ink2 hover:bg-surface2'
                 }`}
               >
-                {info.label}
-                {!isSupported && ' · n/a'}
+                {t(info.label)}
+                {!isSupported && ` · ${t('n/a')}`}
               </button>
             )
           })}
@@ -170,19 +171,19 @@ function UsbSection() {
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line/8 pt-3">
           <div>
-            <p className="text-[13px] font-semibold text-ink">NCM after boot</p>
-            <p className="text-[12px] text-ink2">Applies NCM after the stock USB stack settles.</p>
+            <p className="text-[13px] font-semibold text-ink">{t('NCM after boot')}</p>
+            <p className="text-[12px] text-ink2">{t('Applies NCM after the stock USB stack settles.')}</p>
           </div>
-          <Toggle checked={ncmDefaultEnabled} disabled={busy} onChange={setNcmDefault} label="NCM after boot" />
+          <Toggle checked={ncmDefaultEnabled} disabled={busy} onChange={setNcmDefault} label={t('NCM after boot')} />
         </div>
 
         {powerbank !== null && (
           <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line/8 pt-3">
             <div>
-              <p className="text-[13px] font-semibold text-ink">Powerbank / OTG</p>
-              <p className="text-[12px] text-ink2">Drive the USB-C port as a power output.</p>
+              <p className="text-[13px] font-semibold text-ink">{t('Powerbank / OTG')}</p>
+              <p className="text-[12px] text-ink2">{t('Drive the USB-C port as a power output.')}</p>
             </div>
-            <Toggle checked={powerbank} onChange={togglePowerbank} label="Powerbank" />
+            <Toggle checked={powerbank} onChange={togglePowerbank} label={t('Powerbank')} />
           </div>
         )}
       </div>
@@ -213,22 +214,22 @@ export default function SettingsTab({ onLogout }: { onLogout: () => void }) {
     setBusy('restart')
     try {
       await api.restartAgent()
-      toast('Agent restarting — reloading in a few seconds')
+      toast(t('Agent restarting — reloading in a few seconds'))
       setTimeout(() => window.location.reload(), 5000)
     } catch (e) {
-      toastError(e, 'Failed to restart agent')
+      toastError(e, t('Failed to restart agent'))
       setBusy(null)
     }
   }
 
   async function runPowerAction(action: 'reboot' | 'shutdown') {
     const ok = await confirm({
-      title: action === 'reboot' ? 'Reboot the device?' : 'Shut down the device?',
+      title: action === 'reboot' ? t('Reboot the device?') : t('Shut down the device?'),
       body:
         action === 'reboot'
-          ? 'All connections will drop for about 10-30 seconds.'
-          : 'The device powers off. Use the physical power button to turn it back on.',
-      confirmLabel: action === 'reboot' ? 'Reboot' : 'Shut down',
+          ? t('All connections will drop for about 10-30 seconds.')
+          : t('The device powers off. Use the physical power button to turn it back on.'),
+      confirmLabel: action === 'reboot' ? t('Reboot') : t('Shut down'),
       danger: true,
     })
     if (!ok) return
@@ -236,13 +237,13 @@ export default function SettingsTab({ onLogout }: { onLogout: () => void }) {
     try {
       if (action === 'reboot') {
         await api.reboot()
-        toast('Reboot command sent')
+        toast(t('Reboot command sent'))
       } else {
         await api.shutdown()
-        toast('Shutdown command sent')
+        toast(t('Shutdown command sent'))
       }
     } catch (e) {
-      toastError(e, `Failed to ${action} device`)
+      toastError(e, action === 'reboot' ? t('Failed to reboot device') : t('Failed to shutdown device'))
     } finally {
       setBusy(null)
     }
@@ -251,16 +252,16 @@ export default function SettingsTab({ onLogout }: { onLogout: () => void }) {
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <Card title="Device">
-          <Row label="Model" value={device?.model ?? '\u2014'} mono />
-          <Row label="Firmware" value={device?.firmware ?? '\u2014'} mono />
-          <Row label="Uptime" value={formatUptime(device?.uptime_secs)} />
-          <Row label="Load" value={device?.load_avg?.map((v) => v.toFixed(2)).join(', ') ?? '\u2014'} mono />
+        <Card title={t('Device')}>
+          <Row label={t('Model')} value={device?.model ?? '\u2014'} mono />
+          <Row label={t('Firmware')} value={device?.firmware ?? '\u2014'} mono />
+          <Row label={t('Uptime')} value={formatUptime(device?.uptime_secs)} />
+          <Row label={t('Load average')} value={device?.load_avg?.map((v) => v.toFixed(2)).join(', ') ?? '\u2014'} mono />
           <Row label="IMEI" value={imei || '\u2014'} mono />
         </Card>
 
-        <Card title="SIM card">
-          <Row label="Status" value={sim?.state ?? '\u2014'} />
+        <Card title={t('SIM card')}>
+          <Row label={t('Status')} value={sim?.state ?? '\u2014'} />
           <Row label="ICCID" value={sim?.iccid ?? '\u2014'} mono />
           <Row label="IMSI" value={sim?.imsi ?? '\u2014'} mono />
           <Row label="MCC/MNC" value={sim?.mcc && sim?.mnc ? `${sim.mcc}/${sim.mnc}` : '\u2014'} mono />
@@ -269,38 +270,38 @@ export default function SettingsTab({ onLogout }: { onLogout: () => void }) {
 
       <UsbSection />
 
-      <Card title="Service controls">
+      <Card title={t('Service controls')}>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" onClick={restartAgent} loading={busy === 'restart'}>
-            <IRefresh size={14} /> Restart agent
+            <IRefresh size={14} /> {t('Restart agent')}
           </Button>
           <Button
             variant="outline"
             onClick={() => {
-              toast('Reloading dashboard…')
+              toast(t('Reloading dashboard…'))
               setTimeout(() => window.location.reload(), 400)
             }}
           >
-            <IRestart size={14} /> Reload dashboard
+            <IRestart size={14} /> {t('Reload dashboard')}
           </Button>
           <Button variant="danger" onClick={() => runPowerAction('reboot')} loading={busy === 'reboot'}>
-            <IRestart size={14} /> Reboot
+            <IRestart size={14} /> {t('Reboot')}
           </Button>
           <Button variant="danger" onClick={() => runPowerAction('shutdown')} loading={busy === 'shutdown'}>
-            <IPower size={14} /> Shut down
+            <IPower size={14} /> {t('Shut down')}
           </Button>
         </div>
         <p className="mt-2.5 text-[12px] text-ink3">
-          Restart agent briefly interrupts the backend. Reboot and shut down interrupt all connections.
+          {t('Restart agent briefly interrupts the backend. Reboot and shut down interrupt all connections.')}
         </p>
       </Card>
 
-      <Card title="Connection">
+      <Card title={t('Connection')}>
         <Row label="API" value={API_BASE} mono />
-        <Row label="Dashboard" value={window.location.origin} mono />
+        <Row label={t('Dashboard')} value={window.location.origin} mono />
         <div className="mt-3 border-t border-line/8 pt-3">
           <Button variant="ghost" onClick={onLogout}>
-            <ILogout size={14} /> Sign out
+            <ILogout size={14} /> {t('Sign out')}
           </Button>
         </div>
       </Card>

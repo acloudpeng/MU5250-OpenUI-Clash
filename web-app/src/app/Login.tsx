@@ -3,6 +3,8 @@ import { login, setToken } from '../data/client'
 import { ISignal } from '../icons'
 import { Button } from '../ui/controls'
 import { Segmented } from '../ui/controls'
+import { t, tm, type Lang } from '../i18n'
+import { LangButton } from './Shell'
 
 function isMobilePinClient() {
   const ua = navigator.userAgent
@@ -12,7 +14,7 @@ function isMobilePinClient() {
   )
 }
 
-export default function Login({ onAuthed }: { onAuthed: () => void }) {
+export default function Login({ onAuthed, lang, onToggleLang }: { onAuthed: () => void; lang: Lang; onToggleLang: () => void }) {
   const mobile = isMobilePinClient()
   const [mode, setMode] = useState<'pin' | 'password'>(mobile ? 'pin' : 'password')
   const [pw, setPw] = useState('')
@@ -29,7 +31,7 @@ export default function Login({ onAuthed }: { onAuthed: () => void }) {
       setToken(token)
       onAuthed()
     } catch (error) {
-      setErr(error instanceof Error ? error.message : 'Sign in failed')
+      setErr(error instanceof Error ? tm(error.message) : t('Sign in failed'))
     } finally {
       setBusy(false)
     }
@@ -38,14 +40,17 @@ export default function Login({ onAuthed }: { onAuthed: () => void }) {
   const canSubmit = mode === 'pin' ? pin.length === 6 : pw.length > 0
 
   return (
-    <div className="flex min-h-full items-center justify-center bg-bg p-6">
+    <div className="relative flex min-h-full items-center justify-center bg-bg p-6">
+      <div className="absolute right-4 top-4">
+        <LangButton lang={lang} onToggle={onToggleLang} />
+      </div>
       <div className="w-full max-w-sm">
         <div className="mb-6 flex flex-col items-center text-center">
           <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-accent text-white">
             <ISignal size={24} />
           </div>
           <h1 className="text-lg font-bold text-ink">ZTE U60 Pro</h1>
-          <p className="mt-0.5 text-[13px] text-ink2">OpenUI with WireGuard & Clash · Sign in</p>
+          <p className="mt-0.5 text-[13px] text-ink2">{t('OpenUI with WireGuard & Clash · Sign in')}</p>
         </div>
 
         <form
@@ -57,7 +62,7 @@ export default function Login({ onAuthed }: { onAuthed: () => void }) {
               <Segmented
                 options={[
                   { value: 'pin', label: 'PIN' },
-                  { value: 'password', label: 'Password' },
+                  { value: 'password', label: t('Password') },
                 ]}
                 value={mode}
                 onChange={(m) => {
@@ -89,17 +94,17 @@ export default function Login({ onAuthed }: { onAuthed: () => void }) {
               value={pw}
               onChange={(e) => setPw(e.target.value)}
               className="h-11 w-full rounded-lg border border-line/12 bg-surface2/50 px-3.5 text-sm text-ink outline-none transition-colors placeholder:text-ink3 focus:border-accent/60"
-              placeholder="Agent password"
+              placeholder={t('Agent password')}
               autoFocus
               autoComplete="current-password"
-              aria-label="Agent password"
+              aria-label={t('Agent password')}
             />
           )}
 
           {err && <p className="text-xs font-medium text-danger">{err}</p>}
 
           <Button type="submit" variant="primary" loading={busy} disabled={!canSubmit} className="w-full !h-11">
-            Sign in
+            {t('Sign in')}
           </Button>
         </form>
       </div>

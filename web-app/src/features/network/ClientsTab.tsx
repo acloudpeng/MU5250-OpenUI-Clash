@@ -4,6 +4,7 @@ import type { Client, UsbStatus } from '../../types'
 import { ICable, ILaptop, IRefresh, IUsb, IWifi } from '../../icons'
 import { Button } from '../../ui/controls'
 import { Card, Chip, Empty, Skeleton } from '../../ui/primitives'
+import { t } from '../../i18n'
 
 function formatLinkMbps(value?: number) {
   if (value == null || value <= 0) return '\u2014'
@@ -64,22 +65,22 @@ export default function ClientsTab() {
   return (
     <div className="space-y-3">
       <Card
-        title={`Connected clients (${clients.length})`}
+        title={t('Connected clients ({count})', { count: clients.length })}
         action={
           <Button size="sm" variant="ghost" onClick={refresh} loading={refreshing}>
-            <IRefresh size={13} /> Refresh
+            <IRefresh size={13} /> {t('Refresh')}
           </Button>
         }
       >
         {clients.length === 0 ? (
-          <Empty icon={<ILaptop size={28} />} title="No clients connected" />
+          <Empty icon={<ILaptop size={28} />} title={t('No clients connected')} />
         ) : (
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {[
               { label: 'Wi-Fi', count: grouped.wifi.length, icon: <IWifi size={15} /> },
               { label: 'USB-C', count: grouped.usb.length, icon: <IUsb size={15} /> },
-              { label: 'Ethernet', count: grouped.ethernet.length, icon: <ICable size={15} /> },
-              { label: 'Other', count: grouped.other.length, icon: <ILaptop size={15} /> },
+              { label: t('Ethernet'), count: grouped.ethernet.length, icon: <ICable size={15} /> },
+              { label: t('Other'), count: grouped.other.length, icon: <ILaptop size={15} /> },
             ].map((g) => (
               <div key={g.label} className="rounded-lg bg-surface2/70 px-3 py-2.5">
                 <div className="flex items-center gap-1.5 text-ink3">
@@ -99,11 +100,11 @@ export default function ClientsTab() {
             <table className="w-full text-[13px]">
               <thead>
                 <tr className="border-b border-line/8 text-left text-[11px] uppercase tracking-wider text-ink3">
-                  <th className={TH_CLS}>Hostname</th>
+                  <th className={TH_CLS}>{t('Hostname')}</th>
                   <th className={TH_CLS}>IP</th>
-                  <th className={TH_CLS}>Radio</th>
-                  <th className={TH_CLS}>Signal</th>
-                  <th className={TH_CLS}>Link</th>
+                  <th className={TH_CLS}>{t('Radio')}</th>
+                  <th className={TH_CLS}>{t('Signal')}</th>
+                  <th className={TH_CLS}>{t('Link')}</th>
                   <th className="pb-1.5 font-semibold">MAC</th>
                 </tr>
               </thead>
@@ -133,17 +134,17 @@ export default function ClientsTab() {
           <div className="px-4 pb-3">
             {usbLink && (
               <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg bg-surface2/70 px-3 py-2">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-ink3">Tether link</span>
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-ink3">{t('Tether link')}</span>
                 <span className="text-[13px] font-bold text-ink">
-                  {usbLink.negotiated_label ?? usbLink.negotiated ?? 'Unknown'}
+                  {usbLink.negotiated_label ?? usbLink.negotiated ?? t('Unknown')}
                   {usbNegotiatedRate && <span className="font-medium text-ink2"> · {usbNegotiatedRate}</span>}
                 </span>
                 {usbLink.at_full_speed === false && usbMaxRate && (
                   <Chip tone="warn">
-                    {usbLink.max_label ?? 'Higher'} capable · {usbMaxRate} — cable/port limiting
+                    {usbLink.max_label != null ? t('{max} capable · {rate} — cable/port limiting', { max: usbLink.max_label, rate: usbMaxRate }) : t('Higher speed capable · {rate} — cable/port limiting', { rate: usbMaxRate })}
                   </Chip>
                 )}
-                {usbLink.at_full_speed === true && <Chip tone="ok">Full speed</Chip>}
+                {usbLink.at_full_speed === true && <Chip tone="ok">{t('Full speed')}</Chip>}
               </div>
             )}
             {grouped.usb.length > 0 ? (
@@ -151,9 +152,9 @@ export default function ClientsTab() {
                 <table className="w-full text-[13px]">
                   <thead>
                     <tr className="border-b border-line/8 text-left text-[11px] uppercase tracking-wider text-ink3">
-                      <th className={TH_CLS}>Hostname</th>
+                      <th className={TH_CLS}>{t('Hostname')}</th>
                       <th className={TH_CLS}>IP</th>
-                      <th className={TH_CLS}>Interface</th>
+                      <th className={TH_CLS}>{t('Interface')}</th>
                       <th className="pb-1.5 font-semibold">MAC</th>
                     </tr>
                   </thead>
@@ -170,21 +171,21 @@ export default function ClientsTab() {
                 </table>
               </div>
             ) : (
-              <p className="text-[13px] text-ink3">No USB-C clients connected</p>
+              <p className="text-[13px] text-ink3">{t('No USB-C clients connected')}</p>
             )}
           </div>
         </Card>
       )}
 
       {grouped.ethernet.length > 0 && (
-        <Card title={`Ethernet (${grouped.ethernet.length})`} pad={false}>
+        <Card title={t('Ethernet ({count})', { count: grouped.ethernet.length })} pad={false}>
           <div className="overflow-x-auto px-4 pb-3">
             <table className="w-full text-[13px]">
               <thead>
                 <tr className="border-b border-line/8 text-left text-[11px] uppercase tracking-wider text-ink3">
-                  <th className={TH_CLS}>Hostname</th>
+                  <th className={TH_CLS}>{t('Hostname')}</th>
                   <th className={TH_CLS}>IP</th>
-                  <th className={TH_CLS}>Speed</th>
+                  <th className={TH_CLS}>{t('Speed')}</th>
                   <th className="pb-1.5 font-semibold">MAC</th>
                 </tr>
               </thead>
@@ -204,12 +205,12 @@ export default function ClientsTab() {
       )}
 
       {grouped.other.length > 0 && (
-        <Card title={`Other (${grouped.other.length})`} pad={false}>
+        <Card title={t('Other ({count})', { count: grouped.other.length })} pad={false}>
           <div className="overflow-x-auto px-4 pb-3">
             <table className="w-full text-[13px]">
               <thead>
                 <tr className="border-b border-line/8 text-left text-[11px] uppercase tracking-wider text-ink3">
-                  <th className={TH_CLS}>Hostname</th>
+                  <th className={TH_CLS}>{t('Hostname')}</th>
                   <th className={TH_CLS}>IP</th>
                   <th className="pb-1.5 font-semibold">MAC</th>
                 </tr>

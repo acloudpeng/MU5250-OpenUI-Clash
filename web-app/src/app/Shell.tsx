@@ -3,29 +3,30 @@ import { Suspense, useEffect, useState, type ReactNode } from 'react'
 import { useAlerts } from './HomeContext'
 import { IActivity, IGauge, IGlobe, IHome, ISim, ISignal, IX, IMoon, ISun, IShield, IMonitor } from '../icons'
 import { Spinner } from '../ui/primitives'
+import { N_, t, type Lang } from '../i18n'
 
 export type Group = 'home' | 'signal' | 'network' | 'wireguard' | 'proxy' | 'modem' | 'devui' | 'system'
 
 export const NAV: { id: Group; label: string; icon: (p: { size?: number; className?: string }) => ReactNode }[] = [
-  { id: 'home', label: 'Home', icon: (p) => <IHome {...p} /> },
-  { id: 'signal', label: 'Signal', icon: (p) => <ISignal {...p} /> },
-  { id: 'network', label: 'Network', icon: (p) => <IGlobe {...p} /> },
-  { id: 'wireguard', label: 'WireGuard', icon: (p) => <IShield {...p} /> },
-  { id: 'proxy', label: 'Proxy', icon: (p) => <IActivity {...p} /> },
-  { id: 'modem', label: 'Modem', icon: (p) => <ISim {...p} /> },
-  { id: 'devui', label: 'DevUI', icon: (p) => <IMonitor {...p} /> },
-  { id: 'system', label: 'System', icon: (p) => <IGauge {...p} /> },
+  { id: 'home', label: N_('Home'), icon: (p) => <IHome {...p} /> },
+  { id: 'signal', label: N_('Signal'), icon: (p) => <ISignal {...p} /> },
+  { id: 'network', label: N_('Network'), icon: (p) => <IGlobe {...p} /> },
+  { id: 'wireguard', label: N_('WireGuard'), icon: (p) => <IShield {...p} /> },
+  { id: 'proxy', label: N_('Proxy'), icon: (p) => <IActivity {...p} /> },
+  { id: 'modem', label: N_('Modem'), icon: (p) => <ISim {...p} /> },
+  { id: 'devui', label: N_('DevUI'), icon: (p) => <IMonitor {...p} /> },
+  { id: 'system', label: N_('System'), icon: (p) => <IGauge {...p} /> },
 ]
 
 const GROUP_TITLES: Record<Group, string> = {
-  home: 'Home',
-  signal: 'Signal',
-  network: 'Network',
-  wireguard: 'WireGuard',
-  proxy: 'Proxy',
-  modem: 'Modem',
-  devui: 'DevUI',
-  system: 'System',
+  home: N_('Home'),
+  signal: N_('Signal'),
+  network: N_('Network'),
+  wireguard: N_('WireGuard'),
+  proxy: N_('Proxy'),
+  modem: N_('Modem'),
+  devui: N_('DevUI'),
+  system: N_('System'),
 }
 
 // ── Alert banner (fed by the home poll — zero extra requests) ─────────────────
@@ -53,13 +54,30 @@ function AlertBanner() {
           <button
             onClick={() => setDismissed((prev) => new Set(prev).add(a.message))}
             className="shrink-0 opacity-60 transition-opacity hover:opacity-100"
-            aria-label="Dismiss"
+            aria-label={t('Dismiss')}
           >
             <IX size={14} />
           </button>
         </div>
       ))}
     </div>
+  )
+}
+
+// ── Language switch ───────────────────────────────────────────────────────────
+
+/** Shows the language it switches to, in that language. */
+export function LangButton({ lang, onToggle }: { lang: Lang; onToggle: () => void }) {
+  return (
+    <button
+      onClick={onToggle}
+      className="flex h-8 items-center rounded-lg px-2 text-[12px] font-semibold text-ink2 transition-colors hover:bg-surface2 hover:text-ink"
+      // i18n-ignore: named in the language it switches to
+      aria-label={lang === 'zh' ? 'Switch to English' : '切换到中文'}
+      lang={lang === 'zh' ? 'en' : 'zh-CN'}
+    >
+      {lang === 'zh' ? 'EN' : '中文'}
+    </button>
   )
 }
 
@@ -70,12 +88,16 @@ export default function Shell({
   onNavigate,
   theme,
   onToggleTheme,
+  lang,
+  onToggleLang,
   children,
 }: {
   group: Group
   onNavigate: (g: Group) => void
   theme: 'light' | 'dark'
   onToggleTheme: () => void
+  lang: Lang
+  onToggleLang: () => void
   children: ReactNode
 }) {
   // Lock body scroll while nothing needs it; keeps mobile address bar behavior sane.
@@ -112,19 +134,20 @@ export default function Shell({
               }`}
             >
               {item.icon({ size: 17 })}
-              {item.label}
+              {t(item.label)}
             </button>
           ))}
         </nav>
 
-        <div className="border-t border-line/8 px-5 py-3">
+        <div className="flex items-center justify-between border-t border-line/8 px-5 py-3">
           <button
             onClick={onToggleTheme}
             className="flex items-center gap-2 text-[12px] font-medium text-ink2 transition-colors hover:text-ink"
           >
             {themeIcon}
-            {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+            {theme === 'dark' ? t('Light mode') : t('Dark mode')}
           </button>
+          <LangButton lang={lang} onToggle={onToggleLang} />
         </div>
       </aside>
 
@@ -135,19 +158,22 @@ export default function Shell({
           className="flex min-h-12 shrink-0 items-center justify-between border-b border-line/8 bg-surface px-4 lg:hidden"
           style={{ paddingTop: 'env(safe-area-inset-top)' }}
         >
-          <span className="text-sm font-bold text-ink">{GROUP_TITLES[group]}</span>
+          <span className="text-sm font-bold text-ink">{t(GROUP_TITLES[group])}</span>
+          <div className="flex items-center gap-1">
+          <LangButton lang={lang} onToggle={onToggleLang} />
           <button
             onClick={onToggleTheme}
             className="flex h-8 w-8 items-center justify-center rounded-lg text-ink2 transition-colors hover:bg-surface2 hover:text-ink"
-            aria-label="Toggle theme"
+            aria-label={t('Toggle theme')}
           >
             {themeIcon}
           </button>
+          </div>
         </header>
 
         <main className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-shell px-4 pb-24 pt-4 lg:px-6 lg:pb-10 lg:pt-6">
-            {import.meta.env.MODE === 'demo' && <p className="mb-4 rounded-lg bg-amber-100 px-3 py-2 text-xs font-semibold text-amber-800">Demo data · OpenUI with WireGuard &amp; Clash · No device connected</p>}
+            {import.meta.env.MODE === 'demo' && <p className="mb-4 rounded-lg bg-amber-100 px-3 py-2 text-xs font-semibold text-amber-800">{t('Demo data · OpenUI with WireGuard & Clash · No device connected')}</p>}
             <AlertBanner />
             <Suspense
               fallback={
@@ -178,7 +204,7 @@ export default function Shell({
                   }`}
                 >
                   {item.icon({ size: 20 })}
-                  {item.label}
+                  {t(item.label)}
                 </button>
               )
             })}

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { t } from '../i18n'
 
 // ── Card ──────────────────────────────────────────────────────────────────────
 
@@ -158,7 +159,7 @@ export function SignalBars({ bars, large = false }: { bars?: number; large?: boo
   const heights = large ? [10, 16, 22, 28, 34] : [4, 7, 10, 13, 16]
   const width = large ? 'w-1.5' : 'w-1'
   return (
-    <div className="flex items-end gap-[3px]" aria-label={`${n} of 5 bars`}>
+    <div className="flex items-end gap-[3px]" aria-label={t('{n} of 5 bars', { n })}>
       {heights.map((h, i) => (
         <div
           key={i}

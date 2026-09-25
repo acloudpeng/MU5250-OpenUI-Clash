@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useHome } from '../../app/HomeContext'
 import { formatBandwidthMHz, qualityText, rsrpQuality, rsrqColorClass, sinrColorClass, sumBandwidthMHz } from '../../format'
+import { t, N_ } from '../../i18n'
 import type { CarrierComponent } from '../../types'
 import { Card, Chip, SignalBars, Skeleton } from '../../ui/primitives'
 
@@ -50,14 +51,18 @@ function Tip({ text, children }: { text: string; children: React.ReactNode }) {
   )
 }
 
-const RSRP_TIP =
-  'Reference Signal Received Power — power of a single LTE/NR reference signal. Primary indicator of signal strength.'
-const RSRQ_TIP =
-  'Reference Signal Received Quality — signal quality accounting for noise and interference from neighbouring cells.'
-const SINR_TIP =
-  'Signal to Interference plus Noise Ratio — how far the signal is above the noise floor. Key metric for achievable throughput.'
-const RSSI_TIP =
-  'Received Signal Strength Indicator — total wideband received power including signal, noise, and interference.'
+const RSRP_TIP = N_(
+  'Reference Signal Received Power — power of a single LTE/NR reference signal. Primary indicator of signal strength.',
+)
+const RSRQ_TIP = N_(
+  'Reference Signal Received Quality — signal quality accounting for noise and interference from neighbouring cells.',
+)
+const SINR_TIP = N_(
+  'Signal to Interference plus Noise Ratio — how far the signal is above the noise floor. Key metric for achievable throughput.',
+)
+const RSSI_TIP = N_(
+  'Received Signal Strength Indicator — total wideband received power including signal, noise, and interference.',
+)
 
 // ── Carrier table (desktop) / cards (mobile) ──────────────────────────────────
 
@@ -70,7 +75,7 @@ function CarrierStatus({ carrier, empty = null }: { carrier: CarrierComponent; e
         <Chip tone={carrier.ul_configured ? 'ok' : 'default'}>UL {carrier.ul_configured ? '\u2713' : '\u2717'}</Chip>
       )}
       {carrier.active !== undefined && (
-        <Chip tone={carrier.active ? 'ok' : 'default'}>{carrier.active ? 'Active' : 'Idle'}</Chip>
+        <Chip tone={carrier.active ? 'ok' : 'default'}>{carrier.active ? t('Active') : t('Idle')}</Chip>
       )}
     </span>
   )
@@ -85,7 +90,7 @@ function CarrierTable({ carriers, tech }: { carriers: CarrierComponent[]; tech: 
   return (
     <div className={isNR ? 'mb-4' : ''}>
       <p className={`mb-2 text-[11px] font-bold uppercase tracking-wider ${bandText}`}>
-        {isNR ? 'NR 5G' : 'LTE'} carriers
+        {isNR ? t('NR 5G carriers') : t('LTE carriers')}
       </p>
 
       {/* Desktop table */}
@@ -93,30 +98,30 @@ function CarrierTable({ carriers, tech }: { carriers: CarrierComponent[]; tech: 
         <table className="w-full text-left text-[13px]">
           <thead>
             <tr className="border-b border-line/8 text-[11px] uppercase tracking-wider text-ink3">
-              <th className="pb-1.5 pr-3 font-semibold">Type</th>
-              <th className="pb-1.5 pr-3 font-semibold">Band</th>
-              <th className="pb-1.5 pr-3 font-semibold">Status</th>
+              <th className="pb-1.5 pr-3 font-semibold">{t('Type')}</th>
+              <th className="pb-1.5 pr-3 font-semibold">{t('Band')}</th>
+              <th className="pb-1.5 pr-3 font-semibold">{t('Status')}</th>
               <th className="pb-1.5 pr-3 font-semibold">PCI</th>
               <th className="pb-1.5 pr-3 font-semibold">{isNR ? 'ARFCN' : 'EARFCN'}</th>
-              <th className="pb-1.5 pr-3 font-semibold">BW</th>
-              <th className="pb-1.5 pr-3 font-semibold">Freq</th>
+              <th className="pb-1.5 pr-3 font-semibold">{t('BW')}</th>
+              <th className="pb-1.5 pr-3 font-semibold">{t('Freq')}</th>
               <th className="pb-1.5 pr-3 font-semibold">
-                <Tip text={RSRP_TIP}>
+                <Tip text={t(RSRP_TIP)}>
                   <span className="underline decoration-dotted underline-offset-2">RSRP</span>
                 </Tip>
               </th>
               <th className="pb-1.5 pr-3 font-semibold">
-                <Tip text={RSRQ_TIP}>
+                <Tip text={t(RSRQ_TIP)}>
                   <span className="underline decoration-dotted underline-offset-2">RSRQ</span>
                 </Tip>
               </th>
               <th className="pb-1.5 pr-3 font-semibold">
-                <Tip text={SINR_TIP}>
+                <Tip text={t(SINR_TIP)}>
                   <span className="underline decoration-dotted underline-offset-2">SINR</span>
                 </Tip>
               </th>
               <th className="pb-1.5 font-semibold">
-                <Tip text={RSSI_TIP}>
+                <Tip text={t(RSSI_TIP)}>
                   <span className="underline decoration-dotted underline-offset-2">RSSI</span>
                 </Tip>
               </th>
@@ -195,7 +200,7 @@ function CarrierTable({ carriers, tech }: { carriers: CarrierComponent[]; tech: 
                 <span>
                   {isNR ? 'ARFCN' : 'EARFCN'} {c.earfcn}
                 </span>
-                <span>BW {c.bandwidth}</span>
+                <span>{t('BW')} {c.bandwidth}</span>
                 {c.freq != null && <span>{c.freq.toFixed(1)} MHz</span>}
               </div>
             </div>
@@ -226,7 +231,7 @@ export default function Overview() {
   if (!data) {
     return (
       <Card>
-        <p className="text-[13px] text-ink3">No radio data reported by the modem.</p>
+        <p className="text-[13px] text-ink3">{t('No radio data reported by the modem.')}</p>
       </Card>
     )
   }
@@ -242,19 +247,19 @@ export default function Overview() {
       <Card>
         <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-ink3">Connection</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-ink3">{t('Connection')}</p>
             <p className="mt-0.5 text-sm font-bold text-ink">{data.type ?? '\u2014'}</p>
           </div>
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-ink3">Provider</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-ink3">{t('Provider')}</p>
             <p className="mt-0.5 text-sm font-medium text-ink">{data.carrier ?? '\u2014'}</p>
           </div>
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-ink3">Cell ID</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-ink3">{t('Cell ID')}</p>
             <p className="tnum mt-0.5 font-mono text-[13px] text-ink2">{data.cell_id ?? '\u2014'}</p>
           </div>
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-ink3">Carriers</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-ink3">{t('Carriers')}</p>
             <p className="mt-0.5 text-sm text-ink2">
               {hasNR ? `${data.nr_carriers.length} NR` : ''}
               {hasNR && hasLTE ? ' + ' : ''}
@@ -263,7 +268,7 @@ export default function Overview() {
             </p>
           </div>
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-ink3">Bandwidth</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-ink3">{t('Bandwidth')}</p>
             <p className="tnum mt-0.5 text-sm font-bold text-ink">{formatBandwidthMHz(totalBw)}</p>
             {hasNR && hasLTE && (
               <p className="tnum text-[10px] text-ink3">
@@ -278,38 +283,38 @@ export default function Overview() {
       </Card>
 
       {(hasNR || hasLTE) && (
-        <Card title="Current cell info">
+        <Card title={t('Current cell info')}>
           <CarrierTable carriers={data.nr_carriers} tech="NR" />
           <CarrierTable carriers={data.lte_carriers} tech="LTE" />
         </Card>
       )}
 
-      <Card title="Signal quality reference">
+      <Card title={t('Signal quality reference')}>
         <div className="grid grid-cols-1 gap-4 text-[13px] md:grid-cols-3">
           <div>
             <p className="mb-1.5 font-semibold text-ink">RSRP (dBm)</p>
             <div className="space-y-0.5 text-ink2">
-              <div className="flex justify-between"><span className="text-ok">Excellent</span><span className="tnum text-ink3">&gt; -80</span></div>
-              <div className="flex justify-between"><span className="text-ok">Good</span><span className="tnum text-ink3">-80 to -90</span></div>
-              <div className="flex justify-between"><span className="text-warn">Fair</span><span className="tnum text-ink3">-90 to -100</span></div>
-              <div className="flex justify-between"><span className="text-danger">Poor</span><span className="tnum text-ink3">&lt; -100</span></div>
+              <div className="flex justify-between"><span className="text-ok">{t('Excellent')}</span><span className="tnum text-ink3">&gt; -80</span></div>
+              <div className="flex justify-between"><span className="text-ok">{t('Good')}</span><span className="tnum text-ink3">{t('{min} to {max}', { min: '-80', max: '-90' })}</span></div>
+              <div className="flex justify-between"><span className="text-warn">{t('Fair')}</span><span className="tnum text-ink3">{t('{min} to {max}', { min: '-90', max: '-100' })}</span></div>
+              <div className="flex justify-between"><span className="text-danger">{t('Poor')}</span><span className="tnum text-ink3">&lt; -100</span></div>
             </div>
           </div>
           <div>
             <p className="mb-1.5 font-semibold text-ink">RSRQ (dB)</p>
             <div className="space-y-0.5 text-ink2">
-              <div className="flex justify-between"><span className="text-ok">Good</span><span className="tnum text-ink3">&gt; -10</span></div>
-              <div className="flex justify-between"><span className="text-warn">Fair</span><span className="tnum text-ink3">-10 to -15</span></div>
-              <div className="flex justify-between"><span className="text-danger">Poor</span><span className="tnum text-ink3">&lt; -15</span></div>
+              <div className="flex justify-between"><span className="text-ok">{t('Good')}</span><span className="tnum text-ink3">&gt; -10</span></div>
+              <div className="flex justify-between"><span className="text-warn">{t('Fair')}</span><span className="tnum text-ink3">{t('{min} to {max}', { min: '-10', max: '-15' })}</span></div>
+              <div className="flex justify-between"><span className="text-danger">{t('Poor')}</span><span className="tnum text-ink3">&lt; -15</span></div>
             </div>
           </div>
           <div>
             <p className="mb-1.5 font-semibold text-ink">SINR (dB)</p>
             <div className="space-y-0.5 text-ink2">
-              <div className="flex justify-between"><span className="text-ok">Excellent</span><span className="tnum text-ink3">&gt; 20</span></div>
-              <div className="flex justify-between"><span className="text-ok">Good</span><span className="tnum text-ink3">10 to 20</span></div>
-              <div className="flex justify-between"><span className="text-warn">Fair</span><span className="tnum text-ink3">0 to 10</span></div>
-              <div className="flex justify-between"><span className="text-danger">Poor</span><span className="tnum text-ink3">&lt; 0</span></div>
+              <div className="flex justify-between"><span className="text-ok">{t('Excellent')}</span><span className="tnum text-ink3">&gt; 20</span></div>
+              <div className="flex justify-between"><span className="text-ok">{t('Good')}</span><span className="tnum text-ink3">{t('{min} to {max}', { min: '10', max: '20' })}</span></div>
+              <div className="flex justify-between"><span className="text-warn">{t('Fair')}</span><span className="tnum text-ink3">{t('{min} to {max}', { min: '0', max: '10' })}</span></div>
+              <div className="flex justify-between"><span className="text-danger">{t('Poor')}</span><span className="tnum text-ink3">&lt; 0</span></div>
             </div>
           </div>
         </div>

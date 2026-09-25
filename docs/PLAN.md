@@ -156,3 +156,15 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
 - `cleanup_policy` 用 `strip_suffix().unwrap()` 截脚本，改为参数控制是否删网卡。
 - WG 持久化逻辑重复，改为复用 `persist()`。
 新增测试：`precheck`、策略清理不删 TUN、`--harden` 只推加固程序。
+
+### 2026-09-25 — 管理面板中英文切换
+- 默认简体中文，侧边栏底部、手机顶栏、登录页右上角的 **EN / 中文** 按钮切换，选择保存在 `localStorage`（`u60.lang`），
+  切换时整个界面重新挂载（轮询数据有缓存，不会闪空）。
+- `web-app/src/i18n/`：`t('英文原文', {变量})` 以英文为键，译文按区域放在 `zh/<area>.ts`（约 870 条）；
+  模块级常量用 `N_()` 标记、渲染时 `t()`；日期按界面语言格式化。
+- Agent 返回的英文错误在前端用 `tm()` 翻译（`zh/agent.ts`，约 310 条，精确匹配 + `{占位符}` 模式，
+  "; " 连接的复合错误逐段翻译）；内嵌 mihomo / iptables / 固件原始输出的部分保持原文。
+- `tools/check-i18n.cjs`（纳入 `npm test`）：用 TypeScript AST 找出未经 `t()` 的英文界面文字，并检查缺失、冲突、占位符不一致、未使用的译文。
+- 走查：Playwright 对 mock 在桌面和手机宽度遍历全部页面和标签页，无控制台错误；切换英文后刷新保持英文，再切回中文正常。
+  手机底栏"调制解调器"换行，改为"蜂窝"。
+- DevUI 设备屏幕（320×480）菜单仍为英文，未在此次范围内。

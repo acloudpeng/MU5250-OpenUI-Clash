@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useHome } from '../../app/HomeContext'
 import { api } from '../../data/api'
 import { formatBytes, formatUptime } from '../../format'
+import { locale, t } from '../../i18n'
 import type { UsagePeriod } from '../../types'
 import { Button, Input } from '../../ui/controls'
 import { toast, toastError } from '../../ui/feedback'
@@ -28,7 +29,7 @@ function cycleWindow(resetDay: number, now = new Date()) {
 }
 
 function formatDate(date: Date) {
-  return date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+  return date.toLocaleDateString(locale(), { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
 function UsageTotals({ usage }: { usage: UsagePeriod }) {
@@ -36,15 +37,15 @@ function UsageTotals({ usage }: { usage: UsagePeriod }) {
   return (
     <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
       <div className="rounded-lg bg-surface2/70 p-3">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-ok">Download</p>
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-ok">{t('Download')}</p>
         <p className="tnum mt-1 text-xl font-bold text-ink">{formatBytes(usage.rx_bytes)}</p>
       </div>
       <div className="rounded-lg bg-surface2/70 p-3">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-accent">Upload</p>
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-accent">{t('Upload')}</p>
         <p className="tnum mt-1 text-xl font-bold text-ink">{formatBytes(usage.tx_bytes)}</p>
       </div>
       <div className="rounded-lg bg-surface2/70 p-3">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-ink3">Total</p>
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-ink3">{t('Total')}</p>
         <p className="tnum mt-1 text-xl font-bold text-ink">{formatBytes(total)}</p>
       </div>
     </div>
@@ -68,17 +69,17 @@ export default function DataTab() {
   const saveResetDay = useCallback(async () => {
     const day = parseInt(resetDay, 10)
     if (!day || day < 1 || day > 31) {
-      toast('Reset day must be between 1 and 31', 'err')
+      toast(t('Reset day must be between 1 and 31'), 'err')
       return
     }
     setBusy(true)
     try {
       await api.dataUsageResetDaySet(day)
       setEditingResetDay(false)
-      toast(`Reset day set to day ${day}`)
+      toast(t('Reset day set to day {day}', { day }))
       refresh()
     } catch (e) {
-      toastError(e, 'Failed to set reset day')
+      toastError(e, t('Failed to set reset day'))
     } finally {
       setBusy(false)
     }
@@ -101,24 +102,24 @@ export default function DataTab() {
   return (
     <div className="space-y-3">
       <Card
-        title="Current data cycle"
+        title={t('Current data cycle')}
         action={
           <Button size="sm" variant="ghost" onClick={() => setEditingResetDay((v) => !v)}>
-            Set reset day
+            {t('Set reset day')}
           </Button>
         }
       >
         {editingResetDay && (
           <div className="mb-3 flex flex-wrap items-end gap-2 rounded-lg bg-surface2/70 p-3">
             <div className="w-28">
-              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-ink3">Reset day</p>
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-ink3">{t('Reset day')}</p>
               <Input type="number" min={1} max={31} value={resetDay} onChange={(e) => setResetDay(e.target.value)} />
             </div>
             <Button variant="primary" onClick={saveResetDay} loading={busy}>
-              Save
+              {t('Save')}
             </Button>
             <Button variant="ghost" onClick={() => setEditingResetDay(false)}>
-              Cancel
+              {t('Cancel')}
             </Button>
           </div>
         )}
@@ -127,48 +128,48 @@ export default function DataTab() {
           <div className="space-y-3">
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-ink2">
               <span>
-                Reset day: <span className="tnum font-bold text-ink">{currentResetDay}</span>
+                {t('Reset day:')} <span className="tnum font-bold text-ink">{currentResetDay}</span>
               </span>
               <span>
-                Period: <span className="font-bold text-ink">{formatDate(dates.start)} – {formatDate(dates.end)}</span>
+                {t('Period:')} <span className="font-bold text-ink">{formatDate(dates.start)} – {formatDate(dates.end)}</span>
               </span>
               <span>
-                Next reset: <span className="font-bold text-ink">{formatDate(dates.nextStart)}</span>
+                {t('Next reset:')} <span className="font-bold text-ink">{formatDate(dates.nextStart)}</span>
               </span>
             </div>
             <UsageTotals usage={cycle} />
             <p className="text-[12px] text-ink3">
-              Counters are maintained by the router and reset on the configured day each month.
+              {t('Counters are maintained by the router and reset on the configured day each month.')}
             </p>
           </div>
         ) : (
-          <p className="text-[13px] text-ink3">No cycle data</p>
+          <p className="text-[13px] text-ink3">{t('No cycle data')}</p>
         )}
       </Card>
 
       {sincePowerOn && (
-        <Card title="Since power on">
+        <Card title={t('Since power on')}>
           <UsageTotals usage={sincePowerOn} />
-          <p className="mt-2 text-[12px] text-ink3">Counter time: {formatUptime(sincePowerOn.time_secs)}</p>
+          <p className="mt-2 text-[12px] text-ink3">{t('Counter time: {time}', { time: formatUptime(sincePowerOn.time_secs) })}</p>
         </Card>
       )}
 
-      <Card title="Other counters" pad={false}>
+      <Card title={t('Other counters')} pad={false}>
         <div className="overflow-x-auto px-4 pb-3">
           <table className="w-full text-[13px]">
             <thead>
               <tr className="border-b border-line/8 text-left text-[11px] uppercase tracking-wider text-ink3">
-                <th className="pb-1.5 pr-4 font-semibold">Period</th>
-                <th className="pb-1.5 pr-4 text-right font-semibold">Down</th>
-                <th className="pb-1.5 pr-4 text-right font-semibold">Up</th>
-                <th className="pb-1.5 pr-4 text-right font-semibold">Total</th>
-                <th className="pb-1.5 text-right font-semibold">Time</th>
+                <th className="pb-1.5 pr-4 font-semibold">{t('Period')}</th>
+                <th className="pb-1.5 pr-4 text-right font-semibold">{t('Down')}</th>
+                <th className="pb-1.5 pr-4 text-right font-semibold">{t('Up')}</th>
+                <th className="pb-1.5 pr-4 text-right font-semibold">{t('Total')}</th>
+                <th className="pb-1.5 text-right font-semibold">{t('Time')}</th>
               </tr>
             </thead>
             <tbody>
               {[
-                { label: 'Today', data: usage.day },
-                { label: 'Device lifetime', data: usage.total },
+                { label: t('Today'), data: usage.day },
+                { label: t('Device lifetime'), data: usage.total },
               ].map(({ label, data: d }) => (
                 <tr key={label} className="border-b border-line/6 last:border-0">
                   <td className="py-2 pr-4 text-ink2">{label}</td>

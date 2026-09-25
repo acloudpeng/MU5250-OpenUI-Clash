@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { IAlert, ICheck } from '../icons'
 import { Button } from './controls'
+import { t, tm } from '../i18n'
 
 // ── Toasts ────────────────────────────────────────────────────────────────────
 
@@ -19,8 +20,8 @@ export function toast(text: string, kind: 'ok' | 'err' = 'ok') {
   pushToast?.({ id: ++toastId, text, kind })
 }
 
-export function toastError(e: unknown, fallback = 'Something went wrong') {
-  toast(e instanceof Error ? e.message : fallback, 'err')
+export function toastError(e: unknown, fallback?: string) {
+  toast(e instanceof Error ? tm(e.message) : fallback ?? t('Something went wrong'), 'err')
 }
 
 export function Toaster() {
@@ -127,10 +128,10 @@ export function ConfirmHost() {
         {opts.body && <p className="mt-1.5 text-[13px] leading-relaxed text-ink2">{opts.body}</p>}
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" onClick={() => close(false)}>
-            Cancel
+            {t('Cancel')}
           </Button>
           <Button variant={opts.danger ? 'danger' : 'primary'} onClick={() => close(true)} autoFocus>
-            {opts.confirmLabel ?? 'Confirm'}
+            {opts.confirmLabel ?? t('Confirm')}
           </Button>
         </div>
       </div>

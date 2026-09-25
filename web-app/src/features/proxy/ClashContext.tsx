@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { api } from '../../data/api'
 import type { ClashStatus, ClashUpdate } from '../../types'
 import { confirm, toastError } from '../../ui/feedback'
+import { t } from '../../i18n'
 
 interface ClashState {
   status: ClashStatus | null
@@ -20,7 +21,7 @@ const Ctx = createContext<ClashState | null>(null)
 
 export function useClash() {
   const value = useContext(Ctx)
-  if (!value) throw new Error('useClash outside ClashProvider')
+  if (!value) throw new Error('useClash outside ClashProvider') // i18n-ignore: developer error
   return value
 }
 
@@ -41,7 +42,7 @@ export function ClashProvider({ children }: { children: ReactNode }) {
       if (!mounted.current || busyRef.current || current !== generation.current) return
       latest.current = s; setStatus(s); setError('')
     } catch (e) {
-      if (mounted.current && current === generation.current) setError(e instanceof Error ? e.message : 'Unable to load Clash')
+      if (mounted.current && current === generation.current) setError(e instanceof Error ? e.message : t('Unable to load Clash'))
     }
   }, [])
 
@@ -69,15 +70,15 @@ export function ClashProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const update = useCallback(async (change: Omit<ClashUpdate, 'expected_revision'>, failure = 'Clash update failed', revision?: number) => {
+  const update = useCallback(async (change: Omit<ClashUpdate, 'expected_revision'>, failure = t('Clash update failed'), revision?: number) => {
     const s = latest.current
     if (!s) return null
     let takeover = false
     if (change.enabled && !s.enabled && s.wireguard_enabled) {
       takeover = await confirm({
-        title: 'Switch from WireGuard to Clash?',
-        body: 'WireGuard will be turned off and its device choices kept. Proxy devices briefly lose internet while rules are replaced.',
-        confirmLabel: 'Switch to Clash',
+        title: t('Switch from WireGuard to Clash?'),
+        body: t('WireGuard will be turned off and its device choices kept. Proxy devices briefly lose internet while rules are replaced.'),
+        confirmLabel: t('Switch to Clash'),
       })
       if (!takeover) return null
     }

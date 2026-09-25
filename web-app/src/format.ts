@@ -1,4 +1,5 @@
 // Formatting helpers and signal-quality thresholds.
+import { t } from './i18n'
 
 export function formatBytes(bytes: number): string {
   if (bytes >= 1e12) return `${(bytes / 1e12).toFixed(1)} TB`
@@ -35,17 +36,17 @@ export function formatUptime(secs?: number): string {
   const d = Math.floor(secs / 86400)
   const h = Math.floor((secs % 86400) / 3600)
   const m = Math.floor((secs % 3600) / 60)
-  return [d && `${d}d`, (d || h) && `${h}h`, `${m}m`].filter(Boolean).join(' ')
+  return [d && t('{n}d', { n: d }), (d || h) && t('{n}h', { n: h }), t('{n}m', { n: m })].filter(Boolean).join(' ')
 }
 
 export function formatDuration(secs: number): string {
-  if (!Number.isFinite(secs) || secs <= 0) return '0s'
+  if (!Number.isFinite(secs) || secs <= 0) return t('{n}s', { n: 0 })
   const h = Math.floor(secs / 3600)
   const m = Math.floor((secs % 3600) / 60)
   const s = Math.floor(secs % 60)
-  if (h > 0) return `${h}h ${m}m`
-  if (m > 0) return `${m}m ${s}s`
-  return `${s}s`
+  if (h > 0) return `${t('{n}h', { n: h })} ${t('{n}m', { n: m })}`
+  if (m > 0) return `${t('{n}m', { n: m })} ${t('{n}s', { n: s })}`
+  return t('{n}s', { n: s })
 }
 
 // ── Signal quality ────────────────────────────────────────────────────────────
@@ -63,13 +64,13 @@ export function rsrpQuality(rsrp?: number): Quality {
 export function qualityLabel(q: Quality): string {
   switch (q) {
     case 'excellent':
-      return 'Excellent'
+      return t('Excellent')
     case 'good':
-      return 'Good'
+      return t('Good')
     case 'fair':
-      return 'Fair'
+      return t('Fair')
     case 'poor':
-      return 'Weak'
+      return t('Weak')
     default:
       return '\u2014'
   }

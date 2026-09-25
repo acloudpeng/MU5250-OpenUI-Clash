@@ -6,10 +6,11 @@ import { Button, Input } from '../../ui/controls'
 import { confirm, toast, toastError } from '../../ui/feedback'
 import { Card, Chip, Stat } from '../../ui/primitives'
 import { useClash } from './ClashContext'
+import { t, tm } from '../../i18n'
 
 function since(start: string) {
   const s = Math.max(0, Math.round((Date.now() - Date.parse(start)) / 1000))
-  return Number.isFinite(s) ? (s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : `${Math.floor(s / 3600)}h`) : ''
+  return Number.isFinite(s) ? (s < 60 ? t('{n}s', { n: s }) : s < 3600 ? t('{n}m', { n: Math.floor(s / 60) }) : t('{n}h', { n: Math.floor(s / 3600) })) : ''
 }
 
 export default function ConnectionsTab() {
@@ -21,15 +22,15 @@ export default function ConnectionsTab() {
   const { data, error, refresh } = usePoll('clash-connections', api.clashConnections, 3000, running && !paused)
 
   async function closeAll() {
-    if (!(await confirm({ title: 'Close all connections?', body: 'Apps reconnect on their own, through the currently selected nodes.', confirmLabel: 'Close all', danger: true }))) return
+    if (!(await confirm({ title: t('Close all connections?'), body: t('Apps reconnect on their own, through the currently selected nodes.'), confirmLabel: t('Close all'), danger: true }))) return
     setClosing(true)
-    try { await api.clashCloseConnections(); toast('Connections closed.'); refresh() }
-    catch (e) { toastError(e, 'Unable to close connections') }
+    try { await api.clashCloseConnections(); toast(t('Connections closed.')); refresh() }
+    catch (e) { toastError(e, t('Unable to close connections')) }
     finally { setClosing(false) }
   }
 
-  if (!status) return <p className="text-sm text-ink2">Loading…</p>
-  if (!running) return <Card><p className="text-sm text-ink2">Connections are shown while the Clash core is running.</p></Card>
+  if (!status) return <p className="text-sm text-ink2">{t('Loading…')}</p>
+  if (!running) return <Card><p className="text-sm text-ink2">{t('Connections are shown while the Clash core is running.')}</p></Card>
 
   const needle = filter.trim().toLowerCase()
   const list = (data?.connections ?? [])
@@ -40,19 +41,19 @@ export default function ConnectionsTab() {
     <div className="space-y-4">
       <Card>
         <div className="grid grid-cols-3 gap-4">
-          <Stat label="Active" value={data?.connections.length ?? '—'} />
-          <Stat label="Downloaded" value={data ? formatBytes(data.download_total) : '—'} sub="since core start" />
-          <Stat label="Uploaded" value={data ? formatBytes(data.upload_total) : '—'} sub="since core start" />
+          <Stat label={t('Active')} value={data?.connections.length ?? '—'} />
+          <Stat label={t('Downloaded')} value={data ? formatBytes(data.download_total) : '—'} sub={t('since core start')} />
+          <Stat label={t('Uploaded')} value={data ? formatBytes(data.upload_total) : '—'} sub={t('since core start')} />
         </div>
       </Card>
-      <Card title="Connections" action={<div className="flex gap-2">
-        <Button size="sm" variant="ghost" onClick={() => setPaused(p => !p)}>{paused ? 'Resume' : 'Pause'}</Button>
-        <Button size="sm" variant="danger" loading={closing} disabled={!data?.connections.length} onClick={() => void closeAll()}>Close all</Button>
+      <Card title={t('Connections')} action={<div className="flex gap-2">
+        <Button size="sm" variant="ghost" onClick={() => setPaused(p => !p)}>{paused ? t('Resume') : t('Pause')}</Button>
+        <Button size="sm" variant="danger" loading={closing} disabled={!data?.connections.length} onClick={() => void closeAll()}>{t('Close all')}</Button>
       </div>}>
         <div className="space-y-3">
-          <Input aria-label="Filter connections" placeholder="Filter by host, IP, rule or node" value={filter} onChange={e => setFilter(e.target.value)} />
-          {error && <p role="alert" className="rounded-lg bg-danger/10 p-3 text-[13px] text-danger">{error}</p>}
-          {data && list.length === 0 && <p className="text-sm text-ink3">{needle ? 'No matching connections.' : 'No open connections.'}</p>}
+          <Input aria-label={t('Filter connections')} placeholder={t('Filter by host, IP, rule or node')} value={filter} onChange={e => setFilter(e.target.value)} />
+          {error && <p role="alert" className="rounded-lg bg-danger/10 p-3 text-[13px] text-danger">{tm(error)}</p>}
+          {data && list.length === 0 && <p className="text-sm text-ink3">{needle ? t('No matching connections.') : t('No open connections.')}</p>}
           <div className="divide-y divide-line/10">
             {list.map(c => (
               <div key={c.id} className="space-y-1 py-2">
@@ -65,7 +66,7 @@ export default function ConnectionsTab() {
               </div>
             ))}
           </div>
-          {data && data.connections.length >= 500 && <p className="text-xs text-ink3">Showing the first 500 connections.</p>}
+          {data && data.connections.length >= 500 && <p className="text-xs text-ink3">{t('Showing the first 500 connections.')}</p>}
         </div>
       </Card>
     </div>

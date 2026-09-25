@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useHome } from '../../app/HomeContext'
 import { api } from '../../data/api'
+import { t } from '../../i18n'
 import type { ModemCapabilities, SignalInfo } from '../../types'
 import { Button, Field, Input } from '../../ui/controls'
 import { toast, toastError, confirm } from '../../ui/feedback'
@@ -18,19 +19,19 @@ function NetworkMode({ currentMode, modes, onApplied }: { currentMode: string; m
     setBusy(true)
     try {
       await api.networkModeSet(selected)
-      toast('Network mode applied — connection may briefly drop')
+      toast(t('Network mode applied — connection may briefly drop'))
       onApplied()
     } catch (e) {
-      toastError(e, 'Failed to set network mode')
+      toastError(e, t('Failed to set network mode'))
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <Card title="Network mode">
+    <Card title={t('Network mode')}>
       <p className="mb-3 text-[12px] text-ink2">
-        Preferred network technology. The modem reconnects after a change.
+        {t('Preferred network technology. The modem reconnects after a change.')}
       </p>
       <div className="flex flex-wrap gap-1.5">
         {modes.map((m) => (
@@ -49,11 +50,11 @@ function NetworkMode({ currentMode, modes, onApplied }: { currentMode: string; m
       </div>
       <div className="mt-3 flex items-center gap-3">
         <Button variant="primary" onClick={apply} loading={busy} disabled={selected === currentMode}>
-          Apply
+          {t('Apply')}
         </Button>
         {selected !== currentMode && (
           <span className="text-[12px] text-ink3">
-            Current: {modes.find((m) => m.value === currentMode)?.label ?? currentMode}
+            {t('Current: {mode}', { mode: modes.find((m) => m.value === currentMode)?.label ?? currentMode })}
           </span>
         )}
       </div>
@@ -85,7 +86,7 @@ function ServingCells({ signal, onLock }: { signal: SignalInfo; onLock: (type: '
           <td className="tnum hidden py-1.5 pr-3 sm:table-cell">{c.sinr ?? '\u2014'}</td>
           <td className="py-1.5 text-right">
             <Button size="sm" variant="outline" onClick={() => onLock(tech, c.pci, c.earfcn, tech === 'nr' ? bandNum : undefined)}>
-              Lock
+              {t('Lock')}
             </Button>
           </td>
         </tr>
@@ -93,17 +94,17 @@ function ServingCells({ signal, onLock }: { signal: SignalInfo; onLock: (type: '
     })
 
   return (
-    <Card title="Serving cells">
-      <p className="mb-3 text-[12px] text-ink2">Active cells — lock directly from this list.</p>
+    <Card title={t('Serving cells')}>
+      <p className="mb-3 text-[12px] text-ink2">{t('Active cells — lock directly from this list.')}</p>
       <div className="overflow-x-auto">
         <table className="w-full text-left text-[13px]">
           <thead>
             <tr className="border-b border-line/8 text-[11px] uppercase tracking-wider text-ink3">
-              <th className="pb-1.5 pr-3 font-semibold">Type</th>
-              <th className="pb-1.5 pr-3 font-semibold">Band</th>
+              <th className="pb-1.5 pr-3 font-semibold">{t('Type')}</th>
+              <th className="pb-1.5 pr-3 font-semibold">{t('Band')}</th>
               <th className="pb-1.5 pr-3 font-semibold">PCI</th>
               <th className="pb-1.5 pr-3 font-semibold">ARFCN</th>
-              <th className="hidden pb-1.5 pr-3 font-semibold sm:table-cell">BW</th>
+              <th className="hidden pb-1.5 pr-3 font-semibold sm:table-cell">{t('BW')}</th>
               <th className="pb-1.5 pr-3 font-semibold">RSRP</th>
               <th className="hidden pb-1.5 pr-3 font-semibold sm:table-cell">SINR</th>
               <th className="pb-1.5" />
@@ -154,7 +155,7 @@ function BandLock({
 
   async function apply() {
     if (selected.size === 0) {
-      toast('Select at least one band', 'err')
+      toast(t('Select at least one band'), 'err')
       return
     }
     setBusy(true)
@@ -162,10 +163,10 @@ function BandLock({
       const sorted = Array.from(selected).sort((a, b) => a - b)
       if (type === 'nr') await api.bandLockNr(sorted.join(','))
       else await api.bandLockLte(sorted)
-      toast(`${type === 'nr' ? 'NR' : 'LTE'} locked to ${sorted.map((b) => (type === 'nr' ? `n${b}` : `B${b}`)).join(', ')}`)
+      toast(t('{tech} locked to {bands}', { tech: type === 'nr' ? 'NR' : 'LTE', bands: sorted.map((b) => (type === 'nr' ? `n${b}` : `B${b}`)).join(', ') }))
       onApplied()
     } catch (e) {
-      toastError(e, 'Band lock failed')
+      toastError(e, t('Band lock failed'))
     } finally {
       setBusy(false)
     }
@@ -178,15 +179,15 @@ function BandLock({
       <p className="mb-2.5 text-[12px] text-ink2">{description}</p>
       {lockedBands && lockedBands.length > 0 && (
         <p className="mb-2 text-[12px] font-medium text-ok">
-          Locked: {[...lockedBands].sort((a, b) => a - b).map((b) => (type === 'nr' ? `n${b}` : `B${b}`)).join(', ')}
+          {t('Locked: {bands}', { bands: [...lockedBands].sort((a, b) => a - b).map((b) => (type === 'nr' ? `n${b}` : `B${b}`)).join(', ') })}
         </p>
       )}
       <div className="mb-2 flex gap-3 text-[12px] font-semibold">
         <button className="text-accent hover:underline" onClick={() => setSelected(new Set(bands))}>
-          Select all
+          {t('Select all')}
         </button>
         <button className="text-ink3 hover:text-ink hover:underline" onClick={() => setSelected(new Set())}>
-          Clear
+          {t('Clear')}
         </button>
       </div>
       <div className="flex flex-wrap gap-1.5">
@@ -204,7 +205,7 @@ function BandLock({
       </div>
       <div className="mt-3">
         <Button variant="primary" onClick={apply} loading={busy} disabled={selected.size === 0}>
-          Lock {selected.size} band{selected.size !== 1 ? 's' : ''}
+          {selected.size === 1 ? t('Lock 1 band') : t('Lock {n} bands', { n: selected.size })}
         </Button>
       </div>
     </Card>
@@ -221,30 +222,30 @@ function CellLock({ type, onApplied }: { type: 'nr' | 'lte'; onApplied: () => vo
 
   async function apply() {
     if (!pci || !earfcn) {
-      toast('PCI and ARFCN are required', 'err')
+      toast(t('PCI and ARFCN are required'), 'err')
       return
     }
     if (type === 'nr' && !band) {
-      toast('Band is required for NR cell lock', 'err')
+      toast(t('Band is required for NR cell lock'), 'err')
       return
     }
     setBusy(true)
     try {
       if (type === 'nr') await api.cellLockNr(pci, earfcn, band)
       else await api.cellLockLte(pci, earfcn)
-      toast(`${type === 'nr' ? 'NR' : 'LTE'} cell locked (PCI ${pci})`)
+      toast(t('{tech} cell locked (PCI {pci})', { tech: type === 'nr' ? 'NR' : 'LTE', pci }))
       onApplied()
     } catch (e) {
-      toastError(e, 'Cell lock failed')
+      toastError(e, t('Cell lock failed'))
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <Card title={`${type === 'nr' ? 'NR' : 'LTE'} cell lock`}>
+    <Card title={t('{tech} cell lock', { tech: type === 'nr' ? 'NR' : 'LTE' })}>
       <p className="mb-3 text-[12px] text-ink2">
-        Lock to a specific cell by PCI and {type === 'nr' ? 'NR-ARFCN' : 'EARFCN'}.
+        {t('Lock to a specific cell by PCI and {arfcn}.', { arfcn: type === 'nr' ? 'NR-ARFCN' : 'EARFCN' })}
       </p>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Field label="PCI">
@@ -254,13 +255,13 @@ function CellLock({ type, onApplied }: { type: 'nr' | 'lte'; onApplied: () => vo
           <Input type="number" inputMode="numeric" value={earfcn} onChange={(e) => setEarfcn(e.target.value)} placeholder={type === 'nr' ? '630912' : '3650'} />
         </Field>
         {type === 'nr' && (
-          <Field label="Band">
+          <Field label={t('Band')}>
             <Input type="number" inputMode="numeric" value={band} onChange={(e) => setBand(e.target.value)} placeholder="78" />
           </Field>
         )}
         <div className="flex items-end">
           <Button variant="primary" onClick={apply} loading={busy} className="w-full">
-            Lock
+            {t('Lock')}
           </Button>
         </div>
       </div>
@@ -285,44 +286,44 @@ export default function Locking() {
     try {
       if (type === 'nr') await api.cellLockNr(String(pci), String(earfcn), band ?? '')
       else await api.cellLockLte(String(pci), String(earfcn))
-      toast(`Locked to ${type === 'nr' ? 'NR' : 'LTE'} cell PCI ${pci}`)
+      toast(t('Locked to {tech} cell PCI {pci}', { tech: type === 'nr' ? 'NR' : 'LTE', pci }))
       refresh()
     } catch (e) {
-      toastError(e, 'Lock failed')
+      toastError(e, t('Lock failed'))
     }
   }
 
   async function resetBands() {
     const ok = await confirm({
-      title: 'Reset band locks?',
-      body: 'The modem will use automatic band selection again.',
-      confirmLabel: 'Reset',
+      title: t('Reset band locks?'),
+      body: t('The modem will use automatic band selection again.'),
+      confirmLabel: t('Reset'),
       danger: true,
     })
     if (!ok) return
     try {
       await api.bandLockReset()
-      toast('All band locks cleared')
+      toast(t('All band locks cleared'))
       refresh()
     } catch (e) {
-      toastError(e, 'Reset failed')
+      toastError(e, t('Reset failed'))
     }
   }
 
   async function resetCells() {
     const ok = await confirm({
-      title: 'Reset cell locks?',
-      body: 'The modem will use automatic cell selection again.',
-      confirmLabel: 'Reset',
+      title: t('Reset cell locks?'),
+      body: t('The modem will use automatic cell selection again.'),
+      confirmLabel: t('Reset'),
       danger: true,
     })
     if (!ok) return
     try {
       await api.cellLockReset()
-      toast('All cell locks cleared')
+      toast(t('All cell locks cleared'))
       refresh()
     } catch (e) {
-      toastError(e, 'Reset failed')
+      toastError(e, t('Reset failed'))
     }
   }
 
@@ -342,8 +343,8 @@ export default function Locking() {
       ) : capabilities === undefined ? (
         <Skeleton className="h-40" />
       ) : (
-        <Card title="Network mode and bands">
-          <p className="text-[12px] text-warn">Firmware capability data is unavailable, so radio mode and band changes are disabled.</p>
+        <Card title={t('Network mode and bands')}>
+          <p className="text-[12px] text-warn">{t('Firmware capability data is unavailable, so radio mode and band changes are disabled.')}</p>
         </Card>
       )}
 
@@ -351,16 +352,16 @@ export default function Locking() {
 
       {capabilities && <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         <BandLock
-          title="NR 5G band lock"
-          description="Allowed NR bands. Works in 5G SA mode only — firmware does not support NSA band locking."
+          title={t('NR 5G band lock')}
+          description={t('Allowed NR bands. Works in 5G SA mode only — firmware does not support NSA band locking.')}
           bands={capabilities.nr_sa_bands}
           type="nr"
           lockedBands={signal.nr_band_lock}
           onApplied={refresh}
         />
         <BandLock
-          title="LTE band lock"
-          description="Allowed LTE bands."
+          title={t('LTE band lock')}
+          description={t('Allowed LTE bands.')}
           bands={capabilities.lte_bands}
           type="lte"
           lockedBands={signal.lte_band_lock}
@@ -373,36 +374,36 @@ export default function Locking() {
         <CellLock type="lte" onApplied={refresh} />
       </div>
 
-      <Card title="Reset locks">
+      <Card title={t('Reset locks')}>
         <p className="mb-3 text-[12px] text-ink2">
-          Remove all band and cell locks; the modem returns to automatic selection.
+          {t('Remove all band and cell locks; the modem returns to automatic selection.')}
         </p>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={resetBands}>
-            Reset band locks
+            {t('Reset band locks')}
           </Button>
           <Button variant="outline" onClick={resetCells}>
-            Reset cell locks
+            {t('Reset cell locks')}
           </Button>
         </div>
       </Card>
 
-      <Card title="Diagnostics">
+      <Card title={t('Diagnostics')}>
         <div className="tnum space-y-1 font-mono text-[11px] text-ink3">
           <p>
-            LTE lock (raw): <span className="text-ink">{signal.raw_lte_band_lock || '(empty)'}</span>
+            {t('LTE lock (raw):')} <span className="text-ink">{signal.raw_lte_band_lock || t('(empty)')}</span>
           </p>
           <p>
-            NR lock (raw): <span className="text-ink">{signal.raw_nr_band_lock || '(empty)'}</span>
+            {t('NR lock (raw):')} <span className="text-ink">{signal.raw_nr_band_lock || t('(empty)')}</span>
           </p>
           <p>
-            LTE lock (parsed): <span className="text-ink">{signal.lte_band_lock?.join(', ') || '(none)'}</span>
+            {t('LTE lock (parsed):')} <span className="text-ink">{signal.lte_band_lock?.join(', ') || t('(none)')}</span>
           </p>
           <p>
-            NR lock (parsed): <span className="text-ink">{signal.nr_band_lock?.join(', ') || '(none)'}</span>
+            {t('NR lock (parsed):')} <span className="text-ink">{signal.nr_band_lock?.join(', ') || t('(none)')}</span>
           </p>
           <p>
-            Network mode: <span className="text-ink">{signal.net_select || '(unknown)'}</span>
+            {t('Network mode:')} <span className="text-ink">{signal.net_select || t('(unknown)')}</span>
           </p>
         </div>
       </Card>

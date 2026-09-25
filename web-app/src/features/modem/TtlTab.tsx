@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../data/api'
+import { t } from '../../i18n'
 import type { TtlStatus } from '../../types'
 import { Button, Input } from '../../ui/controls'
 import { toast, toastError } from '../../ui/feedback'
@@ -29,16 +30,16 @@ export default function TtlTab() {
   async function applyTtl() {
     const val = parseInt(ttlInput)
     if (!val || val < 1 || val > 255) {
-      toast('TTL must be 1-255', 'err')
+      toast(t('TTL must be 1-255'), 'err')
       return
     }
     setBusy(true)
     try {
       await api.ttlSet(val)
-      toast(`TTL set to ${val} (IPv4 + IPv6)`)
+      toast(t('TTL set to {ttl} (IPv4 + IPv6)', { ttl: val }))
       await fetchStatus()
     } catch (e) {
-      toastError(e, 'Failed to set TTL')
+      toastError(e, t('Failed to set TTL'))
     } finally {
       setBusy(false)
     }
@@ -48,30 +49,29 @@ export default function TtlTab() {
     setBusy(true)
     try {
       await api.ttlClear()
-      toast('TTL clamping disabled')
+      toast(t('TTL clamping disabled'))
       await fetchStatus()
     } catch (e) {
-      toastError(e, 'Failed to clear TTL')
+      toastError(e, t('Failed to clear TTL'))
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <Card title="TTL clamping">
+    <Card title={t('TTL clamping')}>
       <div className="space-y-3">
         <p className="text-[12px] text-ink2">
-          Overrides the TTL / hop limit on LAN ingress traffic to prevent carrier tethering detection.
-          Applied immediately and persists across reboots.
+          {t('Overrides the TTL / hop limit on LAN ingress traffic to prevent carrier tethering detection. Applied immediately and persists across reboots.')}
         </p>
 
         {status == null ? (
-          <p className="text-[13px] text-ink3">Checking status…</p>
+          <p className="text-[13px] text-ink3">{t('Checking status…')}</p>
         ) : active ? (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
             <div className="flex items-center gap-2">
               <span className="h-2 w-2 rounded-full bg-ok" />
-              <span className="tnum text-[13px] font-semibold text-ok">Active (TTL={status.ttl_value})</span>
+              <span className="tnum text-[13px] font-semibold text-ok">{t('Active (TTL={ttl})', { ttl: status.ttl_value ?? '' })}</span>
               {status.ipv6_active && <Chip tone="default">IPv4 + IPv6</Chip>}
             </div>
             <div className="flex items-center gap-2">
@@ -79,10 +79,10 @@ export default function TtlTab() {
                 <Input type="number" min={1} max={255} value={ttlInput} onChange={(e) => setTtlInput(e.target.value)} />
               </div>
               <Button variant="outline" onClick={applyTtl} loading={busy}>
-                Update
+                {t('Update')}
               </Button>
               <Button variant="ghost" onClick={clearTtl} disabled={busy}>
-                Disable
+                {t('Disable')}
               </Button>
             </div>
           </div>
@@ -92,7 +92,7 @@ export default function TtlTab() {
               <Input type="number" min={1} max={255} value={ttlInput} onChange={(e) => setTtlInput(e.target.value)} placeholder="65" />
             </div>
             <Button variant="primary" onClick={applyTtl} loading={busy} disabled={!ttlInput}>
-              Enable clamping
+              {t('Enable clamping')}
             </Button>
           </div>
         )}

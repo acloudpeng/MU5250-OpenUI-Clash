@@ -35,6 +35,7 @@ web-app/src/
     api.ts           endpoint bindings + firmware response mappers
     poll.ts          visibility-aware, non-overlapping poller with SWR cache
   ui/                design-system primitives (cards, controls, toast, confirm)
+  i18n/              t()/tm() and the Chinese dictionaries (zh/<area>.ts)
   icons.tsx          inline SVG icon set (no icon dependency)
   features/
     home/            Overview — single batched /api/dashboard poll
@@ -53,6 +54,22 @@ web-app/src/
   slowly (15 s) or load on demand.
 - Last-good data is cached in memory, so switching tabs renders instantly
   and refreshes in the background.
+
+## Language
+
+The panel is bilingual: Simplified Chinese by default, English from the **EN / 中文**
+switch in the sidebar, the mobile header or the sign-in page. The choice is kept in
+`localStorage` (`u60.lang`).
+
+- English source text is the key: `t('Save device choices')`, `t('{n} devices', { n })`.
+  Chinese goes in `src/i18n/zh/<area>.ts`.
+- Strings defined at module level are marked with `N_()` and shown with `t()`; `t()` is
+  read at render time and a language switch remounts the app.
+- Messages from the agent stay English on the wire and are shown with `tm()`, which
+  translates known ones by exact text or `{placeholder}` pattern (`zh/agent.ts`).
+- `npm test` runs `tools/check-i18n.cjs`, which fails on English UI text outside
+  `t()`, on missing or conflicting translations, and on unused entries. Run
+  `node tools/check-i18n.cjs [path]` to list problems.
 
 ## Develop
 

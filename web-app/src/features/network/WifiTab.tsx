@@ -4,6 +4,7 @@ import type { WifiAll, WifiBand } from '../../types'
 import { Button, Field, Input, Select, Toggle } from '../../ui/controls'
 import { toast, toastError } from '../../ui/feedback'
 import { Card, Chip, Skeleton } from '../../ui/primitives'
+import { t } from '../../i18n'
 
 const DFS_5G_CHANNELS = new Set(['52', '56', '60', '64', '100', '104', '108', '112', '116', '120', '124', '128', '132', '136', '140', '144'])
 
@@ -24,29 +25,29 @@ function getBandInsights(suffix: '2g' | '5g', band: WifiBand): string[] {
   const actualChannel = band.actualChannel ?? band.channel
 
   if (configuredChannel === 'auto' && actualChannel != null) {
-    insights.push(`Auto channel selected ${actualChannel} at runtime.`)
+    insights.push(t('Auto channel selected {channel} at runtime.', { channel: actualChannel }))
   }
   if (configuredChannel !== 'auto') {
     const configuredNum = parseInt(configuredChannel, 10)
     if (!Number.isNaN(configuredNum)) {
       if (actualChannel != null && configuredNum !== actualChannel) {
-        insights.push(`Configured channel ${configuredNum}, currently operating on ${actualChannel}.`)
+        insights.push(t('Configured channel {configured}, currently operating on {actual}.', { configured: configuredNum, actual: actualChannel }))
       }
       if (suffix === '2g' && ![1, 6, 11].includes(configuredNum)) {
-        insights.push('2.4 GHz usually performs best on channels 1, 6, or 11 to reduce overlap.')
+        insights.push(t('2.4 GHz usually performs best on channels 1, 6, or 11 to reduce overlap.'))
       }
       if (suffix === '5g' && DFS_5G_CHANNELS.has(String(configuredNum))) {
-        insights.push('DFS channel selected — radar events can force channel changes.')
+        insights.push(t('DFS channel selected — radar events can force channel changes.'))
       }
     }
   }
   const configuredBw = (band.configuredBandwidth ?? '').toUpperCase()
   const actualBw = (band.actualBandwidth ?? band.bandwidth ?? '').toUpperCase()
   if (configuredBw && actualBw && configuredBw !== actualBw) {
-    insights.push(`Configured bandwidth ${configuredBw}, runtime reports ${actualBw}.`)
+    insights.push(t('Configured bandwidth {configured}, runtime reports {actual}.', { configured: configuredBw, actual: actualBw }))
   }
   if ((band.clients ?? 0) >= 15) {
-    insights.push('High client count detected. Fixed channels can improve stability.')
+    insights.push(t('High client count detected. Fixed channels can improve stability.'))
   }
   return insights
 }
@@ -98,12 +99,12 @@ function BandCard({
       if (htmode && htmode !== band.configuredBandwidth) settings[`htmode_${suffix}`] = htmode
       if (txpower) settings[`txpower_${suffix}`] = txpower
       await api.wifiSet(settings)
-      toast('Saved — Wi-Fi may reconnect')
+      toast(t('Saved — Wi-Fi may reconnect'))
       setPasswordDirty(false)
       setEditing(false)
       onRefresh()
     } catch (e) {
-      toastError(e, 'Save failed')
+      toastError(e, t('Save failed'))
     } finally {
       setBusy(false)
     }
@@ -114,7 +115,7 @@ function BandCard({
     try {
       const key = suffix === '2g' ? 'radio2_disabled' : 'radio5_disabled'
       await api.wifiSet({ [key]: band.enabled ? '1' : '0' })
-      toast(band.enabled ? 'Radio disabled' : 'Radio enabled')
+      toast(band.enabled ? t('Radio disabled') : t('Radio enabled'))
       onRefresh()
     } catch (e) {
       toastError(e)
@@ -137,7 +138,7 @@ function BandCard({
       action={
         !editing ? (
           <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
-            Edit
+            {t('Edit')}
           </Button>
         ) : (
           <div className="flex gap-1.5">
@@ -155,10 +156,10 @@ function BandCard({
                 setHidden(band.hidden)
               }}
             >
-              Cancel
+              {t('Cancel')}
             </Button>
             <Button size="sm" variant="primary" onClick={handleSave} loading={busy}>
-              Save
+              {t('Save')}
             </Button>
           </div>
         )
@@ -171,18 +172,18 @@ function BandCard({
               className={`h-2 w-2 rounded-full ${masterEnabled ? (band.enabled ? 'bg-ok' : 'bg-danger') : 'bg-warn'}`}
             />
             <span className="text-[13px] text-ink2">
-              {masterEnabled ? (band.enabled ? 'Enabled' : 'Disabled') : 'Master off'}
+              {masterEnabled ? (band.enabled ? t('Enabled') : t('Disabled')) : t('Master off')}
             </span>
             {band.clients != null && (
               <span className="text-[12px] text-ink3">
-                {band.clients} client{band.clients !== 1 ? 's' : ''}
+                {band.clients !== 1 ? t('{n} clients', { n: band.clients }) : t('{n} client', { n: band.clients })}
               </span>
             )}
           </div>
-          <Toggle checked={band.enabled} onChange={toggleRadio} disabled={busy} label={`Toggle ${label} radio`} />
+          <Toggle checked={band.enabled} onChange={toggleRadio} disabled={busy} label={t('Toggle {band} radio', { band: label })} />
         </div>
         {!masterEnabled && (
-          <p className="text-[12px] text-warn">Global Wi-Fi is off. Band settings are still saved.</p>
+          <p className="text-[12px] text-warn">{t('Global Wi-Fi is off. Band settings are still saved.')}</p>
         )}
 
         {editing ? (
@@ -190,7 +191,7 @@ function BandCard({
             <Field label="SSID">
               <Input value={ssid} onChange={(e) => setSsid(e.target.value)} />
             </Field>
-            <Field label="Password" hint="Leave unchanged to keep the current password">
+            <Field label={t('Password')} hint={t('Leave unchanged to keep the current password')}>
               <Input
                 type="password"
                 value={password}
@@ -201,16 +202,16 @@ function BandCard({
               />
             </Field>
             <div className="grid grid-cols-2 gap-2 border-t border-line/8 pt-3">
-              <Field label="Channel">
+              <Field label={t('Channel')}>
                 <Select value={channel} onChange={(e) => setChannel(e.target.value)}>
                   {channels.map((c) => (
                     <option key={c} value={c}>
-                      {c === 'auto' ? 'Auto' : c}
+                      {c === 'auto' ? t('Auto') : c}
                     </option>
                   ))}
                 </Select>
               </Field>
-              <Field label="Bandwidth">
+              <Field label={t('Bandwidth')}>
                 <Select value={htmode} onChange={(e) => setHtmode(e.target.value)}>
                   {htmodes.map((m) => (
                     <option key={m} value={m}>
@@ -219,9 +220,9 @@ function BandCard({
                   ))}
                 </Select>
               </Field>
-              <Field label="TX power">
+              <Field label={t('TX power')}>
                 <Select value={txpower} onChange={(e) => setTxpower(e.target.value)}>
-                  <option value="">Default</option>
+                  <option value="">{t('Default')}</option>
                   <option value="100">100%</option>
                   <option value="75">75%</option>
                   <option value="50">50%</option>
@@ -229,8 +230,8 @@ function BandCard({
                 </Select>
               </Field>
               <div className="flex items-end gap-2 pb-1.5">
-                <Toggle checked={hidden} onChange={setHidden} label="Hidden SSID" />
-                <span className="text-[12px] font-medium text-ink2">Hidden SSID</span>
+                <Toggle checked={hidden} onChange={setHidden} label={t('Hidden SSID')} />
+                <span className="text-[12px] font-medium text-ink2">{t('Hidden SSID')}</span>
               </div>
             </div>
           </>
@@ -238,14 +239,14 @@ function BandCard({
           <>
             <div className="grid grid-cols-2 gap-x-3 gap-y-2">
               <Info label="SSID" value={band.ssid ?? '\u2014'} strong />
-              <Info label="Password" value={band.password ?? '\u2014'} mono />
-              <Info label="Channel" value={configuredChannel === 'auto' ? `Auto (${band.actualChannel ?? band.channel ?? '\u2014'})` : configuredChannel} />
-              <Info label="Bandwidth" value={formatBandwidthMode(band.configuredBandwidth)} />
-              <Info label="Security" value={band.security ?? '\u2014'} />
-              <Info label="Hidden" value={band.hidden ? 'Yes' : 'No'} />
+              <Info label={t('Password')} value={band.password ?? '\u2014'} mono />
+              <Info label={t('Channel')} value={configuredChannel === 'auto' ? t('Auto ({channel})', { channel: band.actualChannel ?? band.channel ?? '\u2014' }) : configuredChannel} />
+              <Info label={t('Bandwidth')} value={formatBandwidthMode(band.configuredBandwidth)} />
+              <Info label={t('Security')} value={band.security ?? '\u2014'} />
+              <Info label={t('Hidden')} value={band.hidden ? t('Yes') : t('No')} />
             </div>
             <div className="rounded-lg bg-surface2/70 px-3 py-2">
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-ink3">Channel insights</p>
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-ink3">{t('Channel insights')}</p>
               {insights.length > 0 ? (
                 <div className="space-y-1">
                   {insights.map((insight, i) => (
@@ -255,7 +256,7 @@ function BandCard({
                   ))}
                 </div>
               ) : (
-                <p className="text-[12px] text-ink3">No obvious channel conflicts detected.</p>
+                <p className="text-[12px] text-ink3">{t('No obvious channel conflicts detected.')}</p>
               )}
             </div>
           </>
@@ -297,7 +298,7 @@ export default function WifiTab() {
     setBusy(true)
     try {
       await api.wifiSet({ wifi_onoff: next ? '1' : '0' })
-      toast(next ? 'Global Wi-Fi enabled' : 'Global Wi-Fi disabled')
+      toast(next ? t('Global Wi-Fi enabled') : t('Global Wi-Fi disabled'))
       refresh()
     } catch (e) {
       toastError(e)
@@ -314,7 +315,7 @@ export default function WifiTab() {
     const targetLabel = source === '2g' ? '5 GHz' : '2.4 GHz'
 
     if (!sourceBand.ssid) {
-      toast(`Cannot sync from ${sourceLabel}: source SSID is empty`, 'err')
+      toast(t('Cannot sync from {band}: source SSID is empty', { band: sourceLabel }), 'err')
       return
     }
 
@@ -329,7 +330,7 @@ export default function WifiTab() {
     setSyncBusy(true)
     try {
       await api.wifiSet(payload)
-      toast(`Copied ${sourceLabel} settings to ${targetLabel}${includePassword ? ' (including password)' : ''}`)
+      toast(includePassword ? t('Copied {source} settings to {target} (including password)', { source: sourceLabel, target: targetLabel }) : t('Copied {source} settings to {target}', { source: sourceLabel, target: targetLabel }))
       refresh()
     } catch (e) {
       toastError(e)
@@ -349,42 +350,42 @@ export default function WifiTab() {
 
   return (
     <div className="space-y-3">
-      <Card title="Global Wi-Fi">
+      <Card title={t('Global Wi-Fi')}>
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-[13px] font-medium text-ink">Master switch</p>
+            <p className="text-[13px] font-medium text-ink">{t('Master switch')}</p>
             <p className="mt-0.5 text-[12px] text-ink2">
               {!wifi.master_supported
-                ? 'This firmware does not expose a reliable global Wi-Fi toggle.'
+                ? t('This firmware does not expose a reliable global Wi-Fi toggle.')
                 : wifi.master_enabled
-                  ? 'On — radios follow your per-band settings'
-                  : 'Off — all Wi-Fi radios are globally disabled'}
+                  ? t('On — radios follow your per-band settings')
+                  : t('Off — all Wi-Fi radios are globally disabled')}
             </p>
           </div>
-          <Toggle checked={wifi.master_enabled} onChange={toggleMaster} disabled={busy || !wifi.master_supported} label="Master Wi-Fi switch" />
+          <Toggle checked={wifi.master_enabled} onChange={toggleMaster} disabled={busy || !wifi.master_supported} label={t('Master Wi-Fi switch')} />
         </div>
         {wifi.wifi6_supported && (
           <div className="mt-3 border-t border-line/8 pt-3">
-            <Chip tone={wifi.wifi6_enabled ? 'ok' : 'default'}>Wi-Fi 6 {wifi.wifi6_enabled ? 'enabled' : 'disabled'}</Chip>
+            <Chip tone={wifi.wifi6_enabled ? 'ok' : 'default'}>{wifi.wifi6_enabled ? t('Wi-Fi 6 enabled') : t('Wi-Fi 6 disabled')}</Chip>
           </div>
         )}
         {wifi.wifi7_supported && (
           <div className="mt-3 border-t border-line/8 pt-3">
-            <Chip tone="ok">Wi-Fi 7 / 802.11be supported</Chip>
+            <Chip tone="ok">{t('Wi-Fi 7 / 802.11be supported')}</Chip>
           </div>
         )}
       </Card>
 
-      <Card title="Band sync">
+      <Card title={t('Band sync')}>
         <p className="mb-2.5 text-[12px] text-ink2">
-          Copy SSID, password, security and hidden-state from one band to the other.
+          {t('Copy SSID, password, security and hidden-state from one band to the other.')}
         </p>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => syncBands('2g')} loading={syncBusy}>
-            Use 2.4 GHz for both
+            {t('Use 2.4 GHz for both')}
           </Button>
           <Button variant="outline" onClick={() => syncBands('5g')} loading={syncBusy}>
-            Use 5 GHz for both
+            {t('Use 5 GHz for both')}
           </Button>
         </div>
       </Card>
@@ -395,7 +396,7 @@ export default function WifiTab() {
       </div>
 
       {wifi.guest_ssid && (
-        <Card title="Guest network">
+        <Card title={t('Guest network')}>
           <p className="text-[13px] text-ink2">
             SSID: <span className="font-semibold text-ink">{wifi.guest_ssid}</span>
           </p>

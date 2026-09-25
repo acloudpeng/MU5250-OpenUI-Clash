@@ -1,10 +1,11 @@
-import { lazy, useEffect, useState } from 'react'
+import { Fragment, lazy, useEffect, useState } from 'react'
 import { AUTH_EXPIRED_EVENT, clearToken, hasToken } from './data/client'
 import { HomeProvider } from './app/HomeContext'
 import Login from './app/Login'
 import Shell, { type Group } from './app/Shell'
 import { useTheme } from './app/theme'
 import { ConfirmHost, Toaster } from './ui/feedback'
+import { applyLang, getLang, type Lang } from './i18n'
 
 const HomePage = lazy(() => import('./features/home/HomePage'))
 const SignalGroup = lazy(() => import('./features/signal/SignalGroup'))
@@ -19,6 +20,12 @@ export default function App() {
   const [authed, setAuthed] = useState(hasToken())
   const [group, setGroup] = useState<Group>('home')
   const { theme, toggle } = useTheme()
+  const [lang, setLang] = useState<Lang>(getLang())
+  const toggleLang = () => {
+    const next = lang === 'zh' ? 'en' : 'zh'
+    applyLang(next)
+    setLang(next)
+  }
 
   useEffect(() => {
     const onAuthExpired = () => setAuthed(false)
@@ -29,7 +36,7 @@ export default function App() {
   if (!authed) {
     return (
       <>
-        <Login onAuthed={() => setAuthed(true)} />
+        <Login key={lang} onAuthed={() => setAuthed(true)} lang={lang} onToggleLang={toggleLang} />
         <Toaster />
       </>
     )
@@ -37,8 +44,10 @@ export default function App() {
 
   return (
     <>
+      {/* Remounting on a language switch re-renders every t() call; polled data is cached. */}
+      <Fragment key={lang}>
       <HomeProvider fast={group === 'home' || group === 'signal'}>
-        <Shell group={group} onNavigate={setGroup} theme={theme} onToggleTheme={toggle}>
+        <Shell group={group} onNavigate={setGroup} theme={theme} onToggleTheme={toggle} lang={lang} onToggleLang={toggleLang}>
           {group === 'home' && <HomePage />}
           {group === 'signal' && <SignalGroup />}
           {group === 'network' && <NetworkGroup />}
@@ -56,6 +65,7 @@ export default function App() {
           )}
         </Shell>
       </HomeProvider>
+      </Fragment>
       <Toaster />
       <ConfirmHost />
     </>

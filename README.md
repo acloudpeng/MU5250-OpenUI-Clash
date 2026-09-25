@@ -227,7 +227,8 @@ idle return and the default 120-second recovery path passed. The device owner
 confirmed that **four short power-button presses open DevUI and the first frame
 appears immediately without touching the screen**. The shortcut is enabled on
 the test device; new installations still default to disabled. Project documentation
-is in English.
+is in English. The web panel is bilingual: Simplified Chinese by default,
+with an English switch (see [DASHBOARD.md](docs/DASHBOARD.md#language)).
 
 ## Acknowledgements
 
