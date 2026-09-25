@@ -55,7 +55,7 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
 | **P1** | mihomo 交叉编译（CI + 本地 Docker）、`prepare-mihomo.py`、sha256 固定；实机基准（内存/CPU/吞吐） | 基准需要 | 构建完成，等实机基准 |
 | **P2** | 从 `wireguard.rs` 抽出 `egress_policy`（设备、标记位、路由表参数化）；WG 行为不变；互斥切换事务与回滚 | 否 | 完成（互斥切换在 P3 实现） |
 | **P3** | `clash.rs`：进程监管、订阅子模块、配置合成、Unix socket 控制客户端、策略应用、revision/409 | 否（mock） | 完成（netns 数据面测试通过），等实机 |
-| **P4** | 网页「代理」分组：概览 / 订阅 / 节点组 / 设备分流 / 连接 / 日志 / 高级设置；`api.ts`、`mock_agent.py`、契约检查 | 否 | `api.ts` / 类型 / mock 已随 P3 完成，页面待开始 |
+| **P4** | 网页「代理」分组：概览 / 订阅 / 节点组 / 设备分流 / 连接 / 日志 / 高级设置；`api.ts`、`mock_agent.py`、契约检查 | 否 | 完成（mock + 浏览器走查），等实机 |
 | **P5** | `deploy-components.py --mihomo`、`transaction.sh` 快照目标、geo 数据打包 | 否 | 待开始 |
 | **P6** | B31 实机验证：吞吐、DNS/IPv6/kill-switch 泄漏、防火墙重载/重启/WAN 重连恢复、72 h 内存浸泡、WG↔Clash 切换 | 是 | 待开始 |
 | **P7** | DevUI 小屏：后端状态、Clash 开关/模式/节点 | 否（预览） | 可选 |
@@ -117,3 +117,13 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
   `tests/clash-netns.sh`：导出的 agent 策略 + qemu 下的真实内核，在 netns 中验证 all/selected/excluded 分流、
   UDP/TCP 任意 DNS 被接管、内核停止时断网断 DNS 且管理口可达、重启恢复、关闭后直连、HOLD/RELEASE。已加入 `mihomo.yml` CI。
 - WG 七份导出脚本与重构前逐字节一致。
+
+### 2026-09-25 — P4 网页「代理」
+- 新导航项 **Proxy**（`web-app/src/features/proxy/`）：概览（开关、状态、代理模式 Rule/Global/Direct、TUN 栈 / DNS 模式 / 日志级别）、
+  订阅（增删改、切换、立即更新、流量/到期条、URL 只显示主机）、节点（按组选择、单节点/整组测速）、设备分流（与 WG 相同的全部/选中模式，
+  名单独立）、连接（3 s 刷新、筛选、全部关闭）、日志（跟随/暂停）。
+- 互斥在两边界面都有确认框：WG 开着时打开 Clash、Clash 开着时打开 WG，都会先确认再带 `takeover: true`。
+  WireGuard 状态新增 `clash_enabled`（只读文件，不取 Clash 锁）。
+- 设备名单编辑沿用 WG 的"编辑时的 revision"，别处改过会得到 409 而不是静默覆盖。
+- 走查：Playwright（容器）对 mock 跑完整流程——登录、添加订阅（确认 token 不回显）、WG→Clash 接管确认、模式切换、选节点、测速、
+  设备保存、连接关闭、日志、手机宽度——无控制台错误。

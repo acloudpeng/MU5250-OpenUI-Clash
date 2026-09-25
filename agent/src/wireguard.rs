@@ -534,7 +534,8 @@ fn response(s: &Settings) -> Value {
         "latest_handshake":handshake,"rx_bytes":fields.get(1).and_then(|v|v.parse::<u64>().ok()).unwrap_or(0),
         "tx_bytes":fields.get(2).and_then(|v|v.parse::<u64>().ok()).unwrap_or(0),"error":error,
         "endpoint":s.tunnel.as_ref().map(|t|t.endpoint.as_str()),"address":s.tunnel.as_ref().map(|t|t.address.as_str()),
-        "dns":s.tunnel.as_ref().map(|t|t.dns.as_str()),"mtu":s.tunnel.as_ref().map(|t|t.mtu),"ipv6_policy":"blocked_for_tunnel_devices"})
+        "dns":s.tunnel.as_ref().map(|t|t.dns.as_str()),"mtu":s.tunnel.as_ref().map(|t|t.mtu),"ipv6_policy":"blocked_for_tunnel_devices",
+        "clash_enabled":clash::stored_enabled()})
 }
 pub fn get() -> (u16, Value) {
     let _guard = LOCK.lock().unwrap();

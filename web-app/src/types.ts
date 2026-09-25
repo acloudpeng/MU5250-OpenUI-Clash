@@ -427,6 +427,8 @@ export interface WireGuardStatus {
   dns: string | null
   mtu: number | null
   ipv6_policy: string
+  /** Clash is stored on; enabling WireGuard then needs `takeover`. */
+  clash_enabled: boolean
 }
 export interface WireGuardUpdate {
   expected_revision?: number

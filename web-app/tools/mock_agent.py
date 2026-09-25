@@ -434,12 +434,17 @@ def wireguard_set(body):
     active = next((p for p in profiles if p["id"] == current["active_profile"]), None)
     current.update({"has_config": active is not None, "endpoint": active["endpoint"] if active else None,
                     "address": active["address"] if active else None, "dns": "1.1.1.1" if active else None, "mtu": 1280 if active else None})
+    if current["enabled"] and STATE["clash"]["enabled"]:
+        if not body.get("takeover"):
+            raise ValueError("Clash is on; turn it off or confirm switching to WireGuard")
+        STATE["clash"].update({"enabled": False, "running": False, "connected": False, "interface_up": False, "pid": None,
+                               "memory_kib": 0, "revision": STATE["clash"]["revision"] + 1})
     current["revision"] += 1
     current["interface_up"] = bool(current["enabled"])
     current["connected"] = bool(current["enabled"])
     current["latest_handshake"] = int(time.time()) - 15 if current["enabled"] else 0
     STATE["wireguard"] = current
-    return current
+    return wireguard_status()
 
 
 def clash_set(body):
@@ -493,6 +498,10 @@ def clash_set(body):
                     "uptime": 0, "version": "mihomo-demo" if on else "", "memory_kib": 38000 if on else 0})
     STATE["clash"] = current
     return current
+
+
+def wireguard_status():
+    return {**STATE["wireguard"], "clash_enabled": STATE["clash"]["enabled"]}
 
 
 def clash_status():
@@ -556,7 +565,7 @@ STATE["screen_settings"] = {"revision": 1, "shortcut_enabled": False, "brightnes
 STATE["screen"] = {"available": True, "verified": True, "running": False, "state": "idle", "settings_revision": 1, "shortcut": {"available": True, "message": "Shortcut disabled"}}
 
 ROUTES_GET = {
-    "/api/wireguard": lambda: STATE["wireguard"],
+    "/api/wireguard": wireguard_status,
     "/api/clash": clash_status,
     "/api/clash/proxies": lambda: STATE["clash_proxies"],
     "/api/clash/connections": lambda: {"upload_total": 52428800, "download_total": 734003200, "memory": 41943040, "connections": [
@@ -749,7 +758,7 @@ def main():
             {'id': 1, 'name': 'Home VPN', 'endpoint': 'vpn.example.com:51820', 'address': '10.8.0.2/32'},
             {'id': 2, 'name': 'Travel VPN', 'endpoint': 'travel.example.com:51820', 'address': '10.9.0.2/32'}]})
         def wg_demo_status():
-            value = dict(STATE['wireguard'])
+            value = wireguard_status()
             value['connected'] = bool(value['enabled'])
             value['latest_handshake'] = int(time.time()) - 15 if value['enabled'] else 0
             return value

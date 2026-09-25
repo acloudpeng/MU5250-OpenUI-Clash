@@ -52,10 +52,13 @@ export default function WireGuardTab() {
 
   async function save(enabled: boolean, disableOnly = false) {
     if (busyRef.current) return
+    const takeover = enabled && !status?.enabled && !!status?.clash_enabled
+    if (takeover && !(await confirm({title:'Switch from Clash to WireGuard?',body:'Clash will be turned off and its settings kept. Tunnel devices briefly lose internet while rules are replaced.',confirmLabel:'Switch to WireGuard'}))) return
+    if (busyRef.current) return
     generation.current += 1
     busyRef.current = true; setBusy(true); setError('')
     try {
-      const s = await api.wireguardSet(disableOnly && status ? { enabled: false, mode: status.mode, macs: status.macs, expected_revision: status.revision } : { enabled, mode, macs, expected_revision: editRevision.current })
+      const s = await api.wireguardSet(disableOnly && status ? { enabled: false, mode: status.mode, macs: status.macs, expected_revision: status.revision } : { enabled, mode, macs, expected_revision: editRevision.current, ...(takeover ? { takeover } : {}) })
       if (!mounted.current) return
       setStatus(s); setMode(s.mode); setMacs(s.macs); editRevision.current = s.revision; editing.current = false
       toast(enabled ? 'WireGuard policy applied. Waiting for peer handshake.' : 'Saved. All devices use the normal network.')
@@ -119,6 +122,7 @@ export default function WireGuardTab() {
             <div className="flex flex-wrap gap-2">
               <Chip tone={status.kernel_supported ? 'ok' : 'warn'}>Kernel {status.kernel_supported ? 'ready' : 'unavailable'}</Chip>
               <Chip tone={status.tools_installed ? 'ok' : 'warn'}>Tools {status.tools_installed ? 'ready' : 'missing'}</Chip>
+              {status.clash_enabled && <Chip tone="accent">Clash is on</Chip>}
               {dirty && <Chip tone="warn">Unsaved changes</Chip>}
             </div>
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
