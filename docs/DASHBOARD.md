@@ -59,7 +59,8 @@ web-app/src/
 
 The panel is bilingual: Simplified Chinese by default, English from the **EN / 中文**
 switch in the sidebar, the mobile header or the sign-in page. The choice is kept in
-`localStorage` (`u60.lang`).
+`localStorage` (`u60.lang`). After sign-in and on every switch the panel also sends it
+to `PUT /api/screen/language`, so the device touchscreen (DevUI) shows the same language.
 
 - English source text is the key: `t('Save device choices')`, `t('{n} devices', { n })`.
   Chinese goes in `src/i18n/zh/<area>.ts`.

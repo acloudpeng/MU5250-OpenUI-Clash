@@ -562,6 +562,8 @@ export interface DevUISettings {
   idle_seconds: number
   home_page: 'menu' | DevUIPageId
   menu_items: DevUIPageId[]
+  /** Screen language; set by the panel's language switch through screenLanguageSet. */
+  language?: 'zh' | 'en'
 }
 export interface ScreenStatus {
   settings_revision: number

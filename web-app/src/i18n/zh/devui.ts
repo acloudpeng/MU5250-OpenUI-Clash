@@ -11,6 +11,8 @@ export default {
   'Device routing': '设备分流',
   'Choose which devices use WireGuard': '选择哪些设备使用 WireGuard',
   'Stock UI': '原厂界面',
+  'Screen language': '屏幕语言',
+  'Follows the language switch of this panel.': '跟随本管理面板的语言切换。',
   'Opening': '正在打开',
   'DevUI active': 'DevUI 运行中',
   'Restoring': '正在恢复',

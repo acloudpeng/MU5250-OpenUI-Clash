@@ -126,11 +126,16 @@ python3 scripts/verify-devui-settings.py --gateway 192.168.0.1 --port 2222 \
   restore. A single startup reservation and supervisor lock prevent duplicate owners.
 - Authenticated `GET /api/screen/settings` / `PUT /api/screen/settings`: typed,
   versioned preferences. Saves require `expected_revision`; conflicts return 409.
+- Authenticated `PUT /api/screen/language` (`{"language":"zh"|"en"}`): the web panel
+  sends its language after sign-in and on every switch, so the screen follows it.
+  A change bumps the settings revision; the same language is a no-op. Settings saved
+  before this field existed load as Chinese.
   Settings are atomically stored in `/data/local/tmp/openui-devui/settings.json`
   with mode 0600 in a 0700 directory.
 - Private `/tmp/openui-screen/control.sock`: mode 0600, parent directory 0700.
   The screen receives redacted `S`, `P`, `D`, `O`, `C` and `J` records. `C` contains
-  the DevUI revision, timeout, brightness, startup page and visible-page bitmask.
+  the DevUI revision, timeout, brightness, startup page, visible-page bitmask and
+  language (`zh`/`en`; a record without it means Chinese).
   No private keys, PSKs, endpoints or login credentials appear in this projection.
 - WireGuard actions are narrow local `toggle`, `devices` and `profile` messages,
   each carrying a WireGuard revision. Jobs execute in the agent and continue

@@ -63,7 +63,7 @@ struct snapshot {
   int has, enabled, connected, error, all, busy, result, n;
   int np, battery, temperature;
   unsigned long long settings_rev;
-  int idle_seconds, brightness, home_page, menu_mask;
+  int idle_seconds, brightness, home_page, menu_mask, zh;
   unsigned long long uptime;
   double memory, cpu;
   struct profile profiles[5];
@@ -79,13 +79,16 @@ static int page = MENU, offset, dialog, dirty, quitting, need_draw = 1,
                                                   return_after_save;
 static unsigned long long settings_revision;
 static int settings_idle = 120, settings_brightness = 128, settings_home = MENU, settings_menu = 27;
+/* Screen language follows the web panel (C record); Chinese until the first record. */
+static int settings_zh = 1;
+#define L(en, zh) (settings_zh ? (zh) : (en))
 static int visible_page(int p) { return p == MENU || (settings_menu & (1 << p)); }
 static int update_settings(const struct snapshot *s) {
   if (!s->settings_rev || s->settings_rev == settings_revision) return 0;
   int result = settings_revision ? 1 : 2;
   settings_revision = s->settings_rev;
   settings_idle = s->idle_seconds; settings_brightness = s->brightness;
-  settings_home = s->home_page; settings_menu = s->menu_mask;
+  settings_home = s->home_page; settings_menu = s->menu_mask; settings_zh = s->zh;
   return result;
 }
 static unsigned long long pending, pending_revision, chosen_profile, chosen_revision;
@@ -137,13 +140,15 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
                &s.tx, &s.all, &s.stamp) == 10)
       valid = 1;
     else if (line[0] == 'C') {
-      unsigned long long rev; int idle, level, home, mask;
-      if (sscanf(line, "C %llu %d %d %d %d", &rev, &idle, &level, &home, &mask) == 5 &&
+      unsigned long long rev; int idle, level, home, mask, fields; char lang[4] = "zh";
+      /* The language field is optional: an older agent sends five. */
+      if ((fields = sscanf(line, "C %llu %d %d %d %d %3s", &rev, &idle, &level, &home, &mask, lang)) >= 5 &&
+          (fields == 5 || !strcmp(lang, "zh") || !strcmp(lang, "en")) &&
           idle >= 30 && idle <= 600 && level >= 20 && level <= 255 &&
           home >= 0 && home <= 4 && mask > 0 && !(mask & ~27) &&
           (home == MENU || (mask & (1 << home)))) {
         s.settings_rev = rev; s.idle_seconds = idle; s.brightness = level;
-        s.home_page = home; s.menu_mask = mask;
+        s.home_page = home; s.menu_mask = mask; s.zh = strcmp(lang, "en") != 0;
       }
     }
     else if (line[0] == 'J')
@@ -251,7 +256,7 @@ static void submit(int toggle, int value) {
     dialog = 0;
     notice[0] = 0;
   } else {
-    strcpy(notice, "Request failed. Try again.");
+    snprintf(notice, sizeof(notice), "%s", L("Request failed. Try again.", "请求失败，请重试。"));
     dialog = 3;
     pending = 0;
   }
@@ -668,8 +673,9 @@ static int panel(int heartbeat, int idle_seconds) {
           if (pending && data.done >= pending) {
             if (data.result) {
               pending = 0;
-              strcpy(notice, data.result == 1 ? "Settings changed. Refresh."
-                                              : "Apply failed. Check OpenUI.");
+              snprintf(notice, sizeof(notice), "%s", data.result == 1
+                  ? L("Settings changed. Refresh.", "设置已被更改，请刷新。")
+                  : L("Apply failed. Check OpenUI.", "应用失败，请在 OpenUI 中检查。"));
               dialog = 3;
             } else if (data.rev > pending_revision) {
               pending = 0;
@@ -1004,7 +1010,7 @@ int main(int argc, char **argv) {
   press_id(&b,"p4");assert(chosen_profile==5&&chosen_revision==7&&dialog==4);
   capture(&b,argv[1],"profile-confirm");data.rev=8;
   press_id(&b,"confirm");assert(!strcmp(test_request,"profile 7 5\n"));
-  pending=0;dialog=3;strcpy(notice,"Settings changed. Refresh.");capture(&b,argv[1],"conflict");
+  pending=0;dialog=3;snprintf(notice,sizeof(notice),"%s",L("Settings changed. Refresh.","设置已被更改，请刷新。"));capture(&b,argv[1],"conflict");
   press_id(&b,"refresh");assert(page==WG&&!dirty&&!dialog);
   data.has=0;data.enabled=0;data.connected=0;capture(&b,argv[1],"unconfigured");
   test_request[0]=0;press_id(&b,"toggle");assert(!test_request[0]);
@@ -1020,9 +1026,22 @@ int main(int argc, char **argv) {
   page=MENU;capture(&b,argv[1],"menu-custom");
   assert(strstr(html,"act:overview") && !strstr(html,"act:wireguard"));
   press_id(&b,"overview");assert(page==OVERVIEW);press_id(&b,"wireguard");assert(page==OVERVIEW);
-  data.battery=12;capture(&b,argv[1],"battery-low");assert(strstr(html,"12%") && strstr(html,"#ff9999"));
+  data.battery=12;capture(&b,argv[1],"battery-low");assert(strstr(html,"12%") && strstr(html,"#ff8a8a"));
   data.battery=-1;capture(&b,argv[1],"battery-unknown");assert(strstr(html,"--%"));
   char bad_settings[]="C 4 0 0 4 99\n.\n";assert(!parse_snapshot(bad_settings,&prefs));
+  /* The language field of the C record switches every page; Chinese is the default. */
+  assert(strstr(html,"lang=\"zh\"")&&strstr(html,"电池"));
+  char bad_language[]="C 5 60 200 2 27 fr\n.\n";assert(!parse_snapshot(bad_language,&prefs));
+  char english[]="C 5 60 200 2 27 en\n.\n";
+  assert(parse_snapshot(english,&prefs)&&update_settings(&prefs)==1&&!settings_zh&&settings_menu==27);
+  data.battery=83;data.stamp=(unsigned long long)time(NULL);data.handshake=data.stamp-15;
+  page=MENU;capture(&b,argv[1],"en-menu");assert(strstr(html,"lang=\"en\"")&&strstr(html,"Stock UI")&&!strstr(html,"原厂"));
+  page=OVERVIEW;capture(&b,argv[1],"en-overview");page=WG;capture(&b,argv[1],"en-home");
+  page=PROFILES;capture(&b,argv[1],"en-profiles");enter_devices();capture(&b,argv[1],"en-devices");
+  dialog=1;capture(&b,argv[1],"en-confirm");dialog=0;
+  char legacy[]="C 6 60 200 2 27\n.\n"; /* An agent without the field keeps Chinese. */
+  assert(parse_snapshot(legacy,&prefs)&&update_settings(&prefs)==1&&settings_zh);
+  page=MENU;capture(&b,argv[1],"menu-zh");assert(strstr(html,"原厂界面"));
   page=MENU;press_id(&b,"stock");assert(quitting);
   free(b.map);puts("PASS DevUI HTML hit testing, menu navigation, profile version capture, device pagination/drafts, escaping, confirmations, disabled states and rotation");
   return 0;

@@ -6,8 +6,11 @@ The menu uses the real litehtml/FreeType RGB565 renderer from
 `vendor/html_view.cpp`; its MIT notice is preserved. It embeds an OFL Unifont
 instead of loading proprietary device fonts, and supports a macOS preview.
 
-`ui/menu.html` and `ui/style.css` define the menu header and appearance.
-`render.h` generates visible feature rows from saved OpenUI preferences, with a
+`ui/style.css` defines the appearance; sizes stay at 16/32 px (24 px for titles)
+because Unifont is a 16 px bitmap design. `render.h` writes every string as
+`L(en, zh)`: the language comes from the settings record and follows the OpenUI
+web panel's language switch (Chinese by default). `render.h` generates visible
+feature rows from saved OpenUI preferences, with a
 battery badge and configurable idle return. `render.h` builds
 the dynamic pages using escaped agent data; `actions.h` accepts only fixed
 navigation, toggle, device-selection and profile-activation actions. HTML and

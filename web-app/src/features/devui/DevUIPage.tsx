@@ -12,6 +12,8 @@ const pages: { id: DevUIPageId; title: string; description: string }[] = [
   { id: 'profiles', title: N_('Saved profiles'), description: N_('Switch between your saved VPN profiles') },
   { id: 'devices', title: N_('Device routing'), description: N_('Choose which devices use WireGuard') },
 ]
+// i18n-ignore: each language is named in its own language
+const LANGUAGES = { zh: '中文', en: 'English' }
 const labels: Record<string, string> = { idle: N_('Stock UI'), starting: N_('Opening'), active: N_('DevUI active'), restoring: N_('Restoring'), error: N_('Recovery needs attention') }
 export default function DevUIPage() {
   const [status, setStatus] = useState<ScreenStatus | null>(null)
@@ -99,6 +101,7 @@ export default function DevUIPage() {
         <label className="block text-[13px] text-ink">{t('Brightness')} <span className="float-right font-mono">{Math.round(draft.brightness / 255 * 100)}%</span><input aria-label={t('DevUI brightness')} className="mt-3 w-full accent-accent" type="range" min="20" max="255" value={draft.brightness} disabled={busy} onChange={e => edit({ brightness: Number(e.target.value) })} /><span className="mt-1 block text-xs text-ink3">{t('Applied live; changing brightness does not wake a sleeping screen.')}</span></label>
         <label className="block text-[13px] text-ink">{t('Return to stock UI after')}<Select aria-label={t('DevUI idle timeout')} className="mt-2 w-full" value={draft.idle_seconds} disabled={busy} onChange={e => edit({ idle_seconds: Number(e.target.value) })}>{Array.from(new Set([30, 60, 120, 300, 600, draft.idle_seconds])).sort((a, b) => a - b).map(n => <option key={n} value={n}>{n < 60 ? t('{n} seconds', { n }) : n === 60 ? t('{n} minute', { n: 1 }) : t('{n} minutes', { n: n / 60 })}</option>)}</Select><span className="mt-2 block text-xs text-ink3">{t('Unsaved device routing choices are discarded on idle return.')}</span></label>
         <label className="block text-[13px] text-ink">{t('Startup page')}<Select aria-label={t('DevUI startup page')} className="mt-2 w-full" value={draft.home_page} disabled={busy} onChange={e => edit({ home_page: e.target.value as DevUISettings['home_page'] })}><option value="menu">{t('Main menu')}</option>{pages.filter(p => draft.menu_items.includes(p.id)).map(p => <option key={p.id} value={p.id}>{t(p.title)}</option>)}</Select></label>
+        <div className="block text-[13px] text-ink">{t('Screen language')}<span className="float-right">{LANGUAGES[draft.language ?? 'zh']}</span><span className="mt-2 block text-xs text-ink3">{t('Follows the language switch of this panel.')}</span></div>
       </div> : <p className="text-sm text-ink2">{t('Loading display preferences…')}</p>}
     </Card>
     <Card title={t('Menu features')}>

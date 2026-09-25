@@ -561,7 +561,7 @@ STATE["clash_proxies"] = {
     },
 }
 
-STATE["screen_settings"] = {"revision": 1, "shortcut_enabled": False, "brightness": 128, "idle_seconds": 120, "home_page": "menu", "menu_items": ["overview", "wireguard", "profiles", "devices"]}
+STATE["screen_settings"] = {"revision": 1, "shortcut_enabled": False, "brightness": 128, "idle_seconds": 120, "home_page": "menu", "menu_items": ["overview", "wireguard", "profiles", "devices"], "language": "zh"}
 STATE["screen"] = {"available": True, "verified": True, "running": False, "state": "idle", "settings_revision": 1, "shortcut": {"available": True, "message": "Shortcut disabled"}}
 
 ROUTES_GET = {
@@ -706,13 +706,21 @@ class Handler(BaseHTTPRequestHandler):
     def do_PUT(self):
         path = self.path.split("?")[0]
         body = self._body()
+        if path == "/api/screen/language":
+            old = STATE["screen_settings"]
+            if body.get("language") not in ("zh", "en"):
+                return self._send({"ok": False, "error": "Invalid language"}, 400)
+            if body["language"] != old["language"]:
+                old.update(language=body["language"], revision=old["revision"] + 1)
+                STATE["screen"]["settings_revision"] = old["revision"]
+            return self._send({"ok": True, "data": old})
         if path == "/api/screen/settings":
             old = STATE["screen_settings"]
             if body.get("expected_revision") != old["revision"]:
                 return self._send({"ok": False, "error": "DevUI settings changed. Reload before saving."}, 409)
             if not 20 <= body.get("brightness", 0) <= 255 or not 30 <= body.get("idle_seconds", 0) <= 600 or not body.get("menu_items"):
                 return self._send({"ok": False, "error": "Invalid DevUI settings"}, 400)
-            STATE["screen_settings"] = {k: body[k] for k in old if k != "revision"}
+            STATE["screen_settings"] = {k: body.get(k, old[k]) for k in old if k != "revision"}
             STATE["screen_settings"]["revision"] = old["revision"] + 1
             STATE["screen"]["settings_revision"] = old["revision"] + 1
             STATE["screen"]["shortcut"]["message"] = "Ready: four short presses within 2.5 seconds" if body["shortcut_enabled"] else "Shortcut disabled"

@@ -317,6 +317,7 @@ pub fn route(
         (&Method::Get, "/api/system/top") => handlers::system_top(state),
         (&Method::Get, "/api/screen/settings") => crate::screen_settings::get(),
         (&Method::Put, "/api/screen/settings") => crate::screen_settings::update(body),
+        (&Method::Put, "/api/screen/language") => crate::screen_settings::set_language(body),
         (&Method::Get, "/api/screen") => screen::get(),
         (&Method::Post, "/api/screen") => screen::open(),
         (&Method::Delete, "/api/screen") => screen::close(),

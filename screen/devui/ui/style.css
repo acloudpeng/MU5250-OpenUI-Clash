@@ -1,20 +1,35 @@
 * { box-sizing: border-box; }
-html, body { margin:0; padding:0; width:320px; height:480px; background:#0e1420; color:#f2f5fa; font-family: sans-serif; font-size:18px; }
-.box { position:absolute; overflow:hidden; }
-a { text-decoration:none; color:#f2f5fa; }
-.btn { display:block; background:#253248; border:1px solid #35445a; border-radius:12px; text-align:center; line-height:48px; height:50px; white-space:nowrap; overflow:hidden; }
-.primary { background:#2464dc; border-color:#3776ec; }
-.disabled { background:#1c2533; color:#738298; border-color:#273344; }
-.card { background:#192434; border:1px solid #2c3b4d; border-radius:12px; padding:0; }
-.title { font-size:22px; font-weight:bold; }
-.small { font-size:14px; color:#a7b6ca; }
-.value { font-size:22px; }
-.good { color:#64e2aa; }
-.warn { color:#ffc77b; }
-.bad { color:#ff9999; }
-.row { display:block; padding:0; background:#1e2a3c; border:1px solid #35445a; border-radius:10px; height:56px; }
-.name { margin:5px 10px 0; height:23px; white-space:nowrap; overflow:hidden; }
-.sub { margin:2px 10px 0; font-size:14px; color:#a7b6ca; white-space:nowrap; overflow:hidden; }
-.footer { color:#a7b6ca; font-size:13px; }
-
-.battery-value { font-size:36px; font-weight:bold; color:#f2f5fa; }
+/* Unifont is a 16 px bitmap design: 16 and 32 px render crisp, 24 px is used only for titles. */
+html, body { margin:0; padding:0; width:320px; height:480px; background:#0b111b; color:#eef2f8; font-family: sans-serif; font-size:16px; line-height:20px; }
+.box { position:absolute; overflow:hidden; white-space:nowrap; }
+.wrap { white-space:normal; }
+a { text-decoration:none; color:#eef2f8; }
+.btn { display:block; background:#1d2940; border:1px solid #2f3f5c; border-radius:12px; text-align:center; font-weight:bold; }
+.primary { background:#2f6fed; border-color:#4a84f5; }
+.danger { background:#3a1d24; border-color:#7a3340; color:#ffb3b3; }
+.disabled { background:#141c2a; color:#5d6b82; border-color:#1f2a3b; }
+.card { background:#131c2b; border:1px solid #223049; border-radius:14px; }
+.title { font-size:24px; line-height:32px; font-weight:bold; }
+.head { font-weight:bold; }
+.big { font-size:32px; line-height:36px; font-weight:bold; }
+.right { text-align:right; }
+.center { text-align:center; }
+.row { display:block; background:#172235; border:1px solid #273652; border-radius:12px; }
+.row.current { background:#12291f; border-color:#2f7a55; }
+.row.off { background:#121a27; border-color:#1d2738; color:#5d6b82; }
+.name { position:absolute; left:14px; top:9px; right:34px; font-weight:bold; overflow:hidden; white-space:nowrap; }
+.sub { position:absolute; left:14px; top:31px; right:34px; color:#8e9bb3; overflow:hidden; white-space:nowrap; }
+.chev { position:absolute; right:12px; top:0; color:#5d6b82; font-size:24px; }
+.bar { background:#223049; border-radius:3px; }
+.fill { border-radius:3px; }
+.check { border:2px solid #4a5a78; border-radius:6px; text-align:center; font-weight:bold; line-height:18px; color:#0b111b; }
+.check.on { background:#4ade9a; border-color:#4ade9a; }
+.badge { border-radius:10px; text-align:center; font-weight:bold; background:#2f7a55; color:#eafff3; }
+.line { background:#1c273a; }
+.shade { background:#05080d; }
+/* State colours last so they win over .sub and .row. */
+.muted { color:#8e9bb3; }
+.good { color:#4ade9a; }
+.warn { color:#fbbf5a; }
+.bad { color:#ff8a8a; }
+.accent { color:#7fa9ff; }

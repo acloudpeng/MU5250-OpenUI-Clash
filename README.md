@@ -12,7 +12,8 @@
 **Author: ZweiChen**
 
 This project is a full fork of [MU5250-OpenUI](https://github.com/dklasens/MU5250-OpenUI)
-with an integrated WireGuard gateway and an English DevUI touchscreen menu.
+with an integrated WireGuard gateway and a Chinese / English DevUI touchscreen menu
+that follows the web panel's language.
 It retains OpenUI's Home, Signal, Network, Modem and System pages, existing login,
 Rust agent and deployment workflow. WireGuard has its own **left sidebar entry, between Network and Modem**.
 
@@ -48,7 +49,8 @@ establish compatibility with other models, hardware revisions or firmware.
 The shortcut is off by default on new installations. Factory long-press handling
 remains available. Stock UI and Back are always accessible; exiting DevUI leaves
 WireGuard and saved routing intact. The Overview page uses a battery icon, a large
-percentage and a low-battery color. See [DevUI details](docs/SCREEN.md).
+percentage and a low-battery color. The screen uses the language chosen in the web
+panel (Chinese by default). See [DevUI details](docs/SCREEN.md).
 
 ## Screenshots
 

@@ -73,7 +73,7 @@ static bool pt_in_round(int x, int y, int fx, int fy, int fw, int fh,
 static FT_Library g_ft;
 static FT_Face    g_face;
 
-struct ft_font { int size; int ascent, descent, height; };
+struct ft_font { int size; int ascent, descent, height; bool bold; };
 
 /* UI base dir (for <link> CSS / images) and last-clicked anchor href. */
 static std::string g_ui_dir = "/data/plugins/u60pro-devui/ui";
@@ -255,6 +255,7 @@ public:
     uint_ptr create_font(const font_description &d, const document *, font_metrics *fm) override {
         auto *f = new ft_font();
         f->size = (int)d.size;
+        f->bold = d.weight >= 600; /* Unifont has one weight: embolden by overstriking. */
         FT_Set_Pixel_Sizes(g_face, 0, f->size);
         f->ascent  = g_face->size->metrics.ascender >> 6;
         f->descent = -(g_face->size->metrics.descender >> 6);
@@ -293,7 +294,8 @@ public:
             if (FT_Load_Char(g_face, cp, FT_LOAD_RENDER)) continue;
             FT_GlyphSlot gl = g_face->glyph;
             FT_Bitmap &bm = gl->bitmap;
-            int ox = pen + gl->bitmap_left, oy = base - gl->bitmap_top;
+            for (int pass = 0; pass < (f->bold ? 2 : 1); pass++) {
+            int ox = pen + gl->bitmap_left + pass, oy = base - gl->bitmap_top;
             for (int r = 0; r < (int)bm.rows; r++) {
                 int yy = oy + r;
                 if (yy < (int)cl.top() || yy >= (int)cl.bottom()) continue;
@@ -303,6 +305,7 @@ public:
                     int a = bm.buffer[r * bm.pitch + cx];
                     if (a) put_px(xx, yy, color.red, color.green, color.blue, a * color.alpha / 255);
                 }
+            }
             }
             pen += gl->advance.x >> 6;
         }

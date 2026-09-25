@@ -6,6 +6,7 @@ import Shell, { type Group } from './app/Shell'
 import { useTheme } from './app/theme'
 import { ConfirmHost, Toaster } from './ui/feedback'
 import { applyLang, getLang, type Lang } from './i18n'
+import { api } from './data/api'
 
 const HomePage = lazy(() => import('./features/home/HomePage'))
 const SignalGroup = lazy(() => import('./features/signal/SignalGroup'))
@@ -26,6 +27,12 @@ export default function App() {
     applyLang(next)
     setLang(next)
   }
+
+  // The device screen (DevUI) follows the panel language: sent after sign-in and on
+  // every switch. An agent without the endpoint simply keeps its language.
+  useEffect(() => {
+    if (authed) api.screenLanguageSet(lang).catch(() => {})
+  }, [authed, lang])
 
   useEffect(() => {
     const onAuthExpired = () => setAuthed(false)
