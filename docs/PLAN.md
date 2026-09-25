@@ -142,3 +142,17 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
 - 验证：`unshare -n`（无网络）下内核通过软链接加载 GEOIP/GEOSITE 成功，缺文件时尝试访问 GitHub 并失败——已加入 `mihomo.yml` CI。
   新增部署/快照单元测试（伪造 transport 检查推送路径、命令顺序、篡改/越界文件名被拒）。
 - 文档：`docs/CLASH.md`。
+
+### 2026-09-25 — 代码审查修复
+独立审查 P2–P5 发现 10 个问题，全部确认并修复：
+- 首次打开 Clash 失败：保护链（HOLD）建好后才 `claim()`，被自己的 `OUCL_` 链拦住。改为先 claim 再上保护。
+- 修改当前订阅 URL 失败时，回滚用的是新 YAML，局域网一直被挡。改为先还原订阅文件和元数据再回滚策略。
+- `--harden` 会把 mihomo 和 geo 文件当成加固程序推进 `/data/bin`。现在只传加固程序。
+- 恢复（resume）失败会让保护链永远留着：失败时也释放保护、清理半成品策略，看门狗发现 Clash/WG 都关着但保护仍在时自动释放。
+- WG 看门狗的"Clash 也开着"冲突错误解决后不清除。现在会清除。
+- 订阅刷新失败时 profile 和元数据不一致。改为连同 profile、元数据一起还原。
+- 添加订阅先下载再检查 revision/上限/重名。改为先做便宜的检查（`precheck`）。
+- 状态接口每 5 秒轮询都会调用 iptables。健康结果缓存 10 秒，看门狗仍实时检查。
+- `cleanup_policy` 用 `strip_suffix().unwrap()` 截脚本，改为参数控制是否删网卡。
+- WG 持久化逻辑重复，改为复用 `persist()`。
+新增测试：`precheck`、策略清理不删 TUN、`--harden` 只推加固程序。

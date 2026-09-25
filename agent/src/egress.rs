@@ -68,18 +68,23 @@ impl Egress {
     /// Removes owned firewall hooks, the rule and the table but leaves the device, for
     /// backends whose device belongs to a running process (the Clash TUN).
     pub fn cleanup_policy(&self) -> String {
-        let cleanup = self.cleanup();
-        let link = format!("ip link del {} 2>/dev/null || true\n", self.iface);
-        cleanup.strip_suffix(&link).unwrap().into()
+        self.cleanup_script(false)
     }
     // Literal script is never combined with unvalidated configuration or arbitrary shell hooks.
     pub fn cleanup(&self) -> String {
-        let (specs, mark, table, iface) = (
+        self.cleanup_script(true)
+    }
+    fn cleanup_script(&self, with_link: bool) -> String {
+        let (specs, mark, table) = (
             self.specs(true, &[0, 1, 2, 3, 4, 5, 6, 7]),
             self.mark,
             self.table,
-            self.iface,
         );
+        let link = if with_link {
+            format!("ip link del {} 2>/dev/null || true\n", self.iface)
+        } else {
+            String::new()
+        };
         format!(
             r#"
 for spec in {specs}; do
@@ -90,8 +95,7 @@ for spec in {specs}; do
 done
 while ip -4 rule del priority {table} fwmark {mark}/{mark} table {table} 2>/dev/null; do :; done
 ip -4 route flush table {table} 2>/dev/null || true
-ip link del {iface} 2>/dev/null || true
-"#
+{link}"#
         )
     }
     fn selection(
@@ -243,6 +247,22 @@ done
             ));
         }
         Ok(())
+    }
+    /// Whether the transition guard is in place. Only meaningful under the backend's lock,
+    /// where no transaction can be running: a guard seen then was left by a failed one.
+    pub fn held(&self) -> bool {
+        run(
+            "iptables",
+            &[
+                "-w",
+                "2",
+                "-C",
+                "FORWARD",
+                "-j",
+                &format!("{}_HOLD", self.prefix),
+            ],
+        )
+        .is_ok()
     }
     pub fn owned(&self) -> bool {
         Path::new(&format!("{}/owned", self.dir)).exists()

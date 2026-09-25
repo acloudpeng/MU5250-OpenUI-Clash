@@ -344,7 +344,9 @@ def deploy(args):
         expanded = validate_dashboard(args.dashboard)
         prepared['dashboard'] = read_limited(args.dashboard)
         if len(prepared['dashboard']) > 64 * 1024 * 1024: raise ValueError('Dashboard archive exceeds 64 MiB')
-    programs = prepare_hardening(args.bundle) if args.harden else {}
+    hardening = prepare_hardening(args.bundle) if args.harden else {}
+    # harden() installs exactly the hardening programs; other components stage and self-check.
+    programs = dict(hardening)
     if getattr(args, 'wireguard_tools', None):
         wg = read_limited(args.wireguard_tools)
         if len(wg) < 64 or wg[:6] != b'\x7fELF\x02\x01' or int.from_bytes(wg[18:20], 'little') != 183:
@@ -396,7 +398,7 @@ def deploy(args):
     recovery = action.format('restore')
     print(f'Recovery command for this device: {recovery}')
     try:
-        if args.harden: harden(transport, programs, identity)
+        if args.harden: harden(transport, hardening, identity)
         if 'wg' in programs:
             transport.shell('mkdir -p /data/bin')
             transport.push(programs['wg'], '/data/bin/wg.staged', True)

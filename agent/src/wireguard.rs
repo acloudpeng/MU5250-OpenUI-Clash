@@ -613,20 +613,21 @@ pub fn update(body: &[u8]) -> (u16, Value) {
             }
         }
         let committed = std::cell::Cell::new(false);
+        let resume_error = std::cell::RefCell::new(None);
         if let Err(e) = commit_change(
             &old,
             &next,
             apply,
             |s| {
-                storage::atomic_write(Path::new(CONFIG), &serde_json::to_vec(s).unwrap())
-                    .map_err(|_| "Cannot persist configuration".to_string())?;
+                persist(s)?;
                 committed.set(true);
                 Ok(())
             },
             || {
                 if !committed.get() {
                     if let Some(s) = suspended.borrow_mut().take() {
-                        clash::resume(s)?;
+                        // Both are saved as off if Clash cannot come back; the guard must still go.
+                        *resume_error.borrow_mut() = clash::resume(s).err();
                     }
                 }
                 if changing_network {
@@ -636,6 +637,10 @@ pub fn update(body: &[u8]) -> (u16, Value) {
                 }
             },
         ) {
+            let e = match resume_error.take() {
+                Some(r) => format!("{e}; Clash could not be restored: {r}"),
+                None => e,
+            };
             *ERROR.lock().unwrap() = Some(e.clone());
             return Err(e);
         }
@@ -685,15 +690,24 @@ pub(crate) fn suspend() -> Result<Option<Suspended>, String> {
 }
 pub(crate) fn resume(saved: Suspended) -> Result<(), String> {
     let mut s = saved.0;
-    s.revision = load()?.revision.saturating_add(1);
-    EGRESS.claim()?;
-    apply(&s)?;
-    persist(&s)
+    let current = load()?;
+    s.revision = current.revision.saturating_add(1);
+    if let Err(e) = EGRESS
+        .claim()
+        .and_then(|_| apply(&s))
+        .and_then(|_| persist(&s))
+    {
+        // Leave nothing half-applied: the saved state stays off.
+        let _ = apply(&current);
+        return Err(e);
+    }
+    Ok(())
 }
 fn persist(s: &Settings) -> Result<(), String> {
     storage::atomic_write(Path::new(CONFIG), &serde_json::to_vec(s).unwrap())
         .map_err(|_| "Cannot persist WireGuard configuration".into())
 }
+const CONFLICT: &str = "Clash is also on; WireGuard stays as is until one is turned off";
 pub fn start() {
     std::thread::spawn(|| {
         let mut first = true;
@@ -701,11 +715,23 @@ pub fn start() {
             {
                 let _guard = LOCK.lock().unwrap();
                 if let Ok(s) = load() {
-                    if s.enabled && clash::stored_enabled() {
-                        *ERROR.lock().unwrap() = Some(
-                            "Clash is also on; WireGuard stays as is until one is turned off"
-                                .into(),
-                        );
+                    let conflict = s.enabled && clash::stored_enabled();
+                    {
+                        let mut error = ERROR.lock().unwrap();
+                        if conflict {
+                            *error = Some(CONFLICT.into());
+                        } else if error.as_deref() == Some(CONFLICT) {
+                            *error = None;
+                        }
+                    }
+                    if conflict {
+                        // Clash's supervisor stops its core; WireGuard stays as is.
+                    } else if !s.enabled && !first && EGRESS.held() {
+                        // A guard seen under the lock was left by a failed switch; with
+                        // WireGuard saved as off, it would otherwise block the LAN for good.
+                        if let Err(e) = apply(&s).and_then(|_| EGRESS.script(&EGRESS.release())) {
+                            *ERROR.lock().unwrap() = Some(e);
+                        }
                     } else if s.enabled
                         && (first
                             || !Path::new(&format!("/sys/class/net/{IFACE}")).exists()

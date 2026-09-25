@@ -269,6 +269,18 @@ class TerminalDeployment(unittest.TestCase):
         self.assertTrue(commands[install].startswith('set -e;'))
         self.assertIn('/data/share/mihomo', next(c for c in commands if 'df -Pk' in c))
         restart = next(i for i, c in enumerate(commands) if 'mihomo.pid' in c)
+        hardened = []
+        with patch.object(self.module, 'Transport', return_value=Fake()), \
+             patch.object(self.module, 'prepare_hardening', return_value={'dropbear': b'ssh'}), \
+             patch.object(self.module, 'harden', side_effect=lambda _t, programs, _i: hardened.append(dict(programs))):
+            args.harden = True
+            with tempfile.TemporaryDirectory() as temp:
+                core = Path(temp) / 'mihomo'; core.write_bytes(bytes(header) + version.encode())
+                geo = Path(temp) / 'geo'; geo.mkdir(); (geo / 'geoip.metadb').write_bytes(b'geoip')
+                (geo / 'SHA256SUMS').write_text(f"{hashlib.sha256(b'geoip').hexdigest()}  geoip.metadb\n")
+                args.mihomo, args.mihomo_geodata = str(core), str(geo)
+                self.module.deploy(args)
+        self.assertEqual(hardened, [{'dropbear': b'ssh'}], 'hardening must not install the Clash core or geo data')
         complete = next(i for i, c in enumerate(commands) if ' complete ' in c)
         self.assertLess(install, restart)
         self.assertLess(restart, complete)

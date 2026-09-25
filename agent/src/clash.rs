@@ -56,6 +56,8 @@ static LOCK: Mutex<()> = Mutex::new(());
 static ERROR: Mutex<Option<String>> = Mutex::new(None);
 static CORE: Mutex<Option<Core>> = Mutex::new(None);
 static LOGS: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
+/// Last policy check, so status polls do not fork iptables every few seconds.
+static HEALTH: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
 
 struct Core {
     child: Child,
@@ -389,6 +391,36 @@ fn edited(
     next.macs.dedup();
     validate(&next)?;
     Ok((next, written))
+}
+
+/// Rejections that do not need the download, so a doomed request does not pull a
+/// profile over the cellular link first. `edited` repeats them under the lock.
+fn precheck(current: &Settings, u: &Update) -> Result<(), String> {
+    if u.expected_revision != current.revision {
+        return Err("Configuration changed; refresh before saving".into());
+    }
+    if matches!(u.subscription, Some(SubscriptionAction::Add { .. }))
+        && current.subscriptions.len() >= MAX_SUBSCRIPTIONS
+    {
+        return Err("A maximum of 5 subscriptions can be saved; delete one first".into());
+    }
+    let named = match &u.subscription {
+        Some(SubscriptionAction::Add { name, .. }) => name.as_deref().map(|n| (0, n)),
+        Some(SubscriptionAction::Edit { id, name, .. }) => name.as_deref().map(|n| (*id, n)),
+        _ => None,
+    };
+    if let Some((id, name)) = named {
+        let name = name.trim().to_lowercase();
+        if !name.is_empty()
+            && current
+                .subscriptions
+                .iter()
+                .any(|p| p.id != id && p.name.to_lowercase() == name)
+        {
+            return Err("A subscription with this name already exists".into());
+        }
+    }
+    Ok(())
 }
 
 fn validate(s: &Settings) -> Result<(), String> {
@@ -730,6 +762,20 @@ fn prepare(s: &Settings) -> Result<(), String> {
     fs::write(format!("/proc/sys/net/ipv4/conf/{IFACE}/rp_filter"), "2\n")
         .map_err(|_| "Cannot set TUN reverse-path check".into())
 }
+fn egress_script(text: &str) -> Result<(), String> {
+    *HEALTH.lock().unwrap() = None;
+    EGRESS.script(text)
+}
+fn policy_healthy(max_age: Duration) -> bool {
+    if let Some((at, ok)) = *HEALTH.lock().unwrap() {
+        if at.elapsed() < max_age {
+            return ok;
+        }
+    }
+    let ok = EGRESS.healthy();
+    *HEALTH.lock().unwrap() = Some((Instant::now(), ok));
+    ok
+}
 fn policy(s: &Settings) -> String {
     EGRESS.cleanup_policy() + &EGRESS.policy(&s.mode, &s.macs, DNS)
 }
@@ -737,12 +783,12 @@ fn apply(s: &Settings) -> Result<(), String> {
     if !s.enabled {
         stop_core();
         if EGRESS.owned() {
-            EGRESS.script(&EGRESS.cleanup())?;
+            egress_script(&EGRESS.cleanup())?;
         }
         return Ok(());
     }
     prepare(s)?;
-    EGRESS.script(&policy(s))
+    egress_script(&policy(s))
 }
 fn active_changed(old: &Settings, next: &Settings) -> bool {
     old.enabled != next.enabled
@@ -781,9 +827,14 @@ pub(crate) fn suspend() -> Result<Option<Suspended>, String> {
 pub(crate) fn resume(saved: Suspended) -> Result<(), String> {
     let _guard = LOCK.lock().unwrap();
     let mut s = saved.0;
-    s.revision = load()?.revision.saturating_add(1);
-    apply(&s)?;
-    persist(&s)
+    let current = load()?;
+    s.revision = current.revision.saturating_add(1);
+    if let Err(e) = apply(&s).and_then(|_| persist(&s)) {
+        // Leave nothing half-started: the saved state stays off.
+        let _ = apply(&current);
+        return Err(e);
+    }
+    Ok(())
 }
 
 // ---------- API ----------
@@ -829,7 +880,7 @@ fn response(s: &Settings) -> Value {
         })
         .unwrap_or_default();
     let interface = Path::new(&format!("/sys/class/net/{IFACE}")).exists();
-    let healthy = !s.enabled || (running && EGRESS.healthy());
+    let healthy = !s.enabled || (running && policy_healthy(Duration::from_secs(10)));
     let error = ERROR.lock().unwrap().clone().or_else(|| {
         (!healthy).then(|| "Clash policy is incomplete; automatic recovery is pending".into())
     });
@@ -896,9 +947,20 @@ fn store(id: u64, f: &Fetched) -> Result<(), String> {
 }
 
 /// Hold → [WireGuard off] → apply → persist → release; rolls back on any failure and
-/// keeps the guard when the previous state cannot be restored.
-fn transact(old: &Settings, next: &Settings, takeover: bool) -> Result<(), String> {
-    EGRESS.script(&EGRESS.hold())?;
+/// keeps the guard when the previous state cannot be restored (the supervisor clears
+/// it later). `undo` puts back subscription files the change wrote, before the rollback
+/// rebuilds the previous profile from them.
+fn transact(
+    old: &Settings,
+    next: &Settings,
+    takeover: bool,
+    undo: &dyn Fn(),
+) -> Result<(), String> {
+    // Before the hold: the hold's own chains carry our prefix and would fail the claim.
+    if next.enabled {
+        EGRESS.claim()?;
+    }
+    egress_script(&EGRESS.hold())?;
     let mut suspended = None;
     let result = (|| {
         if takeover {
@@ -908,26 +970,29 @@ fn transact(old: &Settings, next: &Settings, takeover: bool) -> Result<(), Strin
         persist(next)
     })();
     if let Err(error) = result {
-        let restored = apply(old).and_then(|_| match suspended.take() {
-            Some(s) => wireguard::resume(s),
-            None => Ok(()),
-        });
-        if restored.is_err() {
+        undo();
+        if apply(old).is_err() {
             return Err(format!("{error}; previous policy could not be restored"));
         }
-        EGRESS.script(&EGRESS.release()).map_err(|e| {
+        // If WireGuard cannot come back, both are saved as off; the guard must still go.
+        let resumed = suspended.take().map_or(Ok(()), wireguard::resume);
+        egress_script(&EGRESS.release()).map_err(|e| {
             format!(
                 "{error}; previous policy restored but transition guard could not be released: {e}"
             )
         })?;
-        return Err(error);
+        return Err(match resumed {
+            Ok(()) => error,
+            Err(e) => format!("{error}; WireGuard could not be restored: {e}"),
+        });
     }
-    EGRESS.script(&EGRESS.release())
+    egress_script(&EGRESS.release())
 }
 
 pub fn update(body: &[u8]) -> (u16, Value) {
     reply((|| -> Result<Value, String> {
         let u: Update = serde_json::from_slice(body).map_err(|_| "Invalid Clash request")?;
+        precheck(&load()?, &u)?;
         // Downloads can take 30 s; do them before taking any lock.
         let fetched = match &u.subscription {
             Some(SubscriptionAction::Add {
@@ -974,15 +1039,29 @@ pub fn update(body: &[u8]) -> (u16, Value) {
             return Err("WireGuard is on; turn it off or confirm switching to Clash".into());
         }
         ensure_dirs()?;
-        let previous = written.and_then(|id| fs::read(sub_path(id, "yaml")).ok());
+        let previous = written.map(|id| (fs::read(sub_path(id, "yaml")).ok(), meta(id)));
         if let (Some(id), Some(f)) = (written, &fetched) {
             store(id, f)?;
         }
+        let undo = || {
+            if let (Some(id), Some((bytes, m))) = (written, &previous) {
+                match bytes {
+                    Some(bytes) => {
+                        let _ = storage::atomic_write(&sub_path(id, "yaml"), bytes);
+                        save_meta(id, m);
+                    }
+                    None => {
+                        let _ = fs::remove_file(sub_path(id, "yaml"));
+                        let _ = fs::remove_file(sub_path(id, "json"));
+                    }
+                }
+            }
+        };
         let profile_changed = written.is_some() && written == next.active_subscription;
         let result = if !next.enabled && !old.enabled {
             persist(&next)
         } else if active_changed(&old, &next) || profile_changed {
-            transact(&old, &next, wg_on)
+            transact(&old, &next, wg_on, &undo)
         } else if old.proxy_mode != next.proxy_mode || old.log_level != next.log_level {
             // Runtime-only: patch the live core, then keep the profile consistent for restarts.
             ctl(
@@ -997,17 +1076,7 @@ pub fn update(body: &[u8]) -> (u16, Value) {
             persist(&next)
         };
         if let Err(e) = result {
-            if let Some(id) = written {
-                match &previous {
-                    Some(bytes) => {
-                        let _ = storage::atomic_write(&sub_path(id, "yaml"), bytes);
-                    }
-                    None => {
-                        let _ = fs::remove_file(sub_path(id, "yaml"));
-                        let _ = fs::remove_file(sub_path(id, "json"));
-                    }
-                }
-            }
+            undo();
             *ERROR.lock().unwrap() = Some(e.clone());
             return Err(e);
         }
@@ -1047,6 +1116,7 @@ fn refresh_subscription(id: u64) -> Result<(), String> {
         return Err("Subscription changed during the download; try again".into());
     }
     let previous = fs::read(sub_path(id, "yaml")).ok();
+    let previous_meta = meta(id);
     store(id, &fetched)?;
     if s.enabled && s.active_subscription == Some(id) && core_running() {
         let reload = write_profile(&s).and_then(|_| {
@@ -1058,10 +1128,12 @@ fn refresh_subscription(id: u64) -> Result<(), String> {
             )
         });
         if let Err(e) = reload {
+            // The core keeps its running config; put the files it restarts from back too.
             if let Some(bytes) = previous {
                 let _ = storage::atomic_write(&sub_path(id, "yaml"), &bytes);
+                let _ = write_profile(&s);
             }
-            let mut m = meta(id);
+            let mut m = previous_meta;
             m.error = Some(e.clone());
             m.attempted_at = now();
             save_meta(id, &m);
@@ -1241,7 +1313,7 @@ pub fn start() {
                         && Instant::now() >= retry_at
                         && (first
                             || !core_running()
-                            || (tick.is_multiple_of(6) && !EGRESS.healthy()))
+                            || (tick.is_multiple_of(6) && !policy_healthy(Duration::ZERO)))
                     {
                         if !first && !core_running() {
                             log_line(&format!(
@@ -1250,9 +1322,9 @@ pub fn start() {
                             ));
                         }
                         let result = prepare(&s)
-                            .and_then(|_| EGRESS.script(&EGRESS.hold()))
-                            .and_then(|_| EGRESS.script(&policy(&s)))
-                            .and_then(|_| EGRESS.script(&EGRESS.release()));
+                            .and_then(|_| egress_script(&EGRESS.hold()))
+                            .and_then(|_| egress_script(&policy(&s)))
+                            .and_then(|_| egress_script(&EGRESS.release()));
                         match result {
                             Ok(()) => {
                                 *ERROR.lock().unwrap() = None;
@@ -1264,8 +1336,12 @@ pub fn start() {
                                 backoff = (backoff * 2).min(Duration::from_secs(300));
                             }
                         }
-                    } else if first && !s.enabled && EGRESS.owned() {
-                        if let Err(e) = apply(&s).and_then(|_| EGRESS.script(&EGRESS.release())) {
+                    } else if !s.enabled
+                        && ((first && EGRESS.owned()) || (tick.is_multiple_of(6) && EGRESS.held()))
+                    {
+                        // A guard seen under the lock was left by a failed switch; with
+                        // Clash saved as off, it would otherwise block the LAN for good.
+                        if let Err(e) = apply(&s).and_then(|_| egress_script(&EGRESS.release())) {
                             *ERROR.lock().unwrap() = Some(e);
                         }
                     }
@@ -1324,6 +1400,35 @@ mod tests {
         )
         .unwrap()
         .0
+    }
+    #[test]
+    fn precheck_rejects_doomed_downloads_before_they_start() {
+        let s = with_subscription();
+        let u = |v: Value| serde_json::from_value::<Update>(v).unwrap();
+        let add = |name: &str| json!({"expected_revision":s.revision,"subscription":{"action":"add","url":"https://b.example/x","name":name}});
+        assert!(precheck(&s, &u(json!({"expected_revision":0,"subscription":{"action":"add","url":"https://b.example/x"}}))).unwrap_err().starts_with("Configuration changed;"));
+        assert!(precheck(&s, &u(add(" provider ")))
+            .unwrap_err()
+            .contains("already exists"));
+        assert!(precheck(&s, &u(add("Other"))).is_ok());
+        let id = s.subscriptions[0].id;
+        let rename = json!({"expected_revision":s.revision,"subscription":{"action":"edit","id":id,"name":"Provider"}});
+        assert!(precheck(&s, &u(rename)).is_ok());
+        let mut full = s.clone();
+        for i in 2..=MAX_SUBSCRIPTIONS as u64 {
+            let mut p = full.subscriptions[0].clone();
+            p.id = i;
+            p.name = format!("S{i}");
+            full.subscriptions.push(p);
+        }
+        let v = json!({"expected_revision":full.revision,"subscription":{"action":"add","url":"https://b.example/x"}});
+        assert!(precheck(&full, &u(v)).unwrap_err().contains("maximum of 5"));
+    }
+    #[test]
+    fn policy_cleanup_keeps_the_core_device() {
+        assert!(EGRESS.cleanup().contains(&format!("ip link del {IFACE}")));
+        assert!(!EGRESS.cleanup_policy().contains("ip link del"));
+        assert!(policy(&with_subscription()).contains("ip -4 route flush table 10421"));
     }
     #[test]
     fn add_uses_provider_name_interval_and_becomes_active() {
