@@ -129,7 +129,7 @@ pub fn start() {
                         let event = unsafe {
                             std::ptr::read_unaligned(bytes.as_ptr().cast::<InputEvent>())
                         };
-                        let ms = event.time.tv_sec * 1000 + i64::from(event.time.tv_usec) / 1000;
+                        let ms = event.time.tv_sec * 1000 + event.time.tv_usec / 1000;
                         if accept
                             && Instant::now() >= cooldown
                             && gesture.event(event.kind, event.code, event.value, ms)

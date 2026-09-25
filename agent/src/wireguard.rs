@@ -1,13 +1,15 @@
 //! One managed kernel tunnel, with MAC-based LAN policy. Never changes main routes,
 //! stock firewall chains, init.d, or UCI. Private keys are never returned by the API.
-use crate::{process::BoundedCommand, storage};
+use crate::{
+    egress::{run, Egress},
+    storage,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     fs,
     net::Ipv4Addr,
     path::Path,
-    process::Command,
     sync::Mutex,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -16,6 +18,16 @@ const DIR: &str = "/data/local/tmp/openui-wireguard";
 const CONFIG: &str = "/data/local/tmp/openui-wireguard/config.json";
 const WG: &str = "/data/bin/wg";
 const IFACE: &str = "ou-wg0";
+const EGRESS: Egress = Egress {
+    label: "WireGuard",
+    prefix: "OUWG",
+    mark: "0x40000000",
+    table: "10420",
+    iface: IFACE,
+    dir: DIR,
+    owner: "openui-wireguard-v1",
+    masquerade: true,
+};
 static LOCK: Mutex<()> = Mutex::new(());
 static ERROR: Mutex<Option<String>> = Mutex::new(None);
 
@@ -436,16 +448,6 @@ fn load() -> Result<Settings, String> {
         Err(_) => Err("Cannot read saved WireGuard configuration".into()),
     }
 }
-fn run(program: &str, args: &[&str]) -> Result<String, String> {
-    let o = Command::new(program)
-        .args(args)
-        .bounded_output()
-        .map_err(|_| format!("Cannot run {program}"))?;
-    if !o.status.success() {
-        return Err(format!("{program} failed"));
-    }
-    Ok(String::from_utf8_lossy(&o.stdout).trim().into())
-}
 fn config_text(t: &Tunnel) -> String {
     let mut s = format!("[Interface]\nPrivateKey = {}\n[Peer]\nPublicKey = {}\nEndpoint = {}\nAllowedIPs = 0.0.0.0/0\nPersistentKeepalive = {}\n", t.private_key, t.public_key, t.endpoint, t.keepalive);
     if !t.preshared_key.is_empty() {
@@ -453,154 +455,13 @@ fn config_text(t: &Tunnel) -> String {
     }
     s
 }
-// Literal script is never combined with unvalidated configuration or arbitrary shell hooks.
-const CLEANUP: &str = r#"
-for spec in 'iptables mangle PREROUTING OUWG_MARK' 'iptables nat PREROUTING OUWG_DNS' 'iptables nat POSTROUTING OUWG_NAT' 'iptables filter FORWARD OUWG_FWD' 'iptables mangle FORWARD OUWG_MSS' 'ip6tables filter FORWARD OUWG_V6' 'ip6tables filter INPUT OUWG_DNS6' 'iptables filter INPUT OUWG_DNS4'; do
- set -- $spec
- while "$1" -w 2 -t "$2" -C "$3" -j "$4" 2>/dev/null; do "$1" -w 2 -t "$2" -D "$3" -j "$4" || exit 1; done
- "$1" -w 2 -t "$2" -F "$4" 2>/dev/null || true
- "$1" -w 2 -t "$2" -X "$4" 2>/dev/null || true
-done
-while ip -4 rule del priority 10420 fwmark 0x40000000/0x40000000 table 10420 2>/dev/null; do :; done
-ip -4 route flush table 10420 2>/dev/null || true
-ip link del ou-wg0 2>/dev/null || true
-"#;
-fn selection(s: &Settings, bin: &str, table: &str, chain: &str, action: &str) -> String {
-    let mut out = String::new();
-    for mac in &s.macs {
-        let target = if s.mode == "all" { "RETURN" } else { action };
-        out.push_str(&format!(
-            "{bin} -w 2 -t {table} -A {chain} -m mac --mac-source {mac} -j {target}\n"
-        ));
-    }
-    if s.mode == "all" {
-        out.push_str(&format!("{bin} -w 2 -t {table} -A {chain} -j {action}\n"));
-    }
-    out
-}
 fn policy(s: &Settings) -> String {
-    let t = s.tunnel.as_ref().unwrap();
-    let mut out = String::from("set -eu\n");
-    // Create unreachable fallback first: marked packets must never fall through to WAN.
-    out.push_str("ip -4 route replace unreachable default metric 32760 table 10420\nip -4 route replace default dev ou-wg0 metric 10 table 10420\nip -4 rule add priority 10420 fwmark 0x40000000/0x40000000 table 10420\n");
-    out.push_str("for spec in 'iptables mangle OUWG_MARK' 'iptables nat OUWG_DNS' 'iptables nat OUWG_NAT' 'iptables filter OUWG_FWD' 'iptables mangle OUWG_MSS' 'ip6tables filter OUWG_V6' 'ip6tables filter OUWG_DNS6' 'iptables filter OUWG_DNS4'; do set -- $spec; \"$1\" -w 2 -t \"$2\" -N \"$3\"; done\n");
-    out.push_str("iptables -w 2 -t mangle -A OUWG_MARK ! -i br-lan -j RETURN\n");
-    // Keep router/LAN and broadcast discovery local. Actual connected subnet is discovered, never hardcoded.
-    out.push_str("for net in $(ip -o -4 route show dev br-lan scope link | awk '{print $1}'); do\niptables -w 2 -t mangle -A OUWG_MARK -d \"$net\" -p tcp ! --dport 53 -j RETURN\niptables -w 2 -t mangle -A OUWG_MARK -d \"$net\" -p udp ! --dport 53 -j RETURN\niptables -w 2 -t mangle -A OUWG_MARK -d \"$net\" -p icmp -j RETURN\ndone\niptables -w 2 -t mangle -A OUWG_MARK -d 224.0.0.0/4 -j RETURN\niptables -w 2 -t mangle -A OUWG_MARK -d 255.255.255.255/32 -j RETURN\n");
-    out.push_str(&selection(
-        s,
-        "iptables",
-        "mangle",
-        "OUWG_MARK",
-        "MARK --set-xmark 0x40000000/0x40000000",
-    ));
-    for p in ["udp", "tcp"] {
-        out.push_str(&format!("iptables -w 2 -t nat -A OUWG_DNS -i br-lan -m mark --mark 0x40000000/0x40000000 -p {p} --dport 53 -j DNAT --to-destination {}\n", t.dns));
-    }
-    out.push_str("iptables -w 2 -t nat -A OUWG_NAT -o ou-wg0 -m mark --mark 0x40000000/0x40000000 -j MASQUERADE\niptables -w 2 -A OUWG_FWD -i ou-wg0 -o br-lan -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT\niptables -w 2 -A OUWG_FWD -i br-lan -o ou-wg0 -m mark --mark 0x40000000/0x40000000 -j ACCEPT\niptables -w 2 -A OUWG_FWD -i br-lan -m mark --mark 0x40000000/0x40000000 ! -o br-lan -j REJECT\niptables -w 2 -t mangle -A OUWG_MSS -o ou-wg0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu\n");
-    out.push_str("ip6tables -w 2 -A OUWG_V6 ! -i br-lan -j RETURN\nip6tables -w 2 -A OUWG_V6 -o br-lan -j RETURN\nip6tables -w 2 -A OUWG_DNS6 ! -i br-lan -j RETURN\n");
-    out.push_str(&selection(s, "ip6tables", "filter", "OUWG_V6", "REJECT"));
-    // DNS over IPv6 to the router must not escape through the stock resolver.
-    for m in &s.macs {
-        if s.mode == "all" {
-            out.push_str(&format!(
-                "ip6tables -w 2 -A OUWG_DNS6 -m mac --mac-source {m} -j RETURN\n"
-            ));
-        }
-    }
-    for p in ["tcp", "udp"] {
-        if s.mode == "all" {
-            out.push_str(&format!(
-                "ip6tables -w 2 -A OUWG_DNS6 -p {p} --dport 53 -j REJECT\n"
-            ));
-        } else {
-            for m in &s.macs {
-                out.push_str(&format!("ip6tables -w 2 -A OUWG_DNS6 -m mac --mac-source {m} -p {p} --dport 53 -j REJECT\n"));
-            }
-        }
-    }
-    for p in ["tcp", "udp"] {
-        out.push_str(&format!("iptables -w 2 -A OUWG_DNS4 -i br-lan -m mark --mark 0x40000000/0x40000000 -p {p} --dport 53 -j REJECT\n"));
-    }
-    // Attach marking last, after all forwarding and DNS protection is ready.
-    out.push_str("for spec in 'ip6tables filter FORWARD OUWG_V6' 'ip6tables filter INPUT OUWG_DNS6' 'iptables filter INPUT OUWG_DNS4' 'iptables filter FORWARD OUWG_FWD' 'iptables mangle FORWARD OUWG_MSS' 'iptables nat POSTROUTING OUWG_NAT' 'iptables nat PREROUTING OUWG_DNS' 'iptables mangle PREROUTING OUWG_MARK'; do set -- $spec; \"$1\" -w 2 -t \"$2\" -I \"$3\" 1 -j \"$4\"; done\n");
-    out
-}
-fn script(text: &str) -> Result<(), String> {
-    let mut cmd = Command::new("sh");
-    let out = process_runner::output(
-        &mut cmd,
-        Some(text.as_bytes()),
-        Duration::from_secs(90),
-        32768,
-    )
-    .map_err(|_| "WireGuard network operation timed out")?;
-    if !out.status.success() {
-        // Generated policy contains only validated non-secret network identifiers.
-        let msg = String::from_utf8_lossy(&out.stderr);
-        return Err(format!(
-            "WireGuard network operation failed: {}",
-            msg.chars().take(350).collect::<String>()
-        ));
-    }
-    Ok(())
-}
-// During a policy replacement, briefly pause forwarded LAN traffic and client DNS.
-// This guard remains if the agent is interrupted mid-transaction. LAN management
-// and the router's own WAN connection remain available for recovery.
-const HOLD: &str = r#"
-set -eu
-for bin in iptables ip6tables; do
- $bin -w 2 -N OUWG_HOLD 2>/dev/null || true
- $bin -w 2 -C OUWG_HOLD -i br-lan ! -o br-lan -j REJECT 2>/dev/null || $bin -w 2 -A OUWG_HOLD -i br-lan ! -o br-lan -j REJECT
- $bin -w 2 -C FORWARD -j OUWG_HOLD 2>/dev/null || $bin -w 2 -I FORWARD 1 -j OUWG_HOLD
- $bin -w 2 -N OUWG_HD 2>/dev/null || true
- for proto in udp tcp; do
- $bin -w 2 -C OUWG_HD -i br-lan -p $proto --dport 53 -j REJECT 2>/dev/null || $bin -w 2 -A OUWG_HD -i br-lan -p $proto --dport 53 -j REJECT
- done
- $bin -w 2 -C INPUT -j OUWG_HD 2>/dev/null || $bin -w 2 -I INPUT 1 -j OUWG_HD
-done
-"#;
-const RELEASE: &str = r#"
-set -eu
-for bin in iptables ip6tables; do
- while $bin -w 2 -C FORWARD -j OUWG_HOLD 2>/dev/null; do $bin -w 2 -D FORWARD -j OUWG_HOLD; done
- while $bin -w 2 -C INPUT -j OUWG_HD 2>/dev/null; do $bin -w 2 -D INPUT -j OUWG_HD; done
- $bin -w 2 -F OUWG_HOLD 2>/dev/null || true
- $bin -w 2 -X OUWG_HOLD 2>/dev/null || true
- $bin -w 2 -F OUWG_HD 2>/dev/null || true
- $bin -w 2 -X OUWG_HD 2>/dev/null || true
-done
-"#;
-fn claim_resources() -> Result<(), String> {
-    if Path::new(&format!("{DIR}/owned")).exists() {
-        return Ok(());
-    }
-    if Path::new(&format!("/sys/class/net/{IFACE}")).exists()
-        || run("ip", &["-4", "rule", "show"]).is_ok_and(|s| {
-            s.lines()
-                .any(|l| l.starts_with("10420:") || l.contains("0x40000000"))
-        })
-        || run("ip", &["-4", "route", "show", "table", "10420"]).is_ok_and(|s| !s.is_empty())
-    {
-        return Err("WireGuard interface, mark or routing table is already in use".into());
-    }
-    for bin in ["iptables", "ip6tables"] {
-        for table in ["filter", "nat", "mangle"] {
-            if run(bin, &["-t", table, "-S"])
-                .is_ok_and(|s| s.contains("OUWG_") || s.contains("0x40000000"))
-            {
-                return Err("Reserved WireGuard firewall resources are already in use".into());
-            }
-        }
-    }
-    storage::atomic_write(Path::new(&format!("{DIR}/owned")), b"openui-wireguard-v1\n")
-        .map_err(|_| "Cannot record WireGuard resource ownership".into())
+    EGRESS.policy(&s.mode, &s.macs, &s.tunnel.as_ref().unwrap().dns)
 }
 fn apply(s: &Settings) -> Result<(), String> {
     if !s.enabled {
-        if Path::new(&format!("{DIR}/owned")).exists() {
-            script(CLEANUP)?;
+        if EGRESS.owned() {
+            EGRESS.script(&EGRESS.cleanup())?;
         }
         return Ok(());
     }
@@ -618,8 +479,8 @@ fn apply(s: &Settings) -> Result<(), String> {
         config_text(t).as_bytes(),
     )
     .map_err(|_| "Cannot write private tunnel configuration")?;
-    claim_resources()?;
-    script(CLEANUP)?;
+    EGRESS.claim()?;
+    EGRESS.script(&EGRESS.cleanup())?;
     run("ip", &["link", "add", IFACE, "type", "wireguard"])?;
     run(WG, &["setconf", IFACE, &format!("{DIR}/peer.conf")])?;
     run(
@@ -633,7 +494,7 @@ fn apply(s: &Settings) -> Result<(), String> {
     // Loose reverse-path checking only on our new interface (main route still uses WAN).
     fs::write(format!("/proc/sys/net/ipv4/conf/{IFACE}/rp_filter"), "2\n")
         .map_err(|_| "Cannot set tunnel reverse-path check")?;
-    script(&policy(s))
+    EGRESS.script(&policy(s))
 }
 fn response(s: &Settings) -> Value {
     let interface = Path::new(&format!("/sys/class/net/{IFACE}")).exists();
@@ -722,12 +583,11 @@ pub fn update(body: &[u8]) -> (u16, Value) {
             if !Path::new(WG).exists() || !Path::new("/sys/module/wireguard").exists() {
                 return Err("Kernel WireGuard or /data/bin/wg is unavailable".into());
             }
-            claim_resources()?;
+            EGRESS.claim()?;
         }
-        let changing_network =
-            old.enabled || next.enabled || Path::new(&format!("{DIR}/owned")).exists();
+        let changing_network = old.enabled || next.enabled || EGRESS.owned();
         if changing_network {
-            script(HOLD)?;
+            EGRESS.script(&EGRESS.hold())?;
         }
         if let Err(e) = commit_change(
             &old,
@@ -739,7 +599,7 @@ pub fn update(body: &[u8]) -> (u16, Value) {
             },
             || {
                 if changing_network {
-                    script(RELEASE)
+                    EGRESS.script(&EGRESS.release())
                 } else {
                     Ok(())
                 }
@@ -764,17 +624,7 @@ pub fn update(body: &[u8]) -> (u16, Value) {
     }
 }
 fn policy_healthy() -> bool {
-    run("sh", &["-c", r#"
-set -e
-for spec in 'iptables mangle PREROUTING OUWG_MARK' 'iptables nat PREROUTING OUWG_DNS' 'iptables nat POSTROUTING OUWG_NAT' 'iptables filter FORWARD OUWG_FWD' 'ip6tables filter FORWARD OUWG_V6' 'iptables filter INPUT OUWG_DNS4' 'ip6tables filter INPUT OUWG_DNS6'; do
- set -- $spec
- "$1" -w 2 -t "$2" -C "$3" -j "$4" 2>/dev/null
-done
-if iptables -w 2 -C FORWARD -j OUWG_HOLD 2>/dev/null; then exit 1; fi
-ip -4 rule show | grep -q '^10420:.*fwmark 0x40000000/0x40000000.*lookup 10420'
-ip -4 route show table 10420 | grep -q 'default dev ou-wg0'
-ip -4 route show table 10420 | grep -q 'unreachable default'
-"#]).is_ok()
+    EGRESS.healthy()
 }
 pub fn start() {
     std::thread::spawn(|| {
@@ -788,10 +638,11 @@ pub fn start() {
                             || !Path::new(&format!("/sys/class/net/{IFACE}")).exists()
                             || !policy_healthy())
                     {
-                        if let Err(e) = claim_resources()
-                            .and_then(|_| script(HOLD))
+                        if let Err(e) = EGRESS
+                            .claim()
+                            .and_then(|_| EGRESS.script(&EGRESS.hold()))
                             .and_then(|_| apply(&s))
-                            .and_then(|_| script(RELEASE))
+                            .and_then(|_| EGRESS.script(&EGRESS.release()))
                         {
                             *ERROR.lock().unwrap() = Some(e);
                         } else {
@@ -801,8 +652,9 @@ pub fn start() {
                 }
                 if first {
                     if let Ok(s) = load() {
-                        if !s.enabled && Path::new(&format!("{DIR}/owned")).exists() {
-                            if let Err(e) = apply(&s).and_then(|_| script(RELEASE)) {
+                        if !s.enabled && EGRESS.owned() {
+                            if let Err(e) = apply(&s).and_then(|_| EGRESS.script(&EGRESS.release()))
+                            {
                                 *ERROR.lock().unwrap() = Some(e);
                             }
                         }
@@ -1075,9 +927,10 @@ mod tests {
             fs::write(p.join("selected.sh"), policy(&s)).unwrap();
             s.mode = "all".into();
             fs::write(p.join("excluded.sh"), policy(&s)).unwrap();
-            fs::write(p.join("cleanup.sh"), CLEANUP).unwrap();
-            fs::write(p.join("hold.sh"), HOLD).unwrap();
-            fs::write(p.join("release.sh"), RELEASE).unwrap();
+            fs::write(p.join("cleanup.sh"), EGRESS.cleanup()).unwrap();
+            fs::write(p.join("hold.sh"), EGRESS.hold()).unwrap();
+            fs::write(p.join("release.sh"), EGRESS.release()).unwrap();
+            fs::write(p.join("health.sh"), EGRESS.health_check()).unwrap();
         }
     }
     #[test]

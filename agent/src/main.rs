@@ -7,6 +7,7 @@ mod charge_policy;
 mod connection_logger;
 mod csv_utils;
 mod device_ext;
+mod egress;
 mod event_bus;
 mod handlers;
 mod lan;

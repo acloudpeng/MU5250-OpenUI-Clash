@@ -65,6 +65,8 @@ ip rule show | mask_ip
 ip route show | mask_ip
 ip route show table all 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "table") print $(i + 1)}' | sort -u | tr '\n' ' '
 echo
+# fwmark bits already claimed (WG uses 0x40000000, Clash plans 0x20000000; table 10420/10421).
+echo "fwmarks in use: $({ iptables-save 2>/dev/null; ip rule show; } | grep -oE '(mark|fwmark) 0x[0-9a-f]+(/0x[0-9a-f]+)?' | sort -u | tr '\n' ' ')"
 has mwan3 && echo 'mwan3 present'
 pidof mwan3rtmon >/dev/null && echo 'mwan3rtmon running'
 
