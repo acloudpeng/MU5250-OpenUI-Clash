@@ -3,6 +3,9 @@
 > CN B31, adding a Clash.Meta (FlClash branch) proxy backend that is mutually
 > exclusive with WireGuard. Development plan: [docs/PLAN.md](docs/PLAN.md);
 > building and deploying the core: [docs/CLASH.md](docs/CLASH.md).
+> **Executing agent? Start at [docs/AI-OPERATIONS.md](docs/AI-OPERATIONS.md)** —
+> machine-readable procedure for unlock, deploy, verification and firmware
+> updates, including the hard-won host-side hazards.
 > Everything below is the upstream README.
 
 # MU5250-OpenUI-Wireguard

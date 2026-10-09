@@ -3,6 +3,33 @@
 _Checked 2026-10-09 against this repo's docs and upstream `jesther-ai/open-u60-pro`
 issue #8. Target device: ZTE U60 Pro (MU5250), firmware `CN_ZTE_MU5250V1.0.0B31`._
 
+> **Update 2026-10-10 — B31 confirmed end to end on real hardware.**
+> Unlock, agent + SSH + dashboard deployment, Clash core + geo data, and a
+> reboot-persistence check all completed successfully on `BD_CNMU5250V1.0.0B31`.
+> The suffix discussed in the issue #8 thread **does** work on CN B31 (previously
+> confirmed only for MU5252). The procedure is written up machine-readably in
+> [AI-OPERATIONS.md](AI-OPERATIONS.md); the corrections below are what the live
+> run changed relative to this document and to `DEPLOYMENT.md`.
+>
+> - The daemon is at **`/usr/bin/zte_web`**, not `/usr/sbin/zte_web`.
+> - The suffix is **not** a contiguous string in `zte_web` and **not**
+>   single-byte-XOR obfuscated (all 255 keys tested). The documented
+>   "`strings /usr/sbin/zte_web`" recovery path therefore **does not work on
+>   B31**. It is also absent from `zte_topsw_mc` (the binary that runs
+>   `device_backup_proc`) and from `libztemc.so` (which holds the backup
+>   `openssl` template). Post-rotation recovery is an open problem.
+> - The stock USB composition on B31 is **RNDIS (PID_1403)**, not ECM. Windows
+>   ships an inbox RNDIS driver, so the post-reboot USB path works.
+> - `--harden` removes the unlock payload line by design, so every boot returns
+>   to stock tethering and **ADB is gone after the first reboot**. SSH on :2222
+>   is the durable channel.
+> - FOTA preserves only the paths listed in `/sbin/backup_fota.list`; `rc.local`
+>   and `/etc/dropbear` are **not** in it. `/data/dropbear/` holds a key copy
+>   that does survive, which makes post-update recovery straightforward.
+> - On a Windows host, `scripts/deploy-components.py` needs a wrapper (pipe
+>   `selectors`, `os.killpg`, CRLF doubling, host-side `sh -n`). See
+>   [AI-OPERATIONS.md](AI-OPERATIONS.md) §7.
+
 ## TL;DR
 
 - The old one-click web ADB toggle (`zwrt_bsp.usb.set {"mode":"debug"}`) was

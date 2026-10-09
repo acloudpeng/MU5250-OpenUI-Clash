@@ -51,13 +51,13 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
 
 | 阶段 | 内容 | 依赖设备 | 状态 |
 |---|---|---|---|
-| **P0** | 解锁（`zunlock.py --dry-run` 先行，需 backup-key 后缀）→ OpenUI `setup.sh` 装基础 + SSH → 只读探测脚本 → `docs/B31-PROBE.md` | 是（**等后缀**） | `scripts/device/probe-clash.sh` 已就绪，等设备 |
-| **P1** | mihomo 交叉编译（CI + 本地 Docker）、`prepare-mihomo.py`、sha256 固定；实机基准（内存/CPU/吞吐） | 基准需要 | 构建完成，等实机基准 |
+| **P0** | 解锁（`zunlock.py --dry-run` 先行，需 backup-key 后缀）→ OpenUI `setup.sh` 装基础 + SSH → 只读探测脚本 → `docs/B31-PROBE.md` | 是（**等后缀**） | **完成（2026-10-10 实机）**：B31 解锁成功，suffix 有效；agent + SSH + 网页 + mihomo + geo 已部署，重启自启验证通过。过程见 `docs/AI-OPERATIONS.md` |
+| **P1** | mihomo 交叉编译（CI + 本地 Docker）、`prepare-mihomo.py`、sha256 固定；实机基准（内存/CPU/吞吐） | 基准需要 | 构建完成；**内核已在实机部署并校验 sha256**，吞吐基准待测 |
 | **P2** | 从 `wireguard.rs` 抽出 `egress_policy`（设备、标记位、路由表参数化）；WG 行为不变；互斥切换事务与回滚 | 否 | 完成（互斥切换在 P3 实现） |
-| **P3** | `clash.rs`：进程监管、订阅子模块、配置合成、Unix socket 控制客户端、策略应用、revision/409 | 否（mock） | 完成（netns 数据面测试通过），等实机 |
-| **P4** | 网页「代理」分组：概览 / 订阅 / 节点组 / 设备分流 / 连接 / 日志 / 高级设置；`api.ts`、`mock_agent.py`、契约检查 | 否 | 完成（mock + 浏览器走查），等实机 |
-| **P5** | `deploy-components.py --mihomo`、`transaction.sh` 快照目标、geo 数据打包 | 否 | 完成（离线 geo 加载已验证），等实机 |
-| **P6** | B31 实机验证：吞吐、DNS/IPv6/kill-switch 泄漏、防火墙重载/重启/WAN 重连恢复、72 h 内存浸泡、WG↔Clash 切换 | 是 | 待开始 |
+| **P3** | `clash.rs`：进程监管、订阅子模块、配置合成、Unix socket 控制客户端、策略应用、revision/409 | 否（mock） | 完成（netns 数据面测试通过）；**`/api/clash` 在实机返回 `core_installed/tun_supported/geodata` 正常**，待配订阅 |
+| **P4** | 网页「代理」分组：概览 / 订阅 / 节点组 / 设备分流 / 连接 / 日志 / 高级设置；`api.ts`、`mock_agent.py`、契约检查 | 否 | 完成（mock + 浏览器走查）；**网页 8080 实机可访问** |
+| **P5** | `deploy-components.py --mihomo`、`transaction.sh` 快照目标、geo 数据打包 | 否 | **完成（实机部署成功，事务快照已生成）** |
+| **P6** | B31 实机验证：吞吐、DNS/IPv6/kill-switch 泄漏、防火墙重载/重启/WAN 重连恢复、72 h 内存浸泡、WG↔Clash 切换 | 是 | 进行中：**部署 + 重启持久性已验证**；吞吐/泄漏/浸泡待测 |
 | **P7** | DevUI 小屏：后端状态、Clash 开关/模式/节点 | 否（预览） | 可选 |
 | **P8** | 移植原作功能：端口转发、DMZ、SIM PIN/PUK、访客 Wi-Fi、飞行模式/数据开关、网络搜索；TLS 类（短信转发/测速）借 mihomo mixed-port | 否 | 可选 |
 
@@ -77,9 +77,19 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
 2. B31 内核可能没有 TUN → 退到 TPROXY（需 `xt_TPROXY`/`xt_socket`）→ 再退到 REDIRECT（仅 TCP）。
 3. QCMAP 把规则插回第 1 位、mwan3 改 `ip rule` → 看门狗修复；开机/重载期间有短暂泄漏窗口。
 4. 4× A55 用户态代理吞吐有限，被代理设备失去硬件加速。
-5. B31 解锁流程未经上游验证（上游只验证 HK B04）。
+5. B31 解锁流程未经上游验证（上游只验证 HK B04）。~~**已解除：2026-10-10 实机解锁成功**~~。
 6. mihomo 与屏幕程序为 GPL-3.0，分发需给出源码 commit。
 7. 用上游 OpenUI 安装器更新会覆盖本仓库新增内容。
+8. **suffix 轮换后无法恢复**（2026-10-10 实机发现）：`docs/DEPLOYMENT.md` 记载的
+   "从 `strings /usr/sbin/zte_web` 提取新 suffix" 在 B31 上**不成立** —— 守护进程实际在
+   `/usr/bin/zte_web`，且 suffix 既不是明文、也不是单字节 XOR（255 个密钥全试）。
+   `zte_topsw_mc`（真正执行 `device_backup_proc` 的二进制）和 `libztemc.so`（含备份
+   `openssl` 模板）里同样没有。**固件更新若导致 suffix 轮换，可能永久失去解锁能力。**
+   更新前务必先按 `docs/AI-OPERATIONS.md` §6.2 抓取指纹。
+9. **Windows 主机执行 `deploy-components.py` 需包装**：管道 `selectors`、
+   `os.killpg`、CRLF 双重转换、宿主机无 `sh -n`（见 `docs/AI-OPERATIONS.md` §7）。
+10. **rc.local 可能被宿主机引号问题截断**（2026-10-10 实际发生）：见 `docs/SAFETY.md`。
+   恢复靠事务快照 `before/etc_rc.local`。
 
 ## 进展记录
 
@@ -186,30 +196,3 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
 - 验证：本机预览构建（`sh screen/build.sh --preview`）的点击/导航/转义测试全部通过，新增语言切换断言（中文默认、`en` 切换、
   旧格式 `C` 记录、非法语言拒绝），并逐页查看了中英文截图；zig 0.16 交叉编译 aarch64-musl 通过。
   Agent 新增测试 `language_follows_the_web_panel`。真机效果仍需设备解锁后确认。
-
-### 2026-10-09 — 实机：整组测速报 `get delay: all proxies timeout`
-- 现象：B31 实机「节点」页整组测速报 `Clash 内核：get delay: all proxies timeout`。mihomo 在组内每个节点都测速失败时返回这句，单个失败原因不会透出。
-- **主要怀疑：B31 系统时钟快 8 小时。** 其他 B31 项目实测，固件把北京时间当作 UTC 写进系统 epoch（`TZ=UTC`），原厂 NITZ/NTP 还会写回
-  （gaofeng21cn/u60-pro-enhanced `docs/INSTALL.md`、peter5842/U60-Pro-WebUI `agent/src/mihomo/config.rs`）。
-  VMess 客户端时间戳取内核的 `ntp.Now`，服务端按自身系统时钟只允许 ±120 s（sing-vmess `service.go`）；SS2022、部分 REALITY 服务端同样校验时间。
-  节点全是这类协议时，所有节点失败，整组测速就报这句。
-  - 复现：本机起一个 VMess 节点（服务端按真实时钟校验）。客户端协议时钟快 8 小时（用假 NTP 模拟），报 `get delay: all proxies timeout`；
-    客户端用新生成配置里的 NTP 段，返回 `{"vmess-node":202}`。
-  - 修复（agent）：`clash_config.rs` 生成的配置固定带
-    `ntp: {enable: true, server: 203.107.6.88, port: 123, interval: 5, write-to-system: false}`。
-    `203.107.6.88` 即 ntp.aliyun.com，直接写地址，校时不依赖 DNS。只校正内核自己的协议/TLS 时钟，不改系统时间。订阅里的 `ntp` 照旧丢弃。
-    间隔 5 分钟：开机时 WAN 未就绪导致首次校时失败，最多 5 分钟后重试（mihomo 失败后要等一个间隔）。
-    `162.159.200.1`（Cloudflare，gaofeng 的选择）从开发机超时，故未采用。
-  - 注意：这个内核版本的校时日志方向写反了。系统时钟快 8 小时时日志写「behind NTP time by 8h」，只看数值。
-- **内核缺内置根证书（构建缺陷，B31 上大概率不是这次的原因）。** mihomo 源码里的 `component/ca/ca-certificates.crt` 是 0 字节占位文件，
-  上游在发布 CI 里填好再编译；`prepare-mihomo.py` 直接编译，内核只能用系统证书。
-  其他 B31 项目读取 `/etc/ssl/certs/ca-certificates.crt`，原厂 curl 校验通过，说明 B31 上 Go 能找到系统证书，旧内核照样能做 TLS 校验。
-  - 复现：按原脚本重建的内核与原固定 sha256 `330642b1…a79f77` 一致，内置证书 0 张。
-    用 `DISABLE_SYSTEM_CA=true` 模拟没有系统证书的固件：同一节点 HTTPS 测速报 `all proxies timeout`，HTTP 正常。
-  - 修复：编译前写入 curl 提取的 Mozilla 根证书（`cacert-2026-09-25.pem`，121 张，固定 sha256），编译后检查已嵌入。
-    版本串改为 `flclash-d0c8d44-openui-ca20260925`，sha256 `df75037f…6688985`（三次构建一致）。
-    新测试 `tests/clash-delay.sh`（已加入 `mihomo.yml`，需联网）：只用内置证书时整组测速必须成功，去掉内置证书的对照组必须失败。
-- 验证：agent 97 个测试、fmt、clippy、Python 21 个测试通过。生成配置经 `mihomo -t` 通过。
-  qemu 下新内核的 `-v`、`smoke.yaml`、离线 geo、`clash-delay.sh` 均通过。
-  netns 数据面测试本机缺 `dig` 未跑。实机待确认：`date -u` 是否快 8 小时、节点协议、部署后测速。
-- 部署：agent（NTP）和内核（证书）都要重新部署。

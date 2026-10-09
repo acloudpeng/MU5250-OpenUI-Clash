@@ -123,8 +123,18 @@ ubus call zwrt_data get_wwaniface '{"source_module":"zte_topsw_data","cid":1}'
   READS `usb_op` — never delete that block (`sed '/usb_op/d'` breaks the
   script's syntax and kills ALL rc.local actions next boot). Always `sh -n
   /etc/rc.local` after any edit.
+- **rc.local truncation by host quoting** (observed 2026-10-10, CN B31): a host
+  command such as `adb shell "grep -cF "echo 1 >" /etc/rc.local"` loses its
+  inner quotes in transit, so the *device* shell receives
+  `grep -cF echo 1 > /etc/rc.local` — an unquoted redirection that **truncates
+  rc.local to 0 bytes**, destroying both the boot hooks and the flash-protect
+  block. Recovery: the deployment transaction snapshot keeps a pre-write copy at
+  `/data/local/tmp/open-u60-transactions/<id>/before/etc_rc.local`. Prevention:
+  never inline-quote device commands through a host shell — push a script and
+  run it. See [AI-OPERATIONS.md](AI-OPERATIONS.md) §7.1.
 - **IMEI is QFPROM-fused** — hardware-locked, not modifiable. Don't try.
 - **eSIM**: no eUICC chip; not feasible.
+
 
 ## What the deploy path does (and only this)
 

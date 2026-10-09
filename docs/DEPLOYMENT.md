@@ -254,6 +254,36 @@ Notes:
 4. If the backup-key suffix ever stops working (ZTE rotated it): extract the
    new suffix from `strings /usr/sbin/zte_web` on any rooted unit.
 
+### Verified on CN B31 (2026-10-10)
+
+A full unlock → deploy → reboot-persistence run on `BD_CNMU5250V1.0.0B31`
+produced these corrections. Read them before relying on the notes above.
+
+- **Step 4 above does not work on B31.** The daemon is at
+  `/usr/bin/zte_web`, and the suffix is neither a contiguous string in it nor
+  single-byte-XOR obfuscated (all 255 keys tested). It is also absent from
+  `zte_topsw_mc` (which runs `device_backup_proc`) and from `libztemc.so`
+  (which holds the backup `openssl` template). Post-rotation recovery is an
+  open problem — treat a rotated suffix as potentially unrecoverable.
+- **`/data/dropbear/` is the post-update lifeline.** `harden()` copies the
+  authorised keys and host keys there, and `/data` survives FOTA while
+  `/etc/dropbear` does not. Restoring SSH after an update is:
+  `cp -a /data/dropbear/. /etc/dropbear/`.
+- **`/sbin/backup_fota.list` is the authoritative preserve list** — read it on
+  the running firmware rather than assuming. On B31 it contains only
+  `/zteoverlay/etc-upper/{config/,manual_apn_v2.db,adbd.conf}`,
+  `config/zwrt_tr069`, `etc_rw/ztembb/dm/` and `wireless/mediatek/`;
+  `rc.local` and `dropbear` are absent.
+- **The stock USB composition on B31 is RNDIS (`PID_1403`), not ECM.** Windows
+  has an inbox RNDIS driver, so the post-reboot USB path works without a
+  third-party driver.
+- **Persistence must be proven before an update.** Reboot once and confirm the
+  hooks fire before considering FOTA; the update forces exactly that rebuild.
+- The machine-readable procedure, including host-side hazards (Windows pipe
+  `selectors`, `os.killpg`, CRLF doubling, host-side `sh -n`, and the
+  never-inline-quote rule), is in [AI-OPERATIONS.md](AI-OPERATIONS.md).
+
+
 ## Credits
 
 Backup-crypto details and the original payload hint: the
