@@ -23,6 +23,17 @@ python3 scripts/prepare-geodata.py --asn     # optional: add ASN.mmdb (12 MiB) f
 its app; the patch restores them for a standalone daemon). The result must match the
 pinned sha256; it needs Go or Docker and does not contact the modem.
 
+The build also embeds Mozilla's root certificates as extracted by curl (MPL-2.0; date
+and sha256 pinned in the script). Upstream's source holds only an empty placeholder that
+its release workflow fills in. A core built without it trusts only the system's roots,
+and on firmware with no root store where Go looks, every TLS check fails: HTTPS delay
+tests report `get delay: all proxies timeout`, and DoH upstreams and TLS nodes fail.
+B31 appears to ship `/etc/ssl/certs/ca-certificates.crt`, which the core also reads;
+the built-in copy covers firmware without it. Cores built before 2026-10-09 (version
+`flclash-d0c8d44-openui`) lack it. The version now ends with the bundle date
+(`flclash-d0c8d44-openui-ca20260925`), shown on the Proxy page. `tests/clash-delay.sh`
+runs a delay test through a local node with only the built-in roots (needs internet access).
+
 `prepare-geodata.py` downloads the MetaCubeX geo databases and checks each against the
 checksum published beside it. Upstream rebuilds them daily without versioned tags, so
 the checksums are recorded in `SHA256SUMS` in the output directory and checked again at
@@ -71,6 +82,20 @@ kept; the URL is treated as a secret and only its host is shown. A download is c
 with `mihomo -t` before it replaces the previous profile. The agent keeps proxies,
 groups, rules, providers, hosts, sniffer and geo settings from the profile and owns
 everything that binds a port, routes traffic or picks the DNS mode.
+
+## Clock
+
+B31 has been seen keeping Beijing time in the system clock as if it were UTC, 8 hours
+ahead, and its own NITZ/NTP writes it back. VMess, Shadowsocks 2022 and some REALITY
+servers reject handshakes that far off; when every node uses one of them, a group delay
+test reports `get delay: all proxies timeout`. The generated profile therefore turns on
+the core's NTP client with `write-to-system: false`. It uses `203.107.6.88`
+(ntp.aliyun.com by address, so it does not depend on DNS) over UDP 123 every 5 minutes.
+Only the core's own protocol and TLS clock is corrected; the system clock is left alone.
+Until the first sync succeeds, for example at boot before the WAN is up, time-checked
+nodes can fail for up to 5 minutes. A failed sync logs `Sync time failed`. At log level
+info, the core logs the measured offset; in this core version the line's "ahead" and
+"behind" are swapped, so read only the amount.
 
 ## Traffic and recovery
 

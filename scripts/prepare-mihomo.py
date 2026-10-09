@@ -2,7 +2,8 @@
 """Build mihomo from the pinned Clash.Meta FlClash commit as a static linux/arm64 binary.
 
 Never builds with GOOS=android: that enables embed mode, which disables config reload.
-Applies scripts/mihomo-patches/*.patch (standalone-daemon fixes; see each header).
+Applies scripts/mihomo-patches/*.patch (standalone-daemon fixes; see each header) and
+embeds a pinned root certificate bundle (see CA_URL).
 Uses a local Go toolchain matching GO_VERSION, otherwise the golang Docker image.
 Does not contact or change the modem.
 """
@@ -13,15 +14,24 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import urllib.request
 
 REPO = 'https://github.com/chen08209/Clash.Meta.git'
 COMMIT = 'd0c8d443298ce26e292a63f0f1016313dda599ac'
 GO_VERSION = '1.26.8'
 TAGS = 'with_gvisor,with_low_memory,no_tailscale,no_zerotier,no_easytier,no_fake_tcp'
 PATCHES = sorted((Path(__file__).resolve().parent / 'mihomo-patches').glob('*.patch'))
-VERSION = f'flclash-{COMMIT[:7]}-openui'
-# Reproducible with the pinned commit, tags and Go version; any change must update this.
-SHA256 = '330642b16e0fc2fc60d31cf165560a57e2ca46fc3b670f3eb8a2f44496a79f77'
+# The core trusts the system roots plus component/ca/ca-certificates.crt, an empty
+# placeholder in the source that upstream fills in its release workflow. Without it, on
+# a system with no root store where Go looks, every TLS check fails: HTTPS delay tests
+# ("get delay: all proxies timeout"), DoH upstreams and TLS nodes. Mozilla's roots as
+# extracted by curl, pinned by date and checksum.
+CA_DATE = '2026-09-25'
+CA_URL = f'https://curl.se/ca/cacert-{CA_DATE}.pem'
+CA_SHA256 = 'a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505'
+VERSION = f'flclash-{COMMIT[:7]}-openui-ca{CA_DATE.replace("-", "")}'
+# Reproducible with the pinned commit, tags, CA bundle and Go version; any change must update this.
+SHA256 = 'df75037f7177b1ada6421f39c65899ca304a4d900362a6def68aa338c6688985'
 LDFLAGS = f'-s -w -buildid= -X github.com/metacubex/mihomo/constant.Version={VERSION}'
 BUILD_ENV = {'CGO_ENABLED': '0', 'GOOS': 'linux', 'GOARCH': 'arm64'}
 BUILD_ARGS = ['go', 'build', '-mod=readonly', '-trimpath', '-tags', TAGS, '-ldflags', LDFLAGS, '-o']
@@ -41,6 +51,15 @@ def fetch(source):
         raise SystemExit(f'mihomo source commit mismatch: {head}')
     for patch in PATCHES:
         run(['git', '-C', str(source), 'apply', '--whitespace=nowarn', str(patch)])
+
+
+def embed_ca(source):
+    with urllib.request.urlopen(CA_URL, timeout=30) as response:
+        bundle = response.read(1024 * 1024)
+    if hashlib.sha256(bundle).hexdigest() != CA_SHA256:
+        raise SystemExit('CA bundle checksum mismatch')
+    (source / 'component' / 'ca' / 'ca-certificates.crt').write_bytes(bundle)
+    return bundle
 
 
 def local_go():
@@ -87,8 +106,11 @@ def main():
     with tempfile.TemporaryDirectory(prefix='openui-mihomo-') as tmp:
         source = Path(tmp) / 'src'
         fetch(source)
+        bundle = embed_ca(source)
         build(source, output, args.docker)
     check_elf(output)
+    if bundle not in output.read_bytes():
+        raise SystemExit('mihomo output does not embed the CA bundle')
     output.chmod(0o700)
     digest = hashlib.sha256(output.read_bytes()).hexdigest()
     if digest != SHA256 and not args.no_verify:

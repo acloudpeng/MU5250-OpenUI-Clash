@@ -8,6 +8,7 @@ on:
       - scripts/mihomo-patches/**
       - tests/mihomo/**
       - tests/clash-netns.sh
+      - tests/clash-delay.sh
       - agent/src/clash*.rs
       - agent/src/egress.rs
       - .github/workflows/mihomo.yml
@@ -18,6 +19,7 @@ on:
       - scripts/mihomo-patches/**
       - tests/mihomo/**
       - tests/clash-netns.sh
+      - tests/clash-delay.sh
       - agent/src/clash*.rs
       - agent/src/egress.rs
       - .github/workflows/mihomo.yml
@@ -38,6 +40,8 @@ jobs:
           qemu-aarch64 build/mihomo/mihomo -v | tee /dev/stderr | grep 'linux arm64' | grep -qF "$(python3 -c 'import runpy; print(runpy.run_path("scripts/prepare-mihomo.py")["VERSION"])')"
           mkdir -p build/smoke && cp tests/mihomo/smoke.yaml build/smoke/config.yaml
           qemu-aarch64 build/mihomo/mihomo -d build/smoke -t -f build/smoke/config.yaml
+      - name: Delay test through a node with only the built-in roots
+        run: MIHOMO_RUNNER=qemu-aarch64 sh tests/clash-delay.sh build/mihomo/mihomo
       - name: Bundled geo data loads offline through home symlinks
         run: |
           python3 scripts/prepare-geodata.py --output build/geo

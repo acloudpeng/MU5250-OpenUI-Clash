@@ -10,6 +10,15 @@ pub const MIXED_PORT: u16 = 7890;
 pub const DNS_LISTEN: &str = "127.0.0.1:1053";
 /// The TUN takes the first /30 of this range; the rest is the fake-IP pool.
 pub const FAKE_IP_RANGE: &str = "198.18.0.1/16";
+/// B31 has been seen keeping Beijing time in the system clock as if it were UTC (8 h
+/// ahead), and the firmware's own NITZ/NTP writes it back. VMess, Shadowsocks 2022 and
+/// some REALITY servers reject handshakes that far off, so the core keeps its own
+/// NTP-corrected clock and never writes the system's. ntp.aliyun.com by address, so
+/// time does not wait on DNS.
+const NTP_SERVER: &str = "203.107.6.88";
+/// Minutes between syncs; also how long the core waits after a failed sync, such as
+/// the first one at boot before the WAN is up.
+const NTP_INTERVAL: u16 = 5;
 
 /// Top-level subscription keys carried into the generated configuration. Anything
 /// else (listeners, tunnels, controller, iptables, interface/mark, ntp, tls, ...) is dropped.
@@ -188,6 +197,13 @@ pub fn compose(source: &Mapping, o: &Options) -> String {
     set("find-process-mode", key("off"));
     set("geodata-loader", key("memconservative"));
     set("geo-auto-update", Value::Bool(false));
+    let mut ntp = Mapping::new();
+    ntp.insert(key("enable"), Value::Bool(true));
+    ntp.insert(key("server"), key(NTP_SERVER));
+    ntp.insert(key("port"), Value::Number(123.into()));
+    ntp.insert(key("interval"), Value::Number(NTP_INTERVAL.into()));
+    ntp.insert(key("write-to-system"), Value::Bool(false));
+    set("ntp", Value::Mapping(ntp));
     let mut profile = Mapping::new();
     profile.insert(key("store-selected"), Value::Bool(true));
     profile.insert(key("store-fake-ip"), Value::Bool(o.dns_mode == "fake-ip"));
@@ -244,6 +260,7 @@ iptables: {enable: true}
 listeners: [{name: lan, type: socks, port: 1080, listen: 0.0.0.0}]
 tunnels: [{network: [tcp], address: 0.0.0.0:6553, target: 1.1.1.1:53, proxy: A}]
 tun: {enable: true, stack: gvisor, auto-route: true, device: utun}
+ntp: {enable: false, server: time.example, write-to-system: true}
 dns:
   enable: true
   listen: 0.0.0.0:53
@@ -293,6 +310,15 @@ rules:
         assert_eq!(tun["stack"], key("system"));
         assert_eq!(tun["auto-route"], Value::Bool(false));
         assert_eq!(tun["auto-redirect"], Value::Bool(false));
+    }
+    #[test]
+    fn core_keeps_its_own_clock_without_touching_the_system() {
+        let ntp = &composed()["ntp"];
+        assert_eq!(ntp["enable"], Value::Bool(true));
+        assert_eq!(ntp["server"], key(NTP_SERVER));
+        assert_eq!(ntp["port"], Value::Number(123.into()));
+        assert_eq!(ntp["interval"], Value::Number(NTP_INTERVAL.into()));
+        assert_eq!(ntp["write-to-system"], Value::Bool(false));
     }
     #[test]
     fn dns_keeps_upstreams_but_not_listeners() {
