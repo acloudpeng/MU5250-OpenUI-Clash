@@ -199,3 +199,36 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
 - 验证：本机预览构建（`sh screen/build.sh --preview`）的点击/导航/转义测试全部通过，新增语言切换断言（中文默认、`en` 切换、
   旧格式 `C` 记录、非法语言拒绝），并逐页查看了中英文截图；zig 0.16 交叉编译 aarch64-musl 通过。
   Agent 新增测试 `language_follows_the_web_panel`。真机效果仍需设备解锁后确认。
+
+### 2026-10-09 — 实机：整组测速报 `get delay: all proxies timeout`
+- 现象：B31 实机「节点」页整组测速报 `Clash 内核：get delay: all proxies timeout`。mihomo 在组内每个节点都测速失败时返回这句，单个失败原因不会透出。
+- **主要怀疑：B31 系统时钟快 8 小时。** 其他 B31 项目实测，固件把北京时间当作 UTC 写进系统 epoch（`TZ=UTC`），原厂 NITZ/NTP 还会写回
+  （gaofeng21cn/u60-pro-enhanced `docs/INSTALL.md`、peter5842/U60-Pro-WebUI `agent/src/mihomo/config.rs`）。
+  VMess 客户端时间戳取内核的 `ntp.Now`，服务端按自身系统时钟只允许 ±120 s（sing-vmess `service.go`）；SS2022、部分 REALITY 服务端同样校验时间。
+  节点全是这类协议时，所有节点失败，整组测速就报这句。
+  - 复现：本机起一个 VMess 节点（服务端按真实时钟校验）。客户端协议时钟快 8 小时（用假 NTP 模拟），报 `get delay: all proxies timeout`；
+    客户端用新生成配置里的 NTP 段，返回 `{"vmess-node":202}`。
+  - 修复（agent）：`clash_config.rs` 生成的配置固定带
+    `ntp: {enable: true, server: 203.107.6.88, port: 123, interval: 5, write-to-system: false}`。
+    `203.107.6.88` 即 ntp.aliyun.com，直接写地址，校时不依赖 DNS。只校正内核自己的协议/TLS 时钟，不改系统时间。订阅里的 `ntp` 照旧丢弃。
+    间隔 5 分钟：开机时 WAN 未就绪导致首次校时失败，最多 5 分钟后重试（mihomo 失败后要等一个间隔）。
+    `162.159.200.1`（Cloudflare，gaofeng 的选择）从开发机超时，故未采用。
+  - 注意：这个内核版本的校时日志方向写反了。系统时钟快 8 小时时日志写「behind NTP time by 8h」，只看数值。
+- **内核缺内置根证书（构建缺陷，B31 上大概率不是这次的原因）。** mihomo 源码里的 `component/ca/ca-certificates.crt` 是 0 字节占位文件，
+  上游在发布 CI 里填好再编译；`prepare-mihomo.py` 直接编译，内核只能用系统证书。
+  其他 B31 项目读取 `/etc/ssl/certs/ca-certificates.crt`，原厂 curl 校验通过，说明 B31 上 Go 能找到系统证书，旧内核照样能做 TLS 校验。
+  - 复现：按原脚本重建的内核与原固定 sha256 `330642b1…a79f77` 一致，内置证书 0 张。
+    用 `DISABLE_SYSTEM_CA=true` 模拟没有系统证书的固件：同一节点 HTTPS 测速报 `all proxies timeout`，HTTP 正常。
+  - 修复：编译前写入 curl 提取的 Mozilla 根证书（`cacert-2026-09-25.pem`，121 张，固定 sha256），编译后检查已嵌入。
+    版本串改为 `flclash-d0c8d44-openui-ca20260925`，sha256 `df75037f…6688985`（三次构建一致）。
+    新测试 `tests/clash-delay.sh`（已加入 `mihomo.yml`，需联网）：只用内置证书时整组测速必须成功，去掉内置证书的对照组必须失败。
+- 验证：agent 97 个测试、fmt、clippy、Python 21 个测试通过。生成配置经 `mihomo -t` 通过。
+  qemu 下新内核的 `-v`、`smoke.yaml`、离线 geo、`clash-delay.sh` 均通过。
+  netns 数据面测试本机缺 `dig` 未跑。实机待确认：`date -u` 是否快 8 小时、节点协议、部署后测速。
+- 部署：agent（NTP）和内核（证书）都要重新部署。
+- 补记（同日）：CI 里 `clash-delay.sh` 首次运行失败，是测试自身的启动竞态——mihomo 先开控制接口（`hub.ApplyConfig` 里
+  `applyRoute` 在 `executor.ApplyConfig` 之前），qemu 下节点的监听端口还没开就开始测速。测试改为等节点端口进入 LISTEN、客户端分组加载后再测。
+  agent 不受影响：它等 TUN 网卡出现，TUN 在监听端口之后创建。
+- 新增只读诊断脚本 `scripts/device/diagnose-clash.sh`：时钟偏差、生成配置是否带 ntp、内核 DNS、节点 HTTP/HTTPS 测速、经内核访问国内外地址、
+  连接来源、TUN 与 rp_filter、`ip rule` 与标记流量的路由结果、钩子位置与计数器。真机现象「需要代理的网站打不开、直连的能打开」用它区分
+  「节点不通」和「流量没进 Clash」。

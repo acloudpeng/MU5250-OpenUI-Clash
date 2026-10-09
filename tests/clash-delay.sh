@@ -34,6 +34,17 @@ proxy-groups:
 rules: ['MATCH,PROXY']
 EOF
 
+# wait_for NAME CHECK...: retries CHECK for up to 30 s; NAME's log explains a timeout.
+wait_for() {
+ name=$1; shift
+ i=0
+ until "$@" >/dev/null 2>&1; do
+  i=$((i + 1)); [ "$i" -lt 150 ] || { echo "FAIL: $name core not ready ($*)"; cat "$WORK/$name.log"; exit 1; }
+  sleep 0.2
+ done
+}
+ctl() { curl -fsS --unix-socket "$WORK/$1/mihomo.sock" "http://mihomo$2"; }
+listening() { grep -q ":$(printf '%04X' "$PORT") 00000000:0000 0A" /proc/net/tcp; }
 # start NAME [ENV=VALUE...]: runs the core on NAME's profile with only built-in roots.
 start() {
  name=$1; shift
@@ -41,19 +52,18 @@ start() {
  # shellcheck disable=SC2086
  env DISABLE_SYSTEM_CA=true "$@" $RUNNER "$CORE" -d "$WORK/$name" -f "$WORK/$name/config.yaml" >>"$WORK/$name.log" 2>&1 &
  PIDS="$PIDS $!"
- i=0
- until curl -fsS --unix-socket "$WORK/$name/mihomo.sock" http://mihomo/version >/dev/null 2>&1; do
-  i=$((i + 1)); [ "$i" -lt 150 ] || { echo "FAIL: $name core did not start"; cat "$WORK/$name.log"; exit 1; }
-  sleep 0.2
- done
+ wait_for "$name" ctl "$name" /version
 }
 delay() {
  curl -sS --unix-socket "$WORK/client/mihomo.sock" "http://mihomo/group/PROXY/delay?url=$URL&timeout=10000"
 }
 
+# The controller answers before the core opens its listeners and loads its groups.
 start node
+wait_for node listening
 start client
 client=$!
+wait_for client ctl client /proxies/PROXY
 answer=$(delay)
 case "$answer" in
  *'"node":'[1-9]*) echo "PASS: delay test through a node with built-in roots only: $answer" ;;
@@ -62,6 +72,7 @@ esac
 # Control: without any roots the same test must fail, so the pass above came from them.
 kill "$client"; wait "$client" 2>/dev/null || true
 start client DISABLE_EMBED_CA=true
+wait_for client ctl client /proxies/PROXY
 answer=$(delay)
 case "$answer" in
  *'all proxies timeout'*) echo 'PASS: without roots the delay test fails as on an unfixed core' ;;

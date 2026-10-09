@@ -106,3 +106,19 @@ info, the core logs the measured offset; in this core version the line's "ahead"
   are not affected.
 - IPv6 is blocked for proxied devices.
 - Turning Clash off removes its rules and restores normal routing.
+
+## Troubleshooting
+
+If sites that need the proxy fail while direct sites work, either the nodes fail or the
+device's traffic never reaches the core. `scripts/device/diagnose-clash.sh` tells them
+apart without changing anything: clock skew, whether the profile has the `ntp` block,
+DNS through the core, HTTP and HTTPS node delays, fetches through the core, connection
+sources, the TUN, `ip rule` and where a marked LAN packet is routed, and the firewall
+hooks with their counters.
+
+```sh
+ssh -p 2222 root@192.168.0.1 sh -s < scripts/device/diagnose-clash.sh
+```
+
+On Windows, copy it with `scp -P 2222` and run `sh /tmp/diagnose-clash.sh` on the
+modem; the file must keep LF line endings.
