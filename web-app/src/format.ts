@@ -39,6 +39,13 @@ export function formatUptime(secs?: number): string {
   return [d && t('{n}d', { n: d }), (d || h) && t('{n}h', { n: h }), t('{n}m', { n: m })].filter(Boolean).join(' ')
 }
 
+/** Relative time of an epoch-seconds timestamp ("3 min ago"). */
+export function ago(ts: number) {
+  if (!ts) return t('never')
+  const s = Math.max(0, Math.round(Date.now() / 1000 - ts))
+  return s < 60 ? t('just now') : s < 3600 ? t('{n} min ago', { n: Math.round(s / 60) }) : s < 86400 ? t('{n} h ago', { n: Math.round(s / 3600) }) : t('{n} d ago', { n: Math.round(s / 86400) })
+}
+
 export function formatDuration(secs: number): string {
   if (!Number.isFinite(secs) || secs <= 0) return t('{n}s', { n: 0 })
   const h = Math.floor(secs / 3600)

@@ -1,9 +1,17 @@
-import type { ClashDnsMode, ClashLogLevel, ClashProxyMode, ClashStack } from '../../types'
+import type { ClashDnsMode, ClashLogLevel, ClashProxyMode, ClashStack, ClashStatus } from '../../types'
 import { formatUptime } from '../../format'
 import { Field, Segmented, Select, Toggle } from '../../ui/controls'
 import { Card, Chip, Stat } from '../../ui/primitives'
 import { useClash } from './ClashContext'
+import DiagnosticsCard from './DiagnosticsCard'
 import { t, tm } from '../../i18n'
+
+/** Which devices the saved routing sends through Clash; `macs` are exclusions in all-devices mode. */
+function scope({ mode, macs }: ClashStatus) {
+  const n = macs.length
+  if (mode === 'all') return n ? t('All devices except {n}', { n }) : t('All devices')
+  return n === 0 ? t('No device selected') : n === 1 ? t('Only {n} selected device', { n }) : t('Only {n} selected devices', { n })
+}
 
 export default function OverviewTab() {
   const { status, error, busy, update } = useClash()
@@ -33,6 +41,7 @@ export default function OverviewTab() {
               {status.wireguard_enabled && <Chip tone="accent">{t('WireGuard is on')}</Chip>}
               {!active && <Chip tone="warn">{t('No subscription selected')}</Chip>}
               {active && !active.downloaded && <Chip tone="warn">{t('Subscription not downloaded')}</Chip>}
+              <Chip tone={status.mode === 'selected' && !status.macs.length ? 'warn' : 'default'}>{t('Device routing: {scope}', { scope: scope(status) })}</Chip>
             </div>
             {!status.geodata.length && <p className="text-xs text-ink2">{t('GEOIP and GEOSITE rules make the core download its databases from GitHub, which often fails here. Deploy them with {flag}.').split('{flag}').flatMap((part, i) => i ? [<code key={i}>--mihomo-geodata</code>, part] : [part])}</p>}
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -86,6 +95,8 @@ export default function OverviewTab() {
         </div>
         <p className="mt-3 text-xs text-ink3">{t('IPv6 internet and IPv6 DNS are blocked for proxy devices so nothing bypasses the core. Router management always stays reachable.')}</p>
       </Card>}
+
+      <DiagnosticsCard />
     </div>
   )
 }

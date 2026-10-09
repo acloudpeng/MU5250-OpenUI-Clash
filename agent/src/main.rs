@@ -7,6 +7,7 @@ mod charge_policy;
 mod clash;
 mod clash_config;
 mod clash_ctl;
+mod clash_diag;
 mod clash_sub;
 mod connection_logger;
 mod csv_utils;

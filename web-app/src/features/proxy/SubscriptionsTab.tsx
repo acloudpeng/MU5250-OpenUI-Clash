@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { api } from '../../data/api'
-import { formatBytes } from '../../format'
+import { ago, formatBytes } from '../../format'
 import type { ClashSubscription, ClashSubscriptionAction } from '../../types'
 import { Button, Field, Input } from '../../ui/controls'
 import { confirm, toast } from '../../ui/feedback'
@@ -18,12 +18,6 @@ interface Draft {
 }
 
 const EMPTY: Draft = { id: null, url: '', name: '', user_agent: '', interval_hours: '', via_proxy: false }
-
-function ago(ts: number) {
-  if (!ts) return t('never')
-  const s = Math.max(0, Math.round(Date.now() / 1000 - ts))
-  return s < 60 ? t('just now') : s < 3600 ? t('{n} min ago', { n: Math.round(s / 60) }) : s < 86400 ? t('{n} h ago', { n: Math.round(s / 3600) }) : t('{n} d ago', { n: Math.round(s / 86400) })
-}
 
 function daysLeft(expire: number) {
   return expire ? Math.ceil((expire - Date.now() / 1000) / 86400) : null

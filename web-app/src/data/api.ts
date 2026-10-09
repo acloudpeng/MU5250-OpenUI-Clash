@@ -12,6 +12,7 @@ import type {
   DevUISettings,
   WireGuardUpdate,
   ClashConnections,
+  ClashDiagnostics,
   ClashProxies,
   ClashStatus,
   ClashUpdate,
@@ -642,6 +643,9 @@ export const api = {
   clashConnections: () => get('/api/clash/connections').then(d => d as unknown as ClashConnections),
   clashCloseConnections: () => req('DELETE', '/api/clash/connections'),
   clashLogs: () => get('/api/clash/logs').then(d => d as unknown as { lines: string[] }),
+  // The run itself takes up to ~40 s in the background; the POST answers at once.
+  clashDiagnostics: () => get('/api/clash/diagnostics').then(d => d as unknown as ClashDiagnostics),
+  clashDiagnose: () => req('POST', '/api/clash/diagnostics', undefined, undefined, 10_000).then(d => d as unknown as ClashDiagnostics),
   // Home — single batched request
   home: () => get('/api/dashboard').then(mapHome),
 

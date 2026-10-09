@@ -518,6 +518,51 @@ def clash_select(body):
     return STATE["clash_proxies"]
 
 
+def diagnostics_report():
+    """Mirrors agent/src/clash_diag.rs: a B31 whose clock runs 8 h ahead without the
+    core's NTP block, so every node fails while direct sites still open."""
+    device_now = int(time.time()) + 28800
+    checks = [
+        ("clock", "warn", {"skew_s": 28800, "ntp": False}, ""),
+        ("core", "pass", {"running": True, "supervised": True, "version": "flclash-d0c8d44-openui-ca20260925"}, ""),
+        ("dns", "pass", {"domestic": True, "foreign": False}, ""),
+        ("nodes", "fail", {"group": "Proxy", "node": "HK 01", "https_ms": None, "http_ms": None, "answered": 0, "total": 12}, ""),
+        ("fetch", "fail", {"domestic": 200, "foreign": None}, ""),
+        ("devices", "pass", {"mode": "all", "proxied": 1, "total": 2, "clients": [
+            {"ip": "192.0.2.104", "mac": "02:00:00:00:00:04", "name": "work-laptop", "interface": "rndis0",
+             "proxied": True, "active": True},
+            {"ip": "192.0.2.102", "mac": "02:00:00:00:00:02", "name": "iPhone-16", "interface": "wlan0",
+             "proxied": False, "active": False},
+        ]}, ""),
+        ("route", "pass", {"client": "192.0.2.104", "tun": True, "dns_tun": True},
+         "1.1.1.1 from 192.0.2.104 dev ou-clash0 table 10421 mark 0x20000000\n"
+         "198.19.0.53 from 192.0.2.104 dev ou-clash0 table 10421 mark 0x20000000\n"
+         "0:\tfrom all lookup local\n"
+         "10421:\tfrom all fwmark 0x20000000/0x20000000 lookup 10421\n"
+         "32766:\tfrom all lookup main\n"
+         "32767:\tfrom all lookup default"),
+        ("firewall", "pass", {"missing": [], "displaced": [], "held": False, "rejected": 0,
+                              "ipa_acceleration": True, "rp_filter": 2}, ""),
+    ]
+    return {"started_at": device_now - 38, "finished_at": device_now, "duration_ms": 38_412, "verdict": "nodes",
+            "checks": [{"id": i, "status": s, "data": d, "detail": detail} for i, s, d, detail in checks]}
+
+
+def clash_diagnostics():
+    """The last report; while a run is in progress it keeps the previous one, like the agent."""
+    if STATE["diagnostics"]["running"] and time.time() >= STATE["diagnostics_done_at"]:
+        STATE["diagnostics"] = {**diagnostics_report(), "running": False}
+    return STATE["diagnostics"]
+
+
+def clash_diagnose(body):
+    # A run takes up to ~40 s on the device; the demo finishes after 3.
+    if not STATE["diagnostics"]["running"]:
+        STATE["diagnostics"] = {**STATE["diagnostics"], "running": True}
+        STATE["diagnostics_done_at"] = time.time() + 3
+    return clash_diagnostics()
+
+
 ROUTES_PUT = {
     "/api/clash": clash_set,
     "/api/clash/proxies": clash_select,
@@ -560,6 +605,8 @@ STATE["clash_proxies"] = {
         "GLOBAL": {"type": "Selector", "delay": 48, "udp": True, "alive": True},
     },
 }
+STATE["diagnostics"] = {"running": False, "started_at": None, "finished_at": None, "verdict": None, "checks": []}
+STATE["diagnostics_done_at"] = 0
 
 STATE["screen_settings"] = {"revision": 1, "shortcut_enabled": False, "brightness": 128, "idle_seconds": 120, "home_page": "menu", "menu_items": ["overview", "wireguard", "profiles", "devices"], "language": "zh"}
 STATE["screen"] = {"available": True, "verified": True, "running": False, "state": "idle", "settings_revision": 1, "shortcut": {"available": True, "message": "Shortcut disabled"}}
@@ -573,6 +620,7 @@ ROUTES_GET = {
          "port": "443", "sniff_host": "", "rule": "Match", "rule_payload": "", "chains": ["HK 01", "Proxy"],
          "upload": 18234, "download": 912345, "start": "2026-09-25T08:00:00Z"}] if STATE["clash"]["running"] else []},
     "/api/clash/logs": lambda: {"lines": ["time=\"2026-09-25T08:00:00Z\" level=info msg=\"Start initial Compatible provider default\""]},
+    "/api/clash/diagnostics": clash_diagnostics,
     "/api/screen": lambda: STATE["screen"],
     "/api/screen/settings": lambda: STATE["screen_settings"],
     "/api/dashboard": dashboard_batch,
@@ -633,6 +681,7 @@ ROUTES_POST = {
     "/api/clash/delay": lambda body: (
         {n: STATE["clash_proxies"]["nodes"][n]["delay"] or 0 for g in STATE["clash_proxies"]["groups"] if g["name"] == body.get("name") for n in g["all"]}
         if body.get("group") else {"delay": (STATE["clash_proxies"]["nodes"].get(body.get("name")) or {}).get("delay") or 0}),
+    "/api/clash/diagnostics": clash_diagnose,
     "/api/sms/list": lambda body: sms_list(),
     "/api/system/kill-bloat": lambda body: {
         "killed": [

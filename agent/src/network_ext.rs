@@ -203,6 +203,11 @@ fn link_speed_mbps(iface: &str) -> Option<u64> {
 }
 
 pub fn network_clients(_state: &AppState) -> (u16, Value) {
+    (200, json!({"ok": true, "data": { "clients": clients() }}))
+}
+
+/// LAN clients from DHCP leases, ARP, Wi-Fi stations and bridge ports.
+pub fn clients() -> Vec<Value> {
     // Build hostname lookup from DHCP leases
     let mut hostname_by_mac: HashMap<String, String> = HashMap::new();
     if let Ok(dhcp) = ubus::call("luci-rpc", "getDHCPLeases", Some(r#"{"family":4}"#)) {
@@ -258,8 +263,7 @@ pub fn network_clients(_state: &AppState) -> (u16, Value) {
             "wired_link_mbps": wired_link_mbps,
         }));
     }
-
-    (200, json!({"ok": true, "data": { "clients": clients }}))
+    clients
 }
 
 pub fn network_battery_ubus(_state: &AppState) -> (u16, Value) {

@@ -9,6 +9,7 @@ use tiny_http::{Header, Method, Request, Response, Server};
 use crate::at_cmd;
 use crate::cell;
 use crate::clash;
+use crate::clash_diag;
 use crate::connection_logger;
 use crate::device_ext;
 use crate::handlers::{self, AppState};
@@ -332,6 +333,8 @@ pub fn route(
         (&Method::Get, "/api/clash/connections") => clash::connections(),
         (&Method::Delete, "/api/clash/connections") => clash::close_connections(),
         (&Method::Get, "/api/clash/logs") => clash::logs(),
+        (&Method::Get, "/api/clash/diagnostics") => clash_diag::get(),
+        (&Method::Post, "/api/clash/diagnostics") => clash_diag::run(),
         (&Method::Post, "/api/system/kill-bloat") => handlers::system_kill_bloat(state, body),
         (&Method::Post, "/api/system/restart-agent") => device_ext::agent_restart(state),
         (&Method::Post, "/api/device/reboot") => device_ext::device_reboot(state),

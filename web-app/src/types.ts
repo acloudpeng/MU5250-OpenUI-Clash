@@ -554,6 +554,58 @@ export interface ClashConnections {
   connections: ClashConnection[]
 }
 
+/** `GET /api/clash/diagnostics` — mirrors agent/src/clash_diag.rs. */
+export type ClashCheckStatus = 'pass' | 'warn' | 'fail' | 'skip'
+export type ClashVerdict = 'clash_off' | 'core_down' | 'not_routed' | 'nodes' | 'no_devices' | 'ok'
+export interface ClashDiagClient {
+  ip: string
+  mac: string
+  name: string | null
+  interface: string | null
+  proxied: boolean
+  /** The core has connections from this address. */
+  active: boolean
+}
+/** Each check's data, by check id. */
+export interface ClashCheckData {
+  /** Device clock minus a domestic site's HTTP Date (positive = ahead); ntp: the profile has the core's NTP block. */
+  clock: { skew_s: number | null; ntp: boolean }
+  core: { running: boolean; supervised: boolean; version: string | null }
+  dns: { domestic: boolean; foreign: boolean }
+  /** Main selector group, the node it resolves to, its delays, and members answering a group test. */
+  nodes: { group: string; node: string; https_ms: number | null; http_ms: number | null; answered: number; total: number }
+  /** HTTP status of fetches by the router through the core's mixed port; null = failed. */
+  fetch: { domestic: number | null; foreign: number | null }
+  devices: { mode: 'all' | 'selected'; proxied: number; total: number; clients: ClashDiagClient[] }
+  /** The check's `detail` holds the raw `ip route get` lines and `ip rule show`. */
+  route: { client: string; tun: boolean; dns_tun: boolean }
+  firewall: {
+    missing: string[]
+    /** Owned hooks with a firmware rule above them. */
+    displaced: string[]
+    /** The transition guard was left in place (blocks LAN forwarding). */
+    held: boolean
+    /** Packets the kill switch rejected: marked traffic not routed into the TUN. */
+    rejected: number
+    ipa_acceleration: boolean | null
+    rp_filter: number | null
+  }
+}
+export type ClashCheckId = keyof ClashCheckData
+/** One check; a skipped one may carry no data. */
+export type ClashCheck = {
+  [K in ClashCheckId]: { id: K; status: ClashCheckStatus; data: Partial<ClashCheckData[K]>; detail: string }
+}[ClashCheckId]
+export interface ClashDiagnostics {
+  running: boolean
+  /** Device clock (epoch seconds), which may be skewed; null before the first run. */
+  started_at: number | null
+  finished_at: number | null
+  duration_ms?: number
+  verdict: ClashVerdict | null
+  checks: ClashCheck[]
+}
+
 export type DevUIPageId = 'overview' | 'wireguard' | 'profiles' | 'devices'
 export interface DevUISettings {
   revision: number

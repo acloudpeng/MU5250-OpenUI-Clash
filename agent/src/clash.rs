@@ -27,18 +27,18 @@ const SUBS: &str = "/data/local/tmp/openui-clash/subscriptions";
 const PIDFILE: &str = "/data/local/tmp/openui-clash/mihomo.pid";
 /// mihomo home: generated profile, cache.db, providers and bundled geo data.
 const HOME: &str = "/data/local/tmp/openui-clash/home";
-const PROFILE: &str = "/data/local/tmp/openui-clash/home/config.yaml";
+pub(crate) const PROFILE: &str = "/data/local/tmp/openui-clash/home/config.yaml";
 const SOCKET: &str = "/data/local/tmp/openui-clash/home/mihomo.sock";
 const MIHOMO: &str = "/data/bin/mihomo";
 /// Geo data deployed beside the core; linked into HOME so the core never downloads it.
 const GEODATA: &str = "/data/share/mihomo";
 const GEO_FILES: &[&str] = &["geoip.metadb", "GeoSite.dat", "ASN.mmdb"];
-const IFACE: &str = "ou-clash0";
+pub(crate) const IFACE: &str = "ou-clash0";
 /// Marked clients' DNS is redirected here; it routes into the TUN and is hijacked.
 /// Outside the TUN /30 (whose second address the system stack uses for NAT).
-const DNS: &str = "198.19.0.53";
-const PROXY: &str = "http://127.0.0.1:7890";
-const EGRESS: Egress = Egress {
+pub(crate) const DNS: &str = "198.19.0.53";
+pub(crate) const PROXY: &str = "http://127.0.0.1:7890";
+pub(crate) const EGRESS: Egress = Egress {
     label: "Clash",
     prefix: "OUCL",
     mark: "0x20000000",
@@ -51,7 +51,7 @@ const EGRESS: Egress = Egress {
 };
 const MAX_SUBSCRIPTIONS: usize = 5;
 const LOG_LINES: usize = 300;
-const DELAY_URL: &str = "https://www.gstatic.com/generate_204";
+pub(crate) const DELAY_URL: &str = "https://www.gstatic.com/generate_204";
 static LOCK: Mutex<()> = Mutex::new(());
 static ERROR: Mutex<Option<String>> = Mutex::new(None);
 static CORE: Mutex<Option<Core>> = Mutex::new(None);
@@ -602,7 +602,7 @@ fn stop_core() {
     kill_stale();
 }
 /// True while the supervised core process is alive.
-fn core_running() -> bool {
+pub(crate) fn core_running() -> bool {
     let mut core = CORE.lock().unwrap();
     match core.as_mut().map(|c| c.child.try_wait()) {
         Some(Ok(None)) => true,
@@ -615,7 +615,12 @@ fn core_running() -> bool {
         None => false,
     }
 }
-fn ctl(method: &str, path: &str, body: Option<&Value>, secs: u64) -> Result<Value, String> {
+pub(crate) fn ctl(
+    method: &str,
+    path: &str,
+    body: Option<&Value>,
+    secs: u64,
+) -> Result<Value, String> {
     clash_ctl::call(
         Path::new(SOCKET),
         method,
@@ -805,6 +810,10 @@ pub(crate) struct Suspended(Settings);
 /// Whether Clash is saved as on. Read without the lock (atomic file replacement).
 pub(crate) fn stored_enabled() -> bool {
     load().is_ok_and(|s| s.enabled)
+}
+/// Saved on/off, routing mode and device list, read like `stored_enabled`.
+pub(crate) fn stored_routing() -> Option<(bool, String, Vec<String>)> {
+    load().ok().map(|s| (s.enabled, s.mode, s.macs))
 }
 /// Turns Clash off for a switch to WireGuard. The caller holds the WireGuard lock and
 /// its transition guard; `resume` restores Clash if that switch fails.

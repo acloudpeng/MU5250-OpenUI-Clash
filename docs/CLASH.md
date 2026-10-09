@@ -122,3 +122,12 @@ ssh -p 2222 root@192.168.0.1 sh -s < scripts/device/diagnose-clash.sh
 
 On Windows, copy it with `scp -P 2222` and run `sh /tmp/diagnose-clash.sh` on the
 modem; the file must keep LF line endings.
+
+The **Diagnostics** card on the Proxy page's Overview runs the same checks through the
+agent (`POST /api/clash/diagnostics`, up to about 40 s in the background; it changes
+nothing) and names the first broken layer: Clash off, core not running, traffic not
+reaching Clash (route or firewall), nodes failing, or no device routed to Clash. Each
+check shows its evidence: clock skew and core NTP, core DNS, the main group's node with
+HTTPS/HTTP delays, fetches through the core, which LAN devices are proxied and active in
+the core, the route of a marked LAN packet, and the firewall hooks, kill-switch counter,
+IPA acceleration and `rp_filter`. The Overview also shows which devices Clash covers.

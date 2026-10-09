@@ -232,3 +232,16 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
 - 新增只读诊断脚本 `scripts/device/diagnose-clash.sh`：时钟偏差、生成配置是否带 ntp、内核 DNS、节点 HTTP/HTTPS 测速、经内核访问国内外地址、
   连接来源、TUN 与 rp_filter、`ip rule` 与标记流量的路由结果、钩子位置与计数器。真机现象「需要代理的网站打不开、直连的能打开」用它区分
   「节点不通」和「流量没进 Clash」。
+
+### 2026-10-10 — 阶段 1：内置一键诊断
+- 背景：实机上「需要代理的网站打不开、直连的能打开」，分不清是节点不通还是设备流量没进 Clash。
+- agent：`agent/src/clash_diag.rs`，`GET/POST /api/clash/diagnostics`。POST 在后台线程运行（HTTP 只有几个工作线程，不能占用 40 秒），GET 轮询结果。
+  八项检查：时钟偏差（国内站点 HTTP `Date` 对比）与生成配置是否带 ntp、内核控制接口与版本、内核 DNS、主分组当前节点的 HTTPS/HTTP 测速与整组测速、
+  经 mixed-port 访问国内/国外、设备分流（哪些设备走代理、内核里有没有它们的连接）、标记包的路由（`ip route get … iif br-lan mark`）、
+  防火墙钩子是否在链首/保护链残留/kill-switch 拒绝计数/IPA 加速/rp_filter。结论按层给出：clash_off、core_down、not_routed、nodes、no_devices、ok。
+- 网页：概览页「Clash 诊断」卡片（运行中进度、结论与提示、逐项证据、设备列表、路由详情）和「设备分流」范围标签；旧 agent 返回 404 时提示部署新版。
+- 验证：agent 单元测试（HTTP 日期、设备选择、钩子顺序、计数、结论、主分组解析）；`live_diagnosis` 在容器里对真内核跑通（节点 HTTP 93 ms/HTTPS 296 ms，
+  无策略时正确判为 not_routed）；网页 build/lint/test、i18n 0 问题、契约检查通过；mock 下中英文桌面/手机截图无控制台错误。
+- 调研（其他 B31 项目）：本仓库的 fwmark→表 10421→TUN 方案源自 czwstc 的 WireGuard 分支，只在 netns 里测过、未在真机验证；
+  B31 上验证过的做法有 mihomo 自带 auto-route（规则 9000–9099）+ FORWARD 首位放行，以及打标记 + 自建路由表并处理固件重定向链；
+  有项目要求关闭 IPA 加速，担心转发流量绕过 netfilter。等用户的诊断输出再决定是否改数据面。
