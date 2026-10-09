@@ -264,7 +264,9 @@ produced these corrections. Read them before relying on the notes above.
   single-byte-XOR obfuscated (all 255 keys tested). It is also absent from
   `zte_topsw_mc` (which runs `device_backup_proc`) and from `libztemc.so`
   (which holds the backup `openssl` template). Post-rotation recovery is an
-  open problem — treat a rotated suffix as potentially unrecoverable.
+  open problem — treat a rotated suffix as potentially unrecoverable. The full
+  evidence, including a 1,524-binary sweep and 49 tested derivations, is in
+  [reference/suffix-recovery-b31.md](reference/suffix-recovery-b31.md).
 - **`/data/dropbear/` is the post-update lifeline.** `harden()` copies the
   authorised keys and host keys there, and `/data` survives FOTA while
   `/etc/dropbear` does not. Restoring SSH after an update is:

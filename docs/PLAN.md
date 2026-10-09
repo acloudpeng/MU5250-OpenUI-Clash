@@ -84,8 +84,11 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
    "从 `strings /usr/sbin/zte_web` 提取新 suffix" 在 B31 上**不成立** —— 守护进程实际在
    `/usr/bin/zte_web`，且 suffix 既不是明文、也不是单字节 XOR（255 个密钥全试）。
    `zte_topsw_mc`（真正执行 `device_backup_proc` 的二进制）和 `libztemc.so`（含备份
-   `openssl` 模板）里同样没有。**固件更新若导致 suffix 轮换，可能永久失去解锁能力。**
-   更新前务必先按 `docs/AI-OPERATIONS.md` §6.2 抓取指纹。
+   `openssl` 模板）里同样没有。**全固件 1524 个二进制扫描零命中**，且**不是**从 IMEI /
+   `/proc/zte_unique_id` 可推导（49 种推导全部失败，用真实备份作 oracle 验证）。
+   **固件更新若导致 suffix 轮换，可能永久失去解锁能力。**
+   完整证据见 `docs/reference/suffix-recovery-b31.md`；更新前务必先按
+   `docs/AI-OPERATIONS.md` §6.2 抓取指纹。
 9. **Windows 主机执行 `deploy-components.py` 需包装**：管道 `selectors`、
    `os.killpg`、CRLF 双重转换、宿主机无 `sh -n`（见 `docs/AI-OPERATIONS.md` §7）。
 10. **rc.local 可能被宿主机引号问题截断**（2026-10-10 实际发生）：见 `docs/SAFETY.md`。
