@@ -115,7 +115,7 @@ export function Segmented<T extends string>({
   onChange,
   disabled = false,
 }: {
-  options: { value: T; label: string }[]
+  options: { value: T; label: string; disabled?: boolean }[]
   value: T
   onChange: (v: T) => void
   disabled?: boolean
@@ -126,10 +126,11 @@ export function Segmented<T extends string>({
         <button
           key={o.value}
           type="button"
-          disabled={disabled}
+          disabled={disabled || o.disabled}
+          aria-pressed={value === o.value}
           onClick={() => onChange(o.value)}
           className={`rounded-[7px] px-3 py-1.5 text-[12px] font-semibold transition-colors ${
-            value === o.value ? 'bg-surface text-ink shadow-sm' : 'text-ink2 hover:text-ink'
+            value === o.value ? 'bg-surface text-ink shadow-sm' : o.disabled ? 'cursor-not-allowed text-ink3 opacity-60' : 'text-ink2 hover:text-ink'
           }`}
         >
           {o.label}

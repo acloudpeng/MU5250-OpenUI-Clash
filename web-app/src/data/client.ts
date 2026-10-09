@@ -84,6 +84,41 @@ export async function req(
   }
 }
 
+/** PUTs a file as the raw body (past the agent's 1 MiB JSON limit), reporting how much was sent. */
+export function upload(
+  path: string,
+  file: Blob,
+  onProgress?: (sent: number, total: number) => void,
+  timeoutMs = 600_000,
+): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('PUT', `${API_BASE}${path}`)
+    xhr.timeout = timeoutMs
+    if (_token) xhr.setRequestHeader('Authorization', `Bearer ${_token}`) // i18n-ignore
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream') // i18n-ignore
+    if (onProgress) xhr.upload.onprogress = (e) => onProgress(e.loaded, e.lengthComputable ? e.total : file.size)
+    xhr.ontimeout = () => reject(new ApiError('Timed out reaching the agent')) // i18n-ignore
+    xhr.onerror = () => reject(new ApiError(`Failed to reach the agent at ${API_BASE}`)) // i18n-ignore
+    xhr.onload = () => {
+      let json: { ok?: boolean; data?: unknown; error?: string }
+      try {
+        json = JSON.parse(xhr.responseText)
+      } catch {
+        reject(new ApiError(`Invalid response from agent (${xhr.status})`, xhr.status)) // i18n-ignore
+        return
+      }
+      if (xhr.status === 401) emitAuthExpired()
+      if (xhr.status < 200 || xhr.status > 299 || !json.ok) {
+        reject(new ApiError(json.error ?? `request failed (${xhr.status})`, xhr.status)) // i18n-ignore
+        return
+      }
+      resolve((json.data ?? {}) as Record<string, unknown>)
+    }
+    xhr.send(file)
+  })
+}
+
 export const get = (path: string) => req('GET', path)
 export const post = (path: string, body?: unknown, extraHeaders?: Record<string, string>) =>
   req('POST', path, body, extraHeaders)

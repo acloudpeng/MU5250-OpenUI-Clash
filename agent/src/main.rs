@@ -6,6 +6,7 @@ mod cell;
 mod charge_policy;
 mod clash;
 mod clash_config;
+mod clash_core;
 mod clash_ctl;
 mod clash_diag;
 mod clash_sub;
@@ -19,6 +20,7 @@ mod lan;
 mod logging;
 mod network_ext;
 mod process;
+mod proxy;
 mod router;
 mod screen;
 mod screen_settings;
@@ -85,6 +87,8 @@ fn main() {
         .bounded_output();
 
     wireguard::start();
+    // Before the supervisor: an interrupted core update may have left its files or lock.
+    clash_core::cleanup_on_start();
     clash::start();
     screen::start(state.clone());
 

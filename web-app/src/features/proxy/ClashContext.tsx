@@ -2,7 +2,8 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../../data/api'
 import type { ClashStatus, ClashUpdate } from '../../types'
-import { confirm, toastError } from '../../ui/feedback'
+import { toastError } from '../../ui/feedback'
+import { useProxy } from './ProxyContext'
 import { t } from '../../i18n'
 
 interface ClashState {
@@ -11,8 +12,8 @@ interface ClashState {
   busy: boolean
   refresh: () => Promise<void>
   /** Sends one change against the latest revision (or `revision`, for edits made against an older
-   * view); asks before taking over from WireGuard. */
-  update: (change: Omit<ClashUpdate, 'expected_revision'>, failure?: string, revision?: number) => Promise<ClashStatus | null>
+   * view). Turning Clash on or off is the backend selector's job. */
+  update: (change: Omit<ClashUpdate, 'expected_revision' | 'enabled'>, failure?: string, revision?: number) => Promise<ClashStatus | null>
   /** Runs another request that returns fresh status (e.g. subscription refresh). */
   run: (task: () => Promise<ClashStatus>, failure: string) => Promise<ClashStatus | null>
 }
@@ -26,6 +27,7 @@ export function useClash() {
 }
 
 export function ClashProvider({ children }: { children: ReactNode }) {
+  const { epoch, refresh: refreshProxy } = useProxy()
   const [status, setStatus] = useState<ClashStatus | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -53,6 +55,15 @@ export function ClashProvider({ children }: { children: ReactNode }) {
     return () => { mounted.current = false; window.clearInterval(timer) }
   }, [refresh])
 
+  // Reload after a switch of the active backend.
+  const seen = useRef(epoch)
+  useEffect(() => {
+    if (seen.current === epoch) return
+    seen.current = epoch
+    generation.current += 1
+    void refresh()
+  }, [epoch, refresh])
+
   const run = useCallback(async (task: () => Promise<ClashStatus>, failure: string) => {
     if (busyRef.current) return null
     generation.current += 1
@@ -60,6 +71,8 @@ export function ClashProvider({ children }: { children: ReactNode }) {
     try {
       const s = await task()
       if (mounted.current) { latest.current = s; setStatus(s) }
+      // Readiness and the revision the selector switches against may have changed.
+      void refreshProxy()
       return s
     } catch (e) {
       if (mounted.current) { setError(e instanceof Error ? e.message : failure); toastError(e, failure) }
@@ -68,21 +81,12 @@ export function ClashProvider({ children }: { children: ReactNode }) {
       busyRef.current = false
       if (mounted.current) setBusy(false)
     }
-  }, [])
+  }, [refreshProxy])
 
-  const update = useCallback(async (change: Omit<ClashUpdate, 'expected_revision'>, failure = t('Clash update failed'), revision?: number) => {
+  const update = useCallback(async (change: Omit<ClashUpdate, 'expected_revision' | 'enabled'>, failure = t('Clash update failed'), revision?: number) => {
     const s = latest.current
     if (!s) return null
-    let takeover = false
-    if (change.enabled && !s.enabled && s.wireguard_enabled) {
-      takeover = await confirm({
-        title: t('Switch from WireGuard to Clash?'),
-        body: t('WireGuard will be turned off and its device choices kept. Proxy devices briefly lose internet while rules are replaced.'),
-        confirmLabel: t('Switch to Clash'),
-      })
-      if (!takeover) return null
-    }
-    return run(() => api.clashSet({ ...change, expected_revision: revision ?? s.revision, ...(takeover ? { takeover } : {}) }), failure)
+    return run(() => api.clashSet({ ...change, expected_revision: revision ?? s.revision }), failure)
   }, [run])
 
   return <Ctx.Provider value={{ status, error, busy, refresh, update, run }}>{children}</Ctx.Provider>

@@ -1,17 +1,16 @@
 /* eslint-disable react-refresh/only-export-components */
 import { Suspense, useEffect, useState, type ReactNode } from 'react'
 import { useAlerts } from './HomeContext'
-import { IActivity, IGauge, IGlobe, IHome, ISim, ISignal, IX, IMoon, ISun, IShield, IMonitor } from '../icons'
+import { IActivity, IGauge, IGlobe, IHome, ISim, ISignal, IX, IMoon, ISun, IMonitor } from '../icons'
 import { Spinner } from '../ui/primitives'
 import { N_, t, type Lang } from '../i18n'
 
-export type Group = 'home' | 'signal' | 'network' | 'wireguard' | 'proxy' | 'modem' | 'devui' | 'system'
+export type Group = 'home' | 'signal' | 'network' | 'proxy' | 'modem' | 'devui' | 'system'
 
 export const NAV: { id: Group; label: string; icon: (p: { size?: number; className?: string }) => ReactNode }[] = [
   { id: 'home', label: N_('Home'), icon: (p) => <IHome {...p} /> },
   { id: 'signal', label: N_('Signal'), icon: (p) => <ISignal {...p} /> },
   { id: 'network', label: N_('Network'), icon: (p) => <IGlobe {...p} /> },
-  { id: 'wireguard', label: N_('WireGuard'), icon: (p) => <IShield {...p} /> },
   { id: 'proxy', label: N_('Proxy'), icon: (p) => <IActivity {...p} /> },
   { id: 'modem', label: N_('Modem'), icon: (p) => <ISim {...p} /> },
   { id: 'devui', label: N_('DevUI'), icon: (p) => <IMonitor {...p} /> },
@@ -22,7 +21,6 @@ const GROUP_TITLES: Record<Group, string> = {
   home: N_('Home'),
   signal: N_('Signal'),
   network: N_('Network'),
-  wireguard: N_('WireGuard'),
   proxy: N_('Proxy'),
   modem: N_('Modem'),
   devui: N_('DevUI'),

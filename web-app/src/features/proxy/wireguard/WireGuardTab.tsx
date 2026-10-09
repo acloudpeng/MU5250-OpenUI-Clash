@@ -1,16 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api } from '../../data/api'
-import type { Client, WireGuardStatus, WireGuardProfileAction } from '../../types'
-import { Button, Input, Select, Toggle } from '../../ui/controls'
-import { Card, Chip, Stat } from '../../ui/primitives'
-import { confirm, toast, toastError } from '../../ui/feedback'
-import { t, tm } from '../../i18n'
+import { api } from '../../../data/api'
+import type { Client, WireGuardStatus, WireGuardProfileAction } from '../../../types'
+import { Button, Input, Select } from '../../../ui/controls'
+import { Card, Chip, Stat } from '../../../ui/primitives'
+import { confirm, toast, toastError } from '../../../ui/feedback'
+import { Tabs } from '../../../ui/Tabs'
+import { useProxy } from '../ProxyContext'
+import { t, tm } from '../../../i18n'
+
+type Section = 'status' | 'profiles' | 'devices'
 
 function bytes(n: number) {
   return n >= 1073741824 ? `${(n / 1073741824).toFixed(2)} GB` : n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${(n / 1024).toFixed(1)} KB`
 }
 
+/** WireGuard's settings on the Proxy page; turning it on or off is the backend selector's job. */
 export default function WireGuardTab() {
+  const { epoch, refresh: refreshProxy } = useProxy()
+  const [section, setSection] = useState<Section>('status')
   const [status, setStatus] = useState<WireGuardStatus | null>(null)
   const [clients, setClients] = useState<Client[]>([])
   const [error, setError] = useState('')
@@ -50,19 +57,25 @@ export default function WireGuardTab() {
     const timer = window.setInterval(() => { if (!document.hidden) void refresh() }, 10000)
     return () => { mounted.current = false; window.clearInterval(timer) }
   }, [refresh])
+  // Reload after a switch of the active backend, dropping a read that started before it.
+  const seen = useRef(epoch)
+  useEffect(() => {
+    if (seen.current === epoch) return
+    seen.current = epoch
+    generation.current += 1; reading.current = false
+    void refresh()
+  }, [epoch, refresh])
 
-  async function save(enabled: boolean, disableOnly = false) {
-    if (busyRef.current) return
-    const takeover = enabled && !status?.enabled && !!status?.clash_enabled
-    if (takeover && !(await confirm({title:t('Switch from Clash to WireGuard?'),body:t('Clash will be turned off and its settings kept. Tunnel devices briefly lose internet while rules are replaced.'),confirmLabel:t('Switch to WireGuard')}))) return
-    if (busyRef.current) return
+  async function save() {
+    if (!status || busyRef.current) return
     generation.current += 1
     busyRef.current = true; setBusy(true); setError('')
     try {
-      const s = await api.wireguardSet(disableOnly && status ? { enabled: false, mode: status.mode, macs: status.macs, expected_revision: status.revision } : { enabled, mode, macs, expected_revision: editRevision.current, ...(takeover ? { takeover } : {}) })
+      const s = await api.wireguardSet({ mode, macs, expected_revision: editRevision.current })
+      void refreshProxy()
       if (!mounted.current) return
       setStatus(s); setMode(s.mode); setMacs(s.macs); editRevision.current = s.revision; editing.current = false
-      toast(enabled ? t('WireGuard policy applied. Waiting for peer handshake.') : t('Saved. All devices use the normal network.'))
+      toast(s.enabled ? t('WireGuard policy applied. Waiting for peer handshake.') : t('Device choices saved. WireGuard remains off.'))
     } catch (e) { if (mounted.current) { setError(e instanceof Error ? tm(e.message) : t('Unable to apply configuration')); toastError(e, t('WireGuard update failed')) } }
     finally { busyRef.current = false; if (mounted.current) setBusy(false) }
   }
@@ -74,6 +87,8 @@ export default function WireGuardTab() {
     busyRef.current = true; setBusy(true); setError('')
     try {
       const s = await api.wireguardSet({expected_revision: expectedRevision ?? (editing.current ? editRevision.current : status.revision), profile: action})
+      // Saving the first profile makes WireGuard selectable; every change moves the revision.
+      void refreshProxy()
       if (!mounted.current) return
       setStatus(s); editRevision.current = s.revision
       // Partial profile actions never discard unsaved device choices.
@@ -103,19 +118,25 @@ export default function WireGuardTab() {
   const rows = [...known.values()]
   const selected = (m: string) => mode === 'all' ? !macs.includes(m) : macs.includes(m)
   const dirty = mode !== status?.mode || [...macs].sort().join() !== [...(status?.macs ?? [])].sort().join()
-  const ready = !!status?.kernel_supported && !!status?.tools_installed && !!status?.has_config
   const summary = status?.connected ? t('Recent handshake') : status?.enabled ? status.error ? t('Needs attention') : t('Waiting for handshake') : t('Off')
 
   return (
     <div className="space-y-4">
-      <Card title="WireGuard" action={<Chip tone={status?.connected ? 'ok' : status?.enabled ? 'warn' : 'default'}>{summary}</Chip>}>
+      <Tabs
+        tabs={[
+          { id: 'status', label: t('Status') },
+          { id: 'profiles', label: t('Saved configurations') },
+          { id: 'devices', label: t('Device routing') },
+        ]}
+        active={section}
+        onChange={setSection}
+      />
+
+      {section === 'status' && <Card title="WireGuard" action={<Chip tone={status?.connected ? 'ok' : status?.enabled ? 'warn' : 'default'}>{summary}</Chip>}>
         <div className="space-y-4">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-[13px] font-medium text-ink">{t('WireGuard routing for your connected devices')}</p>
-              <p className="mt-1 text-xs text-ink2">{t('Route every device automatically, or choose individual devices below. A recent handshake does not verify internet access.')}</p>
-            </div>
-            <Toggle label={t('Enable WireGuard')} checked={status?.enabled ?? false} disabled={busy || !status || (!status.enabled && !ready)} onChange={v => void save(v, !v)} />
+          <div>
+            <p className="text-[13px] font-medium text-ink">{t('WireGuard routing for your connected devices')}</p>
+            <p className="mt-1 text-xs text-ink2">{t('Route every device automatically, or choose individual devices under Device routing. A recent handshake does not verify internet access.')}</p>
           </div>
           {(error || status?.error) && <p role="alert" className="rounded-lg bg-danger/10 p-3 text-[13px] text-danger">{error || tm(status?.error)}</p>}
           {!status && <p className="text-sm text-ink2">{t('Loading WireGuard status…')}</p>}
@@ -123,8 +144,6 @@ export default function WireGuardTab() {
             <div className="flex flex-wrap gap-2">
               <Chip tone={status.kernel_supported ? 'ok' : 'warn'}>{status.kernel_supported ? t('Kernel ready') : t('Kernel unavailable')}</Chip>
               <Chip tone={status.tools_installed ? 'ok' : 'warn'}>{status.tools_installed ? t('Tools ready') : t('Tools missing')}</Chip>
-              {status.clash_enabled && <Chip tone="accent">{t('Clash is on')}</Chip>}
-              {dirty && <Chip tone="warn">{t('Unsaved changes')}</Chip>}
             </div>
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
               <Stat label={t('Downloaded')} value={bytes(status.rx_bytes)} />
@@ -135,9 +154,9 @@ export default function WireGuardTab() {
             {status.endpoint && <p className="break-all text-xs text-ink2">{status.endpoint} · {status.address} · DNS {status.dns}</p>}
           </>}
         </div>
-      </Card>
+      </Card>}
 
-
+      {section === 'profiles' && <>
       <Card title={t('Saved configurations')} action={<Chip>{profiles.length} / 5</Chip>}>
         <div className="space-y-3">
           <p className="text-xs text-ink2">{t('Current profile:')} <strong className="text-ink">{active?.name ?? t('None selected')}</strong>{t('. ')}{t('Device routing choices apply to every profile.')}</p>
@@ -172,8 +191,9 @@ export default function WireGuardTab() {
           <p className="text-xs text-ink3">{t('Only IPv4 traffic is tunneled in this version. IPv6 internet and IPv6 DNS to the router are blocked for tunnel devices to prevent direct bypass. Unselected devices keep normal IPv4 and IPv6 access.')}</p>
         </div>
       </Card>
+      </>}
 
-      <Card title={t('Which devices use WireGuard?')}>
+      {section === 'devices' && <Card title={t('Which devices use WireGuard?')} action={dirty && status ? <Chip tone="warn">{t('Unsaved changes')}</Chip> : undefined}>
         <div className="space-y-3">
           <Select aria-label={t('Device routing mode')} value={mode} disabled={busy} onChange={e => { editing.current = true; const next = e.target.value as 'all' | 'selected'; setMacs(rows.filter(c => next === 'selected' ? selected(c.mac.toLowerCase()) : !selected(c.mac.toLowerCase())).map(c => c.mac.toLowerCase())); setMode(next) }}>
             <option value="all">{t('All devices — new devices join automatically')}</option>
@@ -192,12 +212,11 @@ export default function WireGuardTab() {
           </div>
           <p className="rounded-lg bg-surface2/60 p-3 text-xs leading-relaxed text-ink2">{t('When enabled, tunnel devices cannot fall back to the normal network if the VPN stops responding. DNS over IPv4 is sent through the tunnel. Router management stays accessible. Applying changes briefly pauses forwarded traffic while rules are replaced. After changing a device’s route, reconnect its apps or Wi-Fi so existing connections can restart.')}</p>
           <div className="flex flex-wrap gap-2">
-            <Button variant="primary" loading={busy} disabled={!status || !status.has_config} onClick={() => void save(status?.enabled ?? false)}>{status?.enabled ? t('Save & apply') : t('Save device choices')}</Button>
-            {!status?.enabled && <Button variant="outline" disabled={busy || !ready} onClick={() => void save(true)}>{t('Save & enable')}</Button>}
+            <Button variant="primary" loading={busy} disabled={!status || !status.has_config} onClick={() => void save()}>{status?.enabled ? t('Save & apply') : t('Save device choices')}</Button>
             <Button variant="ghost" disabled={busy} onClick={() => { if ((!editing.current && !config && !profileName && renameDraft === null) || window.confirm(t('Discard unsaved changes and reload the latest settings?'))) { editing.current = false; setConfig(''); setProfileName(''); setRenameDraft(null); void refresh() } }}>{t('Refresh')}</Button>
           </div>
         </div>
-      </Card>
+      </Card>}
     </div>
   )
 }

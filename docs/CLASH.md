@@ -2,13 +2,19 @@
 
 The **Proxy** sidebar page runs the Clash.Meta core from the
 [FlClash branch](https://github.com/chen08209/Clash.Meta/tree/FlClash) as a transparent
-proxy for chosen LAN devices. It is mutually exclusive with WireGuard: at most one of
-them is on. Turning one on while the other runs asks for confirmation and switches
-inside a single held transaction; a failure restores the previous backend.
+proxy for chosen LAN devices; its settings are under **Configure → Clash**. It is mutually
+exclusive with WireGuard: at most one of them is on. **Active proxy** at the top of the page
+(Off / WireGuard / Clash, `GET`/`PUT /api/proxy`) shows which one is on and turns them on
+and off. Replacing one with the other, or turning it off, asks for confirmation and
+switches inside a single held transaction; a failure restores the previous backend.
+Clash cannot be selected until the core, TUN support and a downloaded subscription are
+in place; the selector says which is missing. If both are ever saved as on, choosing one
+turns the other off. Turning off names the backend the page shows as on (`active`); if
+another one came on elsewhere meanwhile, the agent answers 409 instead of turning it off.
 
-Status: agent, web page and deployment are complete and tested in network namespaces
-and against a mock agent. Validation on a real B31 modem is pending (see
-[PLAN.md](PLAN.md), P0/P1/P6).
+Status: deployed and running on a real B31 modem since 2026-10-10
+([AI-OPERATIONS.md](AI-OPERATIONS.md)); proxied traffic from LAN devices there is still
+being verified (see [PLAN.md](PLAN.md), P6).
 
 ## Build
 
@@ -75,6 +81,33 @@ the core downloaded earlier. Without them, GEOIP/GEOSITE rules make the core dow
 the databases from GitHub, which often fails in mainland China; the Proxy page shows
 **Geo data missing** in that case.
 
+## Updating the core and geo data on the modem
+
+**Configure → Clash → Advanced → Core and data** shows the installed core (its version
+and whether it is the pinned build from `prepare-mihomo.py`, an official release or an
+uploaded file) and can replace it without a computer:
+
+- **Check for updates** asks api.github.com for the latest official MetaCubeX release
+  (cached for 10 minutes; GitHub allows 60 unauthenticated requests per hour per address).
+- **Update** downloads `mihomo-linux-arm64-<tag>.gz` through the running core, directly,
+  or through an `https://` mirror prefix. The SHA-256 digest always comes from
+  api.github.com, never the mirror. The archive is unpacked, checked to be an arm64
+  executable that reports the release tag with `-v`, and tested with `-t` against the
+  current profile before it replaces `/data/bin/mihomo`.
+- **Upload** accepts a core you built (`.gz` or the binary, up to 64 MiB) with the same
+  checks.
+- The replaced core is kept as `/data/bin/mihomo.previous`; **Roll back** swaps them. A new
+  core that does not answer within 15 s is rolled back automatically.
+- **Update geo data** fetches GeoIP and GeoSite from MetaCubeX/meta-rules-dat with their
+  published checksums and keeps the previous set.
+
+With Clash on, each of these restarts the core: proxied devices pause for a few seconds
+(the kill-switch holds their traffic) and the geo databases are reread (the core caches
+them, so a configuration reload would not). Jobs refuse to run while a deployment holds
+the transaction lock, and take that lock while they replace files. The deploy script keeps
+installing the pinned FlClash build: deploying with `--mihomo` later replaces an on-device
+update.
+
 ## Subscriptions
 
 A subscription URL must return a complete Clash/mihomo YAML profile. Up to five are
@@ -123,7 +156,7 @@ ssh -p 2222 root@192.168.0.1 sh -s < scripts/device/diagnose-clash.sh
 On Windows, copy it with `scp -P 2222` and run `sh /tmp/diagnose-clash.sh` on the
 modem; the file must keep LF line endings.
 
-The **Diagnostics** card on the Proxy page's Overview runs the same checks through the
+The **Diagnostics** card on the Proxy page's Clash **Overview** runs the same checks through the
 agent (`POST /api/clash/diagnostics`, up to about 40 s in the background; it changes
 nothing) and names the first broken layer: Clash off, core not running, traffic not
 reaching Clash (route or firewall), nodes failing, or no device routed to Clash. Each

@@ -17,7 +17,7 @@ use std::{
     io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::Mutex,
+    sync::{Mutex, MutexGuard},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -26,13 +26,13 @@ const CONFIG: &str = "/data/local/tmp/openui-clash/config.json";
 const SUBS: &str = "/data/local/tmp/openui-clash/subscriptions";
 const PIDFILE: &str = "/data/local/tmp/openui-clash/mihomo.pid";
 /// mihomo home: generated profile, cache.db, providers and bundled geo data.
-const HOME: &str = "/data/local/tmp/openui-clash/home";
+pub(crate) const HOME: &str = "/data/local/tmp/openui-clash/home";
 pub(crate) const PROFILE: &str = "/data/local/tmp/openui-clash/home/config.yaml";
 const SOCKET: &str = "/data/local/tmp/openui-clash/home/mihomo.sock";
-const MIHOMO: &str = "/data/bin/mihomo";
+pub(crate) const MIHOMO: &str = "/data/bin/mihomo";
 /// Geo data deployed beside the core; linked into HOME so the core never downloads it.
-const GEODATA: &str = "/data/share/mihomo";
-const GEO_FILES: &[&str] = &["geoip.metadb", "GeoSite.dat", "ASN.mmdb"];
+pub(crate) const GEODATA: &str = "/data/share/mihomo";
+pub(crate) const GEO_FILES: &[&str] = &["geoip.metadb", "GeoSite.dat", "ASN.mmdb"];
 pub(crate) const IFACE: &str = "ou-clash0";
 /// Marked clients' DNS is redirected here; it routes into the TUN and is hijacked.
 /// Outside the TUN /30 (whose second address the system stack uses for NAT).
@@ -67,7 +67,7 @@ struct Core {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-struct Settings {
+pub(crate) struct Settings {
     revision: u64,
     enabled: bool,
     mode: String,
@@ -591,7 +591,7 @@ fn kill_stale() {
     }
     let _ = fs::remove_file(PIDFILE);
 }
-fn stop_core() {
+pub(crate) fn stop_core() {
     let core = CORE.lock().unwrap().take();
     if let Some(mut core) = core {
         let pid = core.child.id() as i32;
@@ -684,10 +684,11 @@ fn options(s: &Settings) -> Options<'_> {
         controller: SOCKET,
     }
 }
-/// `mihomo -t` against a candidate profile; the error is the core's own message.
-fn test_profile(path: &Path) -> Result<(), String> {
-    let mut cmd = Command::new(MIHOMO);
-    cmd.args(["-d", HOME, "-t", "-f"]).arg(path);
+/// `<binary> -d <home> -t` against a candidate profile; the error is the core's own
+/// message. The core updater checks a new binary or a new geo data set the same way.
+pub(crate) fn test_profile(binary: &Path, home: &Path, path: &Path) -> Result<(), String> {
+    let mut cmd = Command::new(binary);
+    cmd.arg("-d").arg(home).arg("-t").arg("-f").arg(path);
     let out = process_runner::output(&mut cmd, None, Duration::from_secs(90), 256 * 1024)
         .map_err(|_| "Clash profile check timed out")?;
     if out.status.success() {
@@ -724,7 +725,7 @@ fn write_profile(s: &Settings) -> Result<(), String> {
         clash_config::compose(&map, &options(s)).as_bytes(),
     )
     .map_err(|_| "Cannot write Clash profile")?;
-    if let Err(e) = test_profile(&candidate) {
+    if let Err(e) = test_profile(Path::new(MIHOMO), Path::new(HOME), &candidate) {
         let _ = fs::remove_file(&candidate);
         return Err(e);
     }
@@ -795,6 +796,28 @@ fn apply(s: &Settings) -> Result<(), String> {
     prepare(s)?;
     egress_script(&policy(s))
 }
+/// prepare → hold → policy → release: brings the core up on `s` (a running one reloads
+/// its profile) and reinstalls the policy, recording the outcome for the status. The
+/// supervisor's recovery; the core updater stops the core first so a replaced binary or
+/// geo data takes effect. The caller holds the lock.
+pub(crate) fn restart_locked(s: &Settings) -> Result<(), String> {
+    let result = prepare(s)
+        .and_then(|_| egress_script(&EGRESS.hold()))
+        .and_then(|_| egress_script(&policy(s)))
+        .and_then(|_| egress_script(&EGRESS.release()));
+    *ERROR.lock().unwrap() = result.as_ref().err().cloned();
+    result
+}
+/// The Clash lock, for the core updater. Lock order: WireGuard before Clash.
+pub(crate) fn lock() -> MutexGuard<'static, ()> {
+    LOCK.lock().unwrap()
+}
+/// Saved settings when Clash is on, also while its core is down between a crash and the
+/// supervisor's retry: what a replaced core or geo data set must be started on. The
+/// caller holds the lock.
+pub(crate) fn enabled_settings() -> Option<Settings> {
+    load().ok().filter(|s| s.enabled)
+}
 fn active_changed(old: &Settings, next: &Settings) -> bool {
     old.enabled != next.enabled
         || old.mode != next.mode
@@ -810,6 +833,28 @@ pub(crate) struct Suspended(Settings);
 /// Whether Clash is saved as on. Read without the lock (atomic file replacement).
 pub(crate) fn stored_enabled() -> bool {
     load().is_ok_and(|s| s.enabled)
+}
+/// Saved state and readiness for the backend selector, read like `stored_enabled`.
+pub(crate) fn summary() -> Result<Value, String> {
+    let s = load()?;
+    let active = s
+        .active_subscription
+        .and_then(|id| s.subscriptions.iter().find(|p| p.id == id));
+    let reason = if !Path::new(MIHOMO).exists() {
+        Some("Clash core missing: install /data/bin/mihomo")
+    } else if !Path::new("/dev/net/tun").exists() {
+        Some("Kernel TUN support is unavailable")
+    } else if active.is_none() {
+        Some("Add a subscription first")
+    } else if active.is_some_and(|p| !sub_path(p.id, "yaml").exists()) {
+        Some("Active subscription has not been downloaded; refresh it")
+    } else {
+        None
+    };
+    Ok(
+        json!({"enabled": s.enabled, "revision": s.revision, "ready": reason.is_none(),
+        "reason": reason, "running": core_running(), "error": ERROR.lock().unwrap().clone()}),
+    )
 }
 /// Saved on/off, routing mode and device list, read like `stored_enabled`.
 pub(crate) fn stored_routing() -> Option<(bool, String, Vec<String>)> {
@@ -1330,20 +1375,11 @@ pub fn start() {
                                 last_log_message()
                             ));
                         }
-                        let result = prepare(&s)
-                            .and_then(|_| egress_script(&EGRESS.hold()))
-                            .and_then(|_| egress_script(&policy(&s)))
-                            .and_then(|_| egress_script(&EGRESS.release()));
-                        match result {
-                            Ok(()) => {
-                                *ERROR.lock().unwrap() = None;
-                                backoff = Duration::from_secs(5);
-                            }
-                            Err(e) => {
-                                *ERROR.lock().unwrap() = Some(e);
-                                retry_at = Instant::now() + backoff;
-                                backoff = (backoff * 2).min(Duration::from_secs(300));
-                            }
+                        if restart_locked(&s).is_ok() {
+                            backoff = Duration::from_secs(5);
+                        } else {
+                            retry_at = Instant::now() + backoff;
+                            backoff = (backoff * 2).min(Duration::from_secs(300));
                         }
                     } else if !s.enabled
                         && ((first && EGRESS.owned()) || (tick.is_multiple_of(6) && EGRESS.held()))

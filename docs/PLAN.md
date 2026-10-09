@@ -245,3 +245,23 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
 - 调研（其他 B31 项目）：本仓库的 fwmark→表 10421→TUN 方案源自 czwstc 的 WireGuard 分支，只在 netns 里测过、未在真机验证；
   B31 上验证过的做法有 mihomo 自带 auto-route（规则 9000–9099）+ FORWARD 首位放行，以及打标记 + 自建路由表并处理固件重定向链；
   有项目要求关闭 IPA 加速，担心转发流量绕过 netfilter。等用户的诊断输出再决定是否改数据面。
+
+### 2026-10-10 — 阶段 2：统一「代理」页面
+- agent：`agent/src/proxy.rs`，`GET/PUT /api/proxy`。GET 用无锁读取（`wireguard::get()` 会等 WG 锁，而 Clash 切换可能持锁两分钟），
+  给出当前后端、冲突标记、两边的 revision、是否就绪和原因；PUT `{backend, expected_revision}` 调用两边已有的 update（`takeover: true`），
+  锁顺序、HOLD、回滚和 409 都不变。两边都保存为开启时，关掉没被选中的那个（选「关闭」则两个都关）。
+- 网页：侧边栏去掉 WireGuard（手机底栏 8 → 7 项）；「代理」页顶部「当前代理：关闭 / WireGuard / Clash」，未就绪的选项置灰并给出原因，
+  切换和关闭前确认；下面「配置」切换 Clash / WireGuard 视图；WireGuard 拆成状态/已保存配置/设备分流子页并去掉启用开关；
+  Clash 新增「高级」页（TUN 栈、DNS、日志级别从概览移来）。旧 agent 没有 `/api/proxy` 时提示部署新版。
+- 验证：网页 build/lint/test、i18n、契约检查；mock 下浏览器走查 106 项（切换、接管确认、409、未就绪、冲突、中英文、桌面/手机）。
+
+### 2026-10-10 — 阶段 3：设备上更新内核与 Geo 数据
+- 用户决定：部署脚本继续装固定的 FlClash 构建；设备上可在线换成 MetaCubeX 官方版，也能上传自建内核。
+- agent：`agent/src/clash_core.rs`，`GET/POST /api/clash/core`、`PUT /api/clash/core/upload`（在通用 1 MiB 读取之前流式写盘，先过登录校验，上限 64 MiB）。
+  检查更新只问 api.github.com（缓存 10 分钟），摘要只取 GitHub 发布信息；下载可经 Clash、直连或镜像前缀；flate2 解压（上限 160 MiB）、
+  aarch64 ELF 检查、`-v` 含版本号、用当前配置 `-t`；取部署事务锁后原子替换并硬链接保留 `mihomo.previous`；Clash 开着时重启内核，
+  15 秒内不应答就自动换回。Geo 数据核对发布的校验和，替换后重启内核（mihomo 把 MMDB/GeoSite 缓存在内存里，热加载不会重读）。
+  `clash.rs` 抽出 `restart_locked()`（准备 → HOLD → 策略 → 释放）供看门狗和更新共用。状态存 `core.json`（`config.json` 是 deny_unknown_fields，旧 agent 会拒绝新字段）。
+- 网页：Clash「高级」页「内核与数据」卡片（版本与来源、检查/更新/回滚、下载方式与镜像、上传、Geo 更新、进度与错误）。
+- 验证：agent 单元测试；容器内对真实 GitHub 跑通 v1.19.32 下载、摘要、解压；上传/回滚/部署锁/中断恢复路径；网页 13 个测试、mock 走查 51 项。
+  **未验证：设备上替换后重启内核**（这台开发机跑不了 arm64）。

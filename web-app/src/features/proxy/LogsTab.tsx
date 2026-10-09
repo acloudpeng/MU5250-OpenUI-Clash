@@ -26,7 +26,7 @@ export default function LogsTab() {
       <Button size="sm" variant="ghost" disabled={!follow} onClick={refresh}>{t('Reload')}</Button>
     </div>}>
       <div className="space-y-3">
-        <p className="text-xs text-ink2">{t('The last 300 lines from the core, kept in memory only.')} {t('Current level:')} <strong className="text-ink">{status?.log_level ? t(LEVEL_LABELS[status.log_level] ?? status.log_level) : '—'}</strong> {t('(change it under Overview → Advanced).')}</p>
+        <p className="text-xs text-ink2">{t('The last 300 lines from the core, kept in memory only.')} {t('Current level:')} <strong className="text-ink">{status?.log_level ? t(LEVEL_LABELS[status.log_level] ?? status.log_level) : '—'}</strong> {t('(change it under Advanced).')}</p>
         {error && <p role="alert" className="rounded-lg bg-danger/10 p-3 text-[13px] text-danger">{tm(error)}</p>}
         <pre ref={box} className="max-h-[60vh] overflow-auto whitespace-pre-wrap break-all rounded-lg bg-surface2/60 p-3 font-mono text-[11px] leading-relaxed text-ink2">
           {lines.length === 0 ? t('No log lines yet.') : lines.map((l, i) => <div key={i} className={TONE[LEVEL.exec(l)?.[1] ?? ''] ?? ''}>{l}</div>)}

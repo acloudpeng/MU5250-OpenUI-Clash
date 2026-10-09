@@ -670,6 +670,24 @@ pub(crate) fn lock() -> MutexGuard<'static, ()> {
 pub(crate) fn stored_enabled() -> bool {
     load().is_ok_and(|s| s.enabled)
 }
+/// Saved state and readiness for the backend selector, read like `stored_enabled`: a
+/// running Clash switch holds the lock for minutes.
+pub(crate) fn summary() -> Result<Value, String> {
+    let s = load()?;
+    let reason = if !Path::new("/sys/module/wireguard").exists() {
+        Some("Kernel WireGuard or /data/bin/wg is unavailable")
+    } else if !Path::new(WG).exists() {
+        Some("WireGuard tools missing: install /data/bin/wg")
+    } else if s.tunnel.is_none() {
+        Some("Import a WireGuard client configuration first")
+    } else {
+        None
+    };
+    Ok(
+        json!({"enabled": s.enabled, "revision": s.revision, "ready": reason.is_none(),
+        "reason": reason, "error": ERROR.lock().unwrap().clone()}),
+    )
+}
 pub(crate) struct Suspended(Settings);
 /// Turns WireGuard off for a switch to Clash. The caller holds `lock()` and its own
 /// transition guard; `resume` restores WireGuard if that switch fails.

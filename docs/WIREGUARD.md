@@ -1,12 +1,21 @@
 # WireGuard gateway
 
-The WireGuard sidebar page manages one kernel WireGuard client tunnel. Import a standard
-single-peer `.conf`, save it, choose devices and enable. A new installation is off.
-The router itself keeps its original WAN route; forwarded devices use the policy.
+WireGuard lives on the **Proxy** sidebar page, under **Configure → WireGuard**, and manages
+one kernel WireGuard client tunnel. Import a standard single-peer `.conf`, save it, choose
+devices, then select **WireGuard** under **Active proxy** at the top of the page. A new
+installation is off. The router itself keeps its original WAN route; forwarded devices use the policy.
+
+**Active proxy** (Off / WireGuard / Clash) is the one switch for both backends; at most one of
+them is on. The page sends `PUT /api/proxy` with `{"backend":"off"|"wireguard"|"clash","expected_revision":N}`
+(the revision of the backend being turned on, or of the one being turned off). The agent turns
+the other backend off in the same transaction and restores it if the switch fails; a stale
+revision returns 409. Replacing one backend with the other, or turning it off, asks for
+confirmation. `GET /api/proxy` also says why a backend cannot be turned on yet, such as no
+imported configuration.
 
 ## Saved configurations (up to 5)
 
-On the **WireGuard** sidebar page, import a `.conf` and give it a unique name under
+On the **Saved configurations** tab, import a `.conf` and give it a unique name under
 **Add client configuration**, then click **Save new profile**. A filename is used
 as the initial name when importing a file. Names allow 1–48 characters.
 
@@ -102,7 +111,7 @@ pre-existing resources. Main routes and stock chains are not flushed or rewritte
 The feature is supervised by the existing agent boot path; no new boot hook is added.
 
 Apply errors attempt to restore the previous configuration. A transition guard
-remains in place if recovery fails. Use the dashboard's Off switch to remove owned
+remains in place if recovery fails. Select **Off** under **Active proxy** to remove owned
 rules and restore direct traffic. If the agent is unavailable, connect by SSH,
 restore the previous agent snapshot, and reboot if temporary rules need clearing.
 Preserve the config directory if you want to retain the client configuration.

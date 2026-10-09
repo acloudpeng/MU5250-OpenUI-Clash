@@ -8,6 +8,7 @@ live jitter); mutating endpoints just succeed.
 Usage:  python3 web-app/tools/mock_agent.py [--port 9090]
 """
 import argparse
+import hashlib
 import json
 import random
 import time
@@ -495,7 +496,7 @@ def clash_set(body):
     current["revision"] += 1
     on = bool(current["enabled"])
     current.update({"running": on, "interface_up": on, "connected": on, "pid": 4242 if on else None,
-                    "uptime": 0, "version": "mihomo-demo" if on else "", "memory_kib": 38000 if on else 0})
+                    "uptime": 0, "version": core_version() if on else "", "memory_kib": 38000 if on else 0})
     STATE["clash"] = current
     return current
 
@@ -504,9 +505,78 @@ def wireguard_status():
     return {**STATE["wireguard"], "clash_enabled": STATE["clash"]["enabled"]}
 
 
+class Stale(Exception):
+    """A change made against an older revision (HTTP 409)."""
+
+
+def proxy_reason(backend):
+    """Why a backend cannot be turned on, as agent/src/{wireguard,clash}.rs `summary` says."""
+    if backend == "wireguard":
+        wg = STATE["wireguard"]
+        if not wg["kernel_supported"]:
+            return "Kernel WireGuard or /data/bin/wg is unavailable"
+        if not wg["tools_installed"]:
+            return "WireGuard tools missing: install /data/bin/wg"
+        return None if wg["has_config"] else "Import a WireGuard client configuration first"
+    clash = STATE["clash"]
+    active = next((p for p in clash["subscriptions"] if p["id"] == clash["active_subscription"]), None)
+    if not clash["core_installed"]:
+        return "Clash core missing: install /data/bin/mihomo"
+    if not clash["tun_supported"]:
+        return "Kernel TUN support is unavailable"
+    if active is None:
+        return "Add a subscription first"
+    return None if active["downloaded"] else "Active subscription has not been downloaded; refresh it"
+
+
+def proxy_status():
+    """Mirrors agent/src/proxy.rs: with both saved as on, WireGuard is the one in effect."""
+    wg, clash = STATE["wireguard"], STATE["clash"]
+    backends = []
+    for name, value in (("wireguard", wg), ("clash", clash)):
+        reason = proxy_reason(name)
+        entry = {"id": name, "enabled": value["enabled"], "revision": value["revision"], "ready": reason is None,
+                 "reason": reason, "error": value["error"]}
+        if name == "clash":
+            entry["running"] = value["running"]
+        backends.append(entry)
+    active = "wireguard" if wg["enabled"] else "clash" if clash["enabled"] else "off"
+    return {"active": active, "conflict": wg["enabled"] and clash["enabled"], "backends": backends}
+
+
+def proxy_set(body):
+    """Turns one backend on (the other off, as a takeover) or the enabled one off."""
+    backend, revision = body.get("backend"), body.get("expected_revision")
+    active = body.get("active")
+    if not {"backend", "expected_revision"} <= set(body) <= {"backend", "expected_revision", "active"} or backend not in ("off", "wireguard", "clash") or type(revision) is not int or active not in (None, "wireguard", "clash"):
+        raise ValueError("Invalid proxy request")
+    time.sleep(1)  # the agent rebuilds both policies; the real switch can take minutes
+    if STATE["wireguard"]["enabled"] and STATE["clash"]["enabled"]:
+        # Both saved as on: the agent turns off the one not chosen at its own revision.
+        for other in ("wireguard", "clash"):
+            if other != backend:
+                setter = wireguard_set if other == "wireguard" else clash_set
+                setter({"expected_revision": STATE[other]["revision"], "enabled": False})
+        return proxy_status()
+    on = [b for b in ("wireguard", "clash") if STATE[b]["enabled"]]
+    if backend == "off" and active and len(on) == 1 and on[0] != active:
+        raise Stale("Configuration changed; refresh before saving")
+    target = backend if backend != "off" else "wireguard" if STATE["wireguard"]["enabled"] else "clash" if STATE["clash"]["enabled"] else None
+    if target is None:
+        return proxy_status()
+    if revision != STATE[target]["revision"]:
+        raise Stale("Configuration changed; refresh before saving")
+    if backend != "off" and proxy_reason(backend):
+        raise ValueError(proxy_reason(backend))
+    change = {"expected_revision": revision, "enabled": backend != "off", **({"takeover": True} if backend != "off" else {})}
+    (wireguard_set if target == "wireguard" else clash_set)(change)
+    return proxy_status()
+
+
 def clash_status():
     value = dict(STATE["clash"])
     value["wireguard_enabled"] = STATE["wireguard"]["enabled"]
+    value["version"] = core_version() if value["running"] else ""
     return value
 
 
@@ -563,7 +633,200 @@ def clash_diagnose(body):
     return clash_diagnostics()
 
 
+# ── Clash core and geo data (agent/src/clash_core.rs) ────────────────────────
+# A job walks through timed steps from its start, so polling shows each one. Times are
+# the device clock, which on B31 runs 8 h ahead (see diagnostics_report).
+
+CORE_BUSY = "A core job is already running"
+CORE_MAX_UPLOAD = 64 << 20
+CORE_RELEASE = {
+    "tag": "v1.19.32", "published_at": "2026-09-30T17:09:36Z", "asset": "mihomo-linux-arm64-v1.19.32.gz",
+    "size": 20809592, "digest": "sha256:" + hashlib.sha256(b"mihomo-linux-arm64-v1.19.32.gz").hexdigest(),
+    "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.32/mihomo-linux-arm64-v1.19.32.gz",
+}
+# Direct GitHub downloads often fail from mainland China; the page then suggests a mirror.
+CORE_DIRECT_FAILURE = "Download failed: cannot connect (curl 7)"
+
+
+class TooLarge(ValueError):
+    """An upload over the limit (HTTP 413)."""
+
+
+def device_now():
+    return int(time.time()) + 28800
+
+
+def core_version():
+    return (STATE["core"]["installed"] or {}).get("version", "")
+
+
+def core_advance():
+    """Moves the running job to the step its elapsed time reaches; past the last, finishes it."""
+    job, run = STATE["core"]["job"], STATE["core_run"]
+    if not job or job["state"] != "running" or not run:
+        return
+    elapsed = time.time() - run["start"]
+    for step, secs, total in run["plan"]:
+        if elapsed < secs:
+            # Geo files download without a known size, like on the device.
+            got = int((total or 6_000_000) * elapsed / secs) if step == "downloading" else 0
+            job.update(step=step, total=total, bytes=got)
+            return
+        elapsed -= secs
+    error = run["finish"]()
+    job.update(state="failed" if error else "done", error=error, finished_at=device_now())
+    STATE["core_run"] = None
+
+
+def core_follow(plan, finish):
+    """Runs the claimed job through `plan` ((step, seconds, total) …); `finish` returns an error or None."""
+    STATE["core_run"] = {"start": time.time(), "plan": plan, "finish": finish}
+    core_advance()
+
+
+def core_claim(kind, step, total=0):
+    core_advance()
+    if STATE["core"]["job"] and STATE["core"]["job"]["state"] == "running":
+        raise Stale(CORE_BUSY)
+    STATE["core"]["job"] = {"kind": kind, "state": "running", "step": step, "bytes": 0, "total": total,
+                            "error": None, "started_at": device_now(), "finished_at": None}
+
+
+def core_status():
+    core_advance()
+    job = STATE["core"]["job"]
+    error = (job or {}).get("error") or ""
+    hint = bool(job and job["state"] == "failed" and job["kind"] in ("update", "geodata")
+                and (error.startswith("Download failed:") or error == "Download timed out"))
+    return {**STATE["core"], "free_bytes": 1_342_177_280, "mirror_hint": hint}
+
+
+def core_route(body):
+    """The download route, validated like the agent's `Via::new`."""
+    route, mirror = body.get("route"), body.get("mirror")
+    if route not in (None, "auto", "proxy", "direct", "mirror") or not isinstance(mirror, (str, type(None))):
+        raise ValueError("Invalid core request")
+    if mirror is not None:
+        host = mirror[8:].split("/")[0] if mirror.startswith("https://") else ""
+        if not host or len(mirror) > 200 or any(c in mirror for c in '"\\?#@ '):
+            raise ValueError("Mirror must be an https:// address prefix")
+        route = route or "mirror"
+    route = route or "auto"
+    if route == "mirror" and mirror is None:
+        raise ValueError("Mirror must be an https:// address prefix")
+    if route != "mirror" and mirror is not None:
+        raise ValueError("Invalid core request")
+    if route == "proxy" and not STATE["clash"]["running"]:
+        raise ValueError("Clash is not running")
+    return route
+
+
+def core_action(body):
+    """POST /api/clash/core: starts a check, update, rollback or geo data job and answers at once."""
+    fields = {"check": {"route"}, "update": {"tag", "route", "mirror"}, "rollback": set(), "geodata": {"route", "mirror"}}
+    action = body.get("action")
+    if action not in fields or set(body) - fields[action] - {"action"}:
+        raise ValueError("Invalid core request")
+    core = STATE["core"]
+    core_advance()
+    if core["job"] and core["job"]["state"] == "running":
+        raise Stale(CORE_BUSY)
+    restart = [("restarting", 1.5, 0)] if STATE["clash"]["running"] else []
+    if action == "check":
+        if core_route(body) == "mirror":
+            raise ValueError("Invalid core request")
+        core_claim("check", "checking")
+        latest = core["latest"]
+        if latest and 0 <= device_now() - latest["checked_at"] < 600:
+            core_follow([], lambda: None)  # a recent check is reused
+        else:
+            def checked():
+                core["latest"] = {**CORE_RELEASE, "checked_at": device_now()}
+            core_follow([("checking", 1, 0)], checked)
+    elif action == "update":
+        route = core_route(body)
+        if not core["latest"] or body.get("tag") != core["latest"]["tag"]:
+            raise ValueError("Check for updates first")
+        size = core["latest"]["size"]
+        core_claim("update", "downloading", size)
+        if route == "direct":
+            core_follow([("downloading", 1.5, size)], lambda: CORE_DIRECT_FAILURE)
+        else:
+            def updated():
+                tag = core["latest"]["tag"]
+                if core_version() == tag:
+                    return "This core is already installed"
+                core["previous"] = core["installed"]
+                core["installed"] = {"version": tag, "sha256": hashlib.sha256(tag.encode()).hexdigest(), "source": "official"}
+            core_follow([("downloading", 4, size), ("verifying", 0.6, 0), ("extracting", 0.8, 0), ("testing", 1.2, 0),
+                         ("installing", 0.5, 0)] + restart, updated)
+    elif action == "rollback":
+        if not core["previous"]:
+            raise ValueError("No previous core to roll back to")
+        core_claim("rollback", "testing")
+
+        def rolled_back():
+            core["installed"], core["previous"] = core["previous"], core["installed"]
+        core_follow([("testing", 1.2, 0), ("installing", 0.5, 0)] + restart, rolled_back)
+    else:
+        route = core_route(body)
+        core_claim("geodata", "downloading")
+        if route == "direct":
+            core_follow([("downloading", 1.5, 0)], lambda: CORE_DIRECT_FAILURE)
+        else:
+            def geo_updated():
+                STATE["clash"]["geodata"] = ["geoip.metadb", "GeoSite.dat"]
+            core_follow([("downloading", 3, 0), ("verifying", 0.6, 0), ("testing", 1.2, 0), ("installing", 0.5, 0)] + restart,
+                        geo_updated)
+    return core_status()
+
+
+def core_upload(stream, length):
+    """PUT /api/clash/core/upload: receives the raw file, then installs it as a job. Any file is
+    accepted; one starting with the gzip magic is "extracted" first."""
+    def drain():
+        left = length
+        while left > 0:
+            chunk = stream.read(min(65536, left))
+            if not chunk:
+                break
+            left -= len(chunk)
+    if length == 0:
+        raise ValueError("Upload is empty")
+    if length > CORE_MAX_UPLOAD:
+        drain()
+        raise TooLarge("Upload exceeds 64 MiB")
+    try:
+        core_claim("upload", "receiving", length)
+    except Stale:
+        drain()
+        raise
+    job, digest, received, head = STATE["core"]["job"], hashlib.sha256(), 0, b""
+    while received < length:
+        chunk = stream.read(min(65536, length - received))
+        if not chunk:
+            break
+        digest.update(chunk)
+        head, received = head or chunk[:2], received + len(chunk)
+        job["bytes"] = received
+    if received != length:
+        job.update(state="failed", error="Upload was interrupted", finished_at=device_now())
+        raise ValueError("Upload was interrupted")
+    sha, core = digest.hexdigest(), STATE["core"]
+
+    def installed():
+        if (core["installed"] or {}).get("sha256") == sha:
+            return "This core is already installed"
+        core["previous"] = core["installed"]
+        core["installed"] = {"version": "alpha-" + sha[:7], "sha256": sha, "source": "uploaded"}
+    extract = [("extracting", 0.8, 0)] if head == b"\x1f\x8b" else []
+    restart = [("restarting", 1.5, 0)] if STATE["clash"]["running"] else []
+    core_follow(extract + [("testing", 1.2, 0), ("installing", 0.5, 0)] + restart, installed)
+    return core_status()
+
+
 ROUTES_PUT = {
+    "/api/proxy": proxy_set,
     "/api/clash": clash_set,
     "/api/clash/proxies": clash_select,
     "/api/wireguard": wireguard_set,
@@ -607,11 +870,15 @@ STATE["clash_proxies"] = {
 }
 STATE["diagnostics"] = {"running": False, "started_at": None, "finished_at": None, "verdict": None, "checks": []}
 STATE["diagnostics_done_at"] = 0
+STATE["core"] = {"installed": {"version": "flclash-d0c8d44-openui-ca20260925", "sha256": hashlib.sha256(b"pinned").hexdigest(),
+                               "source": "pinned"}, "previous": None, "latest": None, "job": None}
+STATE["core_run"] = None
 
 STATE["screen_settings"] = {"revision": 1, "shortcut_enabled": False, "brightness": 128, "idle_seconds": 120, "home_page": "menu", "menu_items": ["overview", "wireguard", "profiles", "devices"], "language": "zh"}
 STATE["screen"] = {"available": True, "verified": True, "running": False, "state": "idle", "settings_revision": 1, "shortcut": {"available": True, "message": "Shortcut disabled"}}
 
 ROUTES_GET = {
+    "/api/proxy": proxy_status,
     "/api/wireguard": wireguard_status,
     "/api/clash": clash_status,
     "/api/clash/proxies": lambda: STATE["clash_proxies"],
@@ -621,6 +888,7 @@ ROUTES_GET = {
          "upload": 18234, "download": 912345, "start": "2026-09-25T08:00:00Z"}] if STATE["clash"]["running"] else []},
     "/api/clash/logs": lambda: {"lines": ["time=\"2026-09-25T08:00:00Z\" level=info msg=\"Start initial Compatible provider default\""]},
     "/api/clash/diagnostics": clash_diagnostics,
+    "/api/clash/core": core_status,
     "/api/screen": lambda: STATE["screen"],
     "/api/screen/settings": lambda: STATE["screen_settings"],
     "/api/dashboard": dashboard_batch,
@@ -682,6 +950,7 @@ ROUTES_POST = {
         {n: STATE["clash_proxies"]["nodes"][n]["delay"] or 0 for g in STATE["clash_proxies"]["groups"] if g["name"] == body.get("name") for n in g["all"]}
         if body.get("group") else {"delay": (STATE["clash_proxies"]["nodes"].get(body.get("name")) or {}).get("delay") or 0}),
     "/api/clash/diagnostics": clash_diagnose,
+    "/api/clash/core": core_action,
     "/api/sms/list": lambda body: sms_list(),
     "/api/system/kill-bloat": lambda body: {
         "killed": [
@@ -749,11 +1018,26 @@ class Handler(BaseHTTPRequestHandler):
             return self._send({"ok": True, "data": STATE["screen"]})
         fn = ROUTES_POST.get(path)
         if fn:
-            return self._send({"ok": True, "data": fn(body)})
+            try:
+                return self._send({"ok": True, "data": fn(body)})
+            except Stale as error:
+                return self._send({"ok": False, "error": str(error)}, 409)
+            except ValueError as error:
+                return self._send({"ok": False, "error": str(error)}, 400)
         return self._send({"ok": True, "data": {}})
 
     def do_PUT(self):
         path = self.path.split("?")[0]
+        if path == "/api/clash/core/upload":
+            # The raw file, not JSON; streamed like the agent does past its 1 MiB body limit.
+            try:
+                return self._send({"ok": True, "data": core_upload(self.rfile, int(self.headers.get("Content-Length") or 0))})
+            except Stale as error:
+                return self._send({"ok": False, "error": str(error)}, 409)
+            except TooLarge as error:
+                return self._send({"ok": False, "error": str(error)}, 413)
+            except ValueError as error:
+                return self._send({"ok": False, "error": str(error)}, 400)
         body = self._body()
         if path == "/api/screen/language":
             old = STATE["screen_settings"]
@@ -782,6 +1066,8 @@ class Handler(BaseHTTPRequestHandler):
         if fn:
             try:
                 return self._send({"ok": True, "data": fn(body)})
+            except Stale as error:
+                return self._send({"ok": False, "error": str(error)}, 409)
             except ValueError as error:
                 return self._send({"ok": False, "error": str(error)}, 400)
         return self._send({"ok": True, "data": {}})

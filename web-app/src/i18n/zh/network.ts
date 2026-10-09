@@ -1,13 +1,12 @@
 import type { Dict } from '.'
 
-// Network (clients, Wi-Fi, router) and WireGuard pages.
+// Network page (clients, Wi-Fi, router) and the Proxy page's WireGuard settings.
 export default {
-  // NetworkGroup / WireGuardPage
+  // NetworkGroup
   'Network': '网络',
   'Connected clients, Wi-Fi and router settings': '已连接客户端、Wi-Fi 与路由器设置',
   'Clients': '客户端',
   'Router': '路由器',
-  'VPN profiles, tunnel status and device routing': 'VPN 配置、隧道状态与设备分流',
 
   // ClientsTab
   'Connected clients ({count})': '已连接客户端（{count}）',
@@ -111,13 +110,10 @@ export default {
   'Use 5 GHz for both': '两个频段均使用 5 GHz 设置',
   'Guest network': '访客网络',
 
-  // WireGuardTab
+  // WireGuard settings (proxy/wireguard/WireGuardTab)
   'Unable to load WireGuard': '无法加载 WireGuard',
-  'Switch from Clash to WireGuard?': '从 Clash 切换到 WireGuard？',
-  'Clash will be turned off and its settings kept. Tunnel devices briefly lose internet while rules are replaced.': '将关闭 Clash，但保留其设置。替换规则期间，走隧道的设备会短暂断网。',
-  'Switch to WireGuard': '切换到 WireGuard',
   'WireGuard policy applied. Waiting for peer handshake.': 'WireGuard 策略已应用，正在等待对端握手。',
-  'Saved. All devices use the normal network.': '已保存。所有设备均使用普通网络。',
+  'Device choices saved. WireGuard remains off.': '设备选择已保存，WireGuard 仍保持关闭。',
   'Unable to apply configuration': '无法应用配置',
   'WireGuard update failed': 'WireGuard 更新失败',
   'Switch WireGuard profile?': '切换 WireGuard 配置？',
@@ -139,14 +135,12 @@ export default {
   'Waiting for handshake': '等待握手',
   'Off': '关闭',
   'WireGuard routing for your connected devices': '已连接设备的 WireGuard 分流',
-  'Route every device automatically, or choose individual devices below. A recent handshake does not verify internet access.': '可让所有设备自动走隧道，或在下方逐个选择设备。近期有握手并不代表能正常上网。',
-  'Enable WireGuard': '启用 WireGuard',
+  'Route every device automatically, or choose individual devices under Device routing. A recent handshake does not verify internet access.': '可让所有设备自动走隧道，或在“设备分流”中逐个选择设备。近期有握手并不代表能正常上网。',
   'Loading WireGuard status…': '正在加载 WireGuard 状态…',
   'Kernel ready': '内核已就绪',
   'Kernel unavailable': '内核不可用',
   'Tools ready': '工具已就绪',
   'Tools missing': '缺少工具',
-  'Clash is on': 'Clash 已开启',
   'Unsaved changes': '有未保存的更改',
   'Downloaded': '已下载',
   'Uploaded': '已上传',
@@ -189,6 +183,5 @@ export default {
   'When enabled, tunnel devices cannot fall back to the normal network if the VPN stops responding. DNS over IPv4 is sent through the tunnel. Router management stays accessible. Applying changes briefly pauses forwarded traffic while rules are replaced. After changing a device’s route, reconnect its apps or Wi-Fi so existing connections can restart.': '启用后，若 VPN 停止响应，走隧道的设备不会回退到普通网络。IPv4 DNS 请求经隧道发送。路由器管理页面仍可访问。应用更改时，替换规则期间转发流量会短暂中断。更改设备的分流后，请重新连接该设备的应用或 Wi-Fi，使现有连接重新建立。',
   'Save & apply': '保存并应用',
   'Save device choices': '保存设备选择',
-  'Save & enable': '保存并启用',
   'Discard unsaved changes and reload the latest settings?': '放弃未保存的更改并重新加载最新设置？',
 } satisfies Dict

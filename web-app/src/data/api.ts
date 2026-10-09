@@ -4,14 +4,18 @@ import { readCsv } from './client'
 // The mappers encode hard-won knowledge of the firmware's response shapes
 // (netinfo carrier strings, CA formats, band-lock bitmasks) — treat with care.
 
-import { get, post, put, req } from './client'
+import { get, post, put, req, upload } from './client'
 import type {
   AtSendResult,
+  ProxyStatus,
+  ProxySwitch,
   WireGuardStatus,
   ScreenStatus,
   DevUISettings,
   WireGuardUpdate,
   ClashConnections,
+  ClashCore,
+  ClashCoreAction,
   ClashDiagnostics,
   ClashProxies,
   ClashStatus,
@@ -631,6 +635,9 @@ export const api = {
   screen: () => get('/api/screen').then(d => d as unknown as ScreenStatus),
   screenOpen: () => req('POST', '/api/screen', {}),
   screenClose: () => req('DELETE', '/api/screen'),
+  // The active backend; a switch rebuilds both policies and can take up to ~2 minutes.
+  proxy: () => get('/api/proxy').then(d => d as unknown as ProxyStatus),
+  proxySet: (body: ProxySwitch) => req('PUT', '/api/proxy', body, undefined, 180_000).then(d => d as unknown as ProxyStatus),
   wireguard: () => get('/api/wireguard').then(d => d as unknown as WireGuardStatus),
   wireguardSet: (body: WireGuardUpdate) => req('PUT', '/api/wireguard', body, undefined, 120_000).then(d => d as unknown as WireGuardStatus),
   // Clash — downloads and core restarts can take a while
@@ -646,6 +653,12 @@ export const api = {
   // The run itself takes up to ~40 s in the background; the POST answers at once.
   clashDiagnostics: () => get('/api/clash/diagnostics').then(d => d as unknown as ClashDiagnostics),
   clashDiagnose: () => req('POST', '/api/clash/diagnostics', undefined, undefined, 10_000).then(d => d as unknown as ClashDiagnostics),
+  // Core and geo data updates: each action answers at once and runs as a job that
+  // clashCore() reports; an upload streams the file (up to 64 MiB), then installs as one.
+  clashCore: () => get('/api/clash/core').then(d => d as unknown as ClashCore),
+  clashCoreAction: (body: ClashCoreAction) => req('POST', '/api/clash/core', body).then(d => d as unknown as ClashCore),
+  clashCoreUpload: (file: Blob, onProgress?: (sent: number, total: number) => void) =>
+    upload('/api/clash/core/upload', file, onProgress, 600_000).then(d => d as unknown as ClashCore),
   // Home — single batched request
   home: () => get('/api/dashboard').then(mapHome),
 

@@ -11,7 +11,6 @@ import { api } from './data/api'
 const HomePage = lazy(() => import('./features/home/HomePage'))
 const SignalGroup = lazy(() => import('./features/signal/SignalGroup'))
 const NetworkGroup = lazy(() => import('./features/network/NetworkGroup'))
-const WireGuardPage = lazy(() => import('./features/network/WireGuardPage'))
 const ProxyPage = lazy(() => import('./features/proxy/ProxyPage'))
 const DevUIPage = lazy(() => import('./features/devui/DevUIPage'))
 const ModemGroup = lazy(() => import('./features/modem/ModemGroup'))
@@ -58,7 +57,6 @@ export default function App() {
           {group === 'home' && <HomePage />}
           {group === 'signal' && <SignalGroup />}
           {group === 'network' && <NetworkGroup />}
-          {group === 'wireguard' && <WireGuardPage />}
           {group === 'proxy' && <ProxyPage />}
           {group === 'devui' && <DevUIPage />}
           {group === 'modem' && <ModemGroup />}

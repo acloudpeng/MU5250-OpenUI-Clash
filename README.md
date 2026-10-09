@@ -18,7 +18,8 @@ This project is a full fork of [MU5250-OpenUI](https://github.com/dklasens/MU525
 with an integrated WireGuard gateway and a Chinese / English DevUI touchscreen menu
 that follows the web panel's language.
 It retains OpenUI's Home, Signal, Network, Modem and System pages, existing login,
-Rust agent and deployment workflow. WireGuard has its own **left sidebar entry, between Network and Modem**.
+Rust agent and deployment workflow. WireGuard and Clash share the **Proxy** entry in the left sidebar,
+between Network and Modem: choose which one is on (or neither) at the top of the page, then configure each below.
 
 | Management service | Address |
 | --- | --- |
@@ -61,7 +62,7 @@ Actual browser captures of this fork, using **synthetic demo data**. The endpoin
 client names, MAC addresses and traffic values below are examples, not a live VPN
 measurement or private device information.
 
-![WireGuard sidebar](docs/images/wireguard-sidebar.png)
+![WireGuard settings (captured before WireGuard moved under Proxy)](docs/images/wireguard-sidebar.png)
 
 ![DevUI screen settings](docs/images/devui-settings.png)
 

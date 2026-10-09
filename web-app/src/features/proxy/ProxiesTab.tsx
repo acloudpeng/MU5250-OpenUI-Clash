@@ -56,7 +56,7 @@ export default function ProxiesTab() {
   }
 
   if (!status) return <p className="text-sm text-ink2">{t('Loading…')}</p>
-  if (!running) return <Card><p className="text-sm text-ink2">{t('Nodes are listed while the Clash core is running. Turn Clash on in Overview.')}</p></Card>
+  if (!running) return <Card><p className="text-sm text-ink2">{t('Nodes are listed while the Clash core is running. Choose Clash under Active proxy.')}</p></Card>
 
   const groups = (data?.groups ?? []).filter(g => showHidden || !g.hidden)
   const hiddenCount = (data?.groups ?? []).filter(g => g.hidden).length

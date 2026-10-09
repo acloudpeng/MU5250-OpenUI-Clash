@@ -64,6 +64,15 @@ test('agent messages translate by exact text, by pattern and part by part', () =
   assert.equal(tm('Timed out reaching the agent'), 'Timed out reaching the agent')
 })
 
+test('core job errors translate with their reasons and inside rollback composites', () => {
+  const { tm } = i18n()
+  assert.equal(tm('Download failed: cannot resolve proxy (curl 5)'), '下载失败：无法解析代理地址（curl 5）')
+  assert.equal(tm('New core and previous core failed to start: Clash core exited after starting; Clash core did not answer within 15 s'),
+    '新内核和之前的内核均启动失败：Clash 内核启动后退出；Clash 内核未在 15 秒内响应')
+  assert.equal(tm('New geo data failed to load; previous data restored: Clash profile rejected: bad rule'),
+    '新 Geo 数据加载失败，已恢复之前的数据：Clash 配置未通过检查：bad rule')
+})
+
 test('the checker tells interface text from code', () => {
   assert.ok(isProse('Unsaved changes'))
   assert.ok(isProse('Save'))

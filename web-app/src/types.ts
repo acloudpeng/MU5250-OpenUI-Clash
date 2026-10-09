@@ -394,6 +394,36 @@ export interface HomeData {
   thermal: ThermalInfo | null
 }
 
+/** `GET/PUT /api/proxy` — mirrors agent/src/proxy.rs: at most one backend is on. */
+export type ProxyBackendId = 'wireguard' | 'clash'
+export type ProxyChoice = 'off' | ProxyBackendId
+export interface ProxyBackend {
+  id: ProxyBackendId
+  /** Saved as on. */
+  enabled: boolean
+  revision: number
+  /** Can be turned on; otherwise `reason`, an agent message, says why not. */
+  ready: boolean
+  reason: string | null
+  /** The last apply error. */
+  error: string | null
+  /** Clash only: the core runs. */
+  running?: boolean
+}
+export interface ProxyStatus {
+  active: ProxyChoice
+  /** Both saved as on; WireGuard is the one in effect. */
+  conflict: boolean
+  backends: ProxyBackend[]
+}
+export interface ProxySwitch {
+  backend: ProxyChoice
+  /** Revision of the backend being turned on, or of the one being turned off. */
+  expected_revision: number
+  /** For off: the backend shown as on; the agent answers 409 if another one is on. */
+  active?: ProxyBackendId
+}
+
 export interface WireGuardProfile {
   id: number
   name: string
@@ -427,18 +457,14 @@ export interface WireGuardStatus {
   dns: string | null
   mtu: number | null
   ipv6_policy: string
-  /** Clash is stored on; enabling WireGuard then needs `takeover`. */
-  clash_enabled: boolean
 }
+/** Turning the tunnel on or off goes through `PUT /api/proxy`. */
 export interface WireGuardUpdate {
   expected_revision?: number
   profile?: WireGuardProfileAction
-  enabled?: boolean
   mode?: 'all' | 'selected'
   macs?: string[]
   config_text?: string
-  /** Required to enable WireGuard while Clash is on; turns Clash off. */
-  takeover?: boolean
 }
 
 export interface ClashUsage {
@@ -497,14 +523,12 @@ export interface ClashStatus {
   interface_up: boolean
   connected: boolean
   error: string | null
-  wireguard_enabled: boolean
   ipv6_policy: string
 }
+/** Turning Clash on goes through `PUT /api/proxy`; `enabled: false` only resolves a conflict. */
 export interface ClashUpdate {
   expected_revision: number
-  enabled?: boolean
-  /** Required to enable Clash while WireGuard is on; turns WireGuard off. */
-  takeover?: boolean
+  enabled?: false
   mode?: 'all' | 'selected'
   macs?: string[]
   devices?: { mac: string; selected: boolean }[]
@@ -605,6 +629,58 @@ export interface ClashDiagnostics {
   verdict: ClashVerdict | null
   checks: ClashCheck[]
 }
+
+/** `GET/POST /api/clash/core` — mirrors agent/src/clash_core.rs; times are device clock seconds.
+ * pinned: the FlClash build the deploy script installs; official: a MetaCubeX release installed here. */
+export type ClashCoreSource = 'pinned' | 'official' | 'uploaded' | 'unknown'
+export interface ClashCoreBuild {
+  /** A release tag (v1.19.32) or another build's token. */
+  version: string
+  sha256: string
+  source: ClashCoreSource
+}
+/** The last release check, cached by the agent for 10 minutes. */
+export interface ClashCoreRelease {
+  tag: string
+  /** GitHub's ISO time (not the device clock). */
+  published_at: string
+  checked_at: number
+  asset: string
+  size: number
+  digest: string
+  url: string
+}
+export type ClashCoreJobKind = 'check' | 'update' | 'rollback' | 'upload' | 'geodata'
+export type ClashCoreStep = 'checking' | 'receiving' | 'downloading' | 'verifying' | 'extracting' | 'testing' | 'installing' | 'restarting'
+/** The running job, or the last one until the next starts. */
+export interface ClashCoreJob {
+  kind: ClashCoreJobKind
+  state: 'running' | 'done' | 'failed'
+  step: ClashCoreStep
+  /** Progress of a downloading or receiving step; `total` is 0 when unknown. */
+  bytes: number
+  total: number
+  error: string | null
+  started_at: number
+  finished_at: number | null
+}
+export interface ClashCore {
+  installed: ClashCoreBuild | null
+  previous: ClashCoreBuild | null
+  latest: ClashCoreRelease | null
+  job: ClashCoreJob | null
+  /** Available on /data; 0 when unknown. */
+  free_bytes: number
+  /** The last download from GitHub failed: suggest a mirror. */
+  mirror_hint: boolean
+}
+/** auto: through the running core, else direct. mirror: the large files from an https:// prefix. */
+export type ClashCoreRoute = 'auto' | 'proxy' | 'direct' | 'mirror'
+export type ClashCoreAction =
+  | { action: 'check'; route?: Exclude<ClashCoreRoute, 'mirror'> }
+  | { action: 'update'; tag: string; route?: ClashCoreRoute; mirror?: string }
+  | { action: 'rollback' }
+  | { action: 'geodata'; route?: ClashCoreRoute; mirror?: string }
 
 export type DevUIPageId = 'overview' | 'wireguard' | 'profiles' | 'devices'
 export interface DevUISettings {
