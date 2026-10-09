@@ -58,7 +58,7 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
 | **P4** | 网页「代理」分组：概览 / 订阅 / 节点组 / 设备分流 / 连接 / 日志 / 高级设置；`api.ts`、`mock_agent.py`、契约检查 | 否 | 完成（mock + 浏览器走查）；**网页 8080 实机可访问** |
 | **P5** | `deploy-components.py --mihomo`、`transaction.sh` 快照目标、geo 数据打包 | 否 | **完成（实机部署成功，事务快照已生成）** |
 | **P6** | B31 实机验证：吞吐、DNS/IPv6/kill-switch 泄漏、防火墙重载/重启/WAN 重连恢复、72 h 内存浸泡、WG↔Clash 切换 | 是 | 进行中：**部署 + 重启持久性已验证**；吞吐/泄漏/浸泡待测 |
-| **P7** | DevUI 小屏：后端状态、Clash 开关/模式/节点 | 否（预览） | 可选 |
+| **P7** | DevUI 小屏：后端状态、Clash 开关/模式/节点 | 否（预览） | 完成（预览测试 + aarch64 交叉编译，见 2026-10-10 阶段 4），待实机 |
 | **P8** | 移植原作功能：端口转发、DMZ、SIM PIN/PUK、访客 Wi-Fi、飞行模式/数据开关、网络搜索；TLS 类（短信转发/测速）借 mihomo mixed-port | 否 | 可选 |
 
 ## P0 探测项（只读）
@@ -265,3 +265,14 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
 - 网页：Clash「高级」页「内核与数据」卡片（版本与来源、检查/更新/回滚、下载方式与镜像、上传、Geo 更新、进度与错误）。
 - 验证：agent 单元测试；容器内对真实 GitHub 跑通 v1.19.32 下载、摘要、解压；上传/回滚/部署锁/中断恢复路径；网页 13 个测试、mock 走查 51 项。
   **未验证：设备上替换后重启内核**（这台开发机跑不了 arm64）。
+
+### 2026-10-10 — 阶段 4：DevUI 触屏代理功能
+- 菜单最多 4 项，可选 概览/代理/WireGuard/Clash/已保存配置/设备分流，默认前四个；恰好等于旧默认的设置迁移一次（`menu-v2` 标记文件）。
+  已保存配置和设备分流始终能从 WireGuard 页进入。
+- 页面：代理（关闭/WireGuard/Clash + 诊断）、Clash（状态、开关、规则/全局/直连）、节点（分组 → 节点，每页 4 个，点选、整组测速）、
+  订阅（设为当前/立即更新）、内核与数据（检查/更新/回滚/更新 GEO）、诊断（结论 + 8 项）。WireGuard 开关改走代理切换，修复 Clash 开着时切换失败。
+- 协议：新增 `V B K U M X/x E` 记录、`groups`/`nodes` 查询（按序号 + 代数，从缓存回答，不阻塞）、`backend/cmode/csub/crefresh/select/delay/core/diag` 动词；
+  `J` 末尾加 `fresh`；状态回复 40 KiB 以内；`C` 只带旧屏幕认识的页面，旧屏幕与新 agent、新屏幕与旧 agent 都能工作。
+  状态刷新拆成三个线程，WG 锁被占用时屏幕不再变灰。
+- 验证：agent 测试、`screen/build.sh --preview` 新页面中英文点按测试（触控区 ≥48×48、翻页、对话框、代数过期、标志转换、最大页面 5220 字节、状态 23 KB）；
+  zig 0.14.1 交叉编译 aarch64 通过。**未在真机运行**：部署屏幕后需跑 `verify-screen.py` 并手动走一遍。

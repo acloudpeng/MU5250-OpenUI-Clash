@@ -43,6 +43,7 @@ static void draw_pixel(struct drm_buf *b, int x, int y, uint16_t c) {
 #include "power.h"
 #include "devui/html.h"
 #include "devui_assets.h"
+#include "devui/records.h"
 #define MAX_ROWS 128
 #define BG 0x0863
 #define CARD 0x1926
@@ -59,14 +60,22 @@ struct row {
 };
 struct profile { unsigned long long id; int active; char name[193]; };
 struct snapshot {
-  unsigned long long rev, handshake, rx, tx, stamp, job, done;
-  int has, enabled, connected, error, all, busy, result, n;
+  unsigned long long rev, handshake, rx, tx, stamp, job, done, fresh, failed_job;
+  int has, enabled, connected, error, all, busy, result, n, has_fresh;
   int np, battery, temperature;
   unsigned long long settings_rev;
   int idle_seconds, brightness, home_page, menu_mask, zh;
   unsigned long long uptime;
   double memory, cpu;
   struct profile profiles[5];
+  /* Agents with proxy support: backend switch, Clash, subscriptions, core, diagnosis. */
+  struct backend_info backend;
+  struct clash_info clash;
+  int nsubs;
+  struct sub_info subs[5];
+  struct core_info core;
+  struct diag_info diag;
+  char failure[97]; /* the agent's message for failed_job */
   struct row rows[MAX_ROWS];
 };
 static struct snapshot data, draft;
@@ -74,15 +83,30 @@ static int original_selection[MAX_ROWS];
 #ifndef SCREEN_PREVIEW
 static int screen_awake = 1;
 #endif
-enum { WG, DEVICES, MENU, PROFILES, OVERVIEW };
+/* Menu features first (their numbers are the settings record's page bits), then pages
+ * reached from them. */
+enum { WG, DEVICES, MENU, PROFILES, OVERVIEW, PROXY, CLASH, NODES, GROUP, SUBS, CORE, DIAG };
+#define LEGACY_PAGES 27  /* features of a C record: WireGuard, devices, profiles, overview */
+#define MENU_PAGES 123   /* features of a V record: the above plus proxy and Clash */
 static int page = MENU, offset, dialog, dirty, quitting, need_draw = 1,
                                                   return_after_save;
 static unsigned long long settings_revision;
-static int settings_idle = 120, settings_brightness = 128, settings_home = MENU, settings_menu = 27;
+/* Until the first record: overview, proxy, WireGuard and Clash. */
+static int settings_idle = 120, settings_brightness = 128, settings_home = MENU, settings_menu = 113;
 /* Screen language follows the web panel (C record); Chinese until the first record. */
 static int settings_zh = 1;
 #define L(en, zh) (settings_zh ? (zh) : (en))
-static int visible_page(int p) { return p == MENU || (settings_menu & (1 << p)); }
+static int visible_page(int p) { return p == MENU || (p <= CLASH && (settings_menu & (1 << p))); }
+/* Saved profiles and device routing belong to WireGuard; node, subscription and core
+ * pages to Clash; diagnostics to Clash and Proxy. */
+static int reachable(int p) {
+  switch (p) {
+  case PROFILES: case DEVICES: return visible_page(p) || visible_page(WG);
+  case NODES: case GROUP: case SUBS: case CORE: return visible_page(CLASH);
+  case DIAG: return visible_page(CLASH) || visible_page(PROXY);
+  default: return visible_page(p);
+  }
+}
 static int update_settings(const struct snapshot *s) {
   if (!s->settings_rev || s->settings_rev == settings_revision) return 0;
   int result = settings_revision ? 1 : 2;
@@ -93,11 +117,22 @@ static int update_settings(const struct snapshot *s) {
 }
 static unsigned long long pending, pending_revision, chosen_profile, chosen_revision;
 static char chosen_name[193];
-static char notice[128];
+static char notice[128], failure_text[97];
+/* What the pending job does, for its labels and its completion. */
+enum { JOB_WG = 1, JOB_BACKEND, JOB_MODE, JOB_SUB, JOB_REFRESH, JOB_SELECT, JOB_DELAY, JOB_CORE, JOB_DIAG };
+static int pending_kind;
+/* When the panel stops waiting for the pending job's outcome. */
+static long long pending_deadline;
 static long long monotonic_ms(void) {
   struct timespec t;
   clock_gettime(CLOCK_MONOTONIC, &t);
   return (long long)t.tv_sec * 1000 + t.tv_nsec / 1000000;
+}
+/* How long a job's outcome may take: a switch can wait minutes for a backend's lock and
+ * start, a download or core restart too; a node choice, delay test (20 s at most) or
+ * the start of a diagnosis answers in seconds. Past it the job is taken as lost. */
+static long long job_wait_ms(int kind) {
+  return kind == JOB_SELECT || kind == JOB_DELAY || kind == JOB_DIAG ? 60000 : 180000;
 }
 static void amount(char *out, size_t n, unsigned long long v) {
   if (v >= 1073741824)
@@ -111,6 +146,25 @@ static int stale(void) {
   return !data.stamp || (unsigned long long)time(NULL) > data.stamp + 10;
 }
 static int blocked(void) { return pending || data.busy || stale(); }
+/* A change to WireGuard (clash 0) or to Clash (1) is in progress: a backend switch is
+ * both, the WireGuard verbs only WireGuard, mode and subscription jobs only Clash; delay
+ * tests, node choices, core jobs and diagnoses neither. A busy agent counts for both. */
+static int applying(int clash) {
+  if (!pending) return data.busy;
+  if (pending_kind == JOB_BACKEND) return 1;
+  return clash ? pending_kind >= JOB_MODE && pending_kind <= JOB_REFRESH : pending_kind == JOB_WG;
+}
+/* Proxy groups and the open group's nodes, fetched while their pages are shown. */
+static struct groups_view groups;
+static struct nodes_view nodes;
+static int group_offset, node_offset, open_group, diag_offset, diag_from = MENU;
+static unsigned long long open_gen;
+static long long page_fetch_at;
+/* The confirmation dialog (5) and the subscription dialog (6). */
+enum { CF_BACKEND = 1, CF_UPDATE, CF_ROLLBACK, CF_GEO };
+static char confirm_req[96];
+static int confirm_what, confirm_target, confirm_job;
+static unsigned long long confirm_rev, chosen_sub, chosen_sub_rev;
 #include "devui/render.h"
 // The LCD and raw touch axes are mounted upside down relative to the case.
 // Keep layout coordinates upright; transform only at the hardware boundary.
@@ -132,7 +186,9 @@ static void rotate_frame(struct drm_buf *b) {
 static int parse_snapshot(char *buf, struct snapshot *out) {
   struct snapshot s = {.battery = -1, .temperature = -999, .memory = -1};
   char *save, *line = strtok_r(buf, "\n", &save);
-  int valid = 0;
+  int valid = 0, v_ok = 0, v_idle = 0, v_level = 0, v_home = 0, v_mask = 0;
+  unsigned long long v_rev = 0;
+  char v_lang[4] = "zh";
   while (line) {
     if (line[0] == 'S' &&
         sscanf(line, "S %llu %d %d %d %d %llu %llu %llu %d %llu", &s.rev,
@@ -145,14 +201,40 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
       if ((fields = sscanf(line, "C %llu %d %d %d %d %3s", &rev, &idle, &level, &home, &mask, lang)) >= 5 &&
           (fields == 5 || !strcmp(lang, "zh") || !strcmp(lang, "en")) &&
           idle >= 30 && idle <= 600 && level >= 20 && level <= 255 &&
-          home >= 0 && home <= 4 && mask > 0 && !(mask & ~27) &&
+          home >= 0 && home <= 4 && mask > 0 && !(mask & ~LEGACY_PAGES) &&
           (home == MENU || (mask & (1 << home)))) {
         s.settings_rev = rev; s.idle_seconds = idle; s.brightness = level;
         s.home_page = home; s.menu_mask = mask; s.zh = strcmp(lang, "en") != 0;
       }
     }
+    /* V: the same settings with Proxy and Clash; preferred over C when valid. */
+    else if (line[0] == 'V') {
+      char lang[4] = "";
+      if (sscanf(line, "V %llu %d %d %d %d %3s", &v_rev, &v_idle, &v_level, &v_home, &v_mask, lang) == 6 &&
+          (!strcmp(lang, "zh") || !strcmp(lang, "en")) &&
+          v_idle >= 30 && v_idle <= 600 && v_level >= 20 && v_level <= 255 &&
+          v_home >= 0 && v_home <= CLASH && v_mask > 0 && !(v_mask & ~MENU_PAGES) &&
+          (v_home == MENU || (v_mask & (1 << v_home)))) {
+        v_ok = 1;
+        snprintf(v_lang, sizeof(v_lang), "%s", lang);
+      }
+    }
     else if (line[0] == 'J')
-      sscanf(line, "J %d %llu %llu %d", &s.busy, &s.job, &s.done, &s.result);
+      /* fresh, the newest job the records already show, is absent from older agents. */
+      s.has_fresh = sscanf(line, "J %d %llu %llu %d %llu", &s.busy, &s.job, &s.done, &s.result, &s.fresh) == 5;
+    else if (line[0] && strchr("BKUMXxE", line[0]) && line[1] == '\t') {
+      char *f[16];
+      int n = split_tabs(line, f, 16);
+      switch (f[0][0]) {
+      case 'B': parse_backend(f, n, &s.backend); break;
+      case 'K': parse_clash(f, n, &s.clash); break;
+      case 'U': if (s.nsubs < 5 && parse_sub(f, n, &s.subs[s.nsubs])) s.nsubs++; break;
+      case 'M': parse_core(f, n, &s.core); break;
+      case 'X': parse_diag(f, n, &s.diag); break;
+      case 'x': parse_check(f, n, &s.diag); break;
+      case 'E': if (n >= 3) { s.failed_job = u64_field(f[1]); COPY(s.failure, f[2]); } break;
+      }
+    }
     else if (line[0] == 'O')
       sscanf(line, "O %d %d %llu %lf %lf", &s.battery, &s.temperature, &s.uptime, &s.memory, &s.cpu);
     else if (line[0] == 'P' && s.np < 5) {
@@ -188,6 +270,10 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
     }
     line = strtok_r(NULL, "\n", &save);
   }
+  if (v_ok) {
+    s.settings_rev = v_rev; s.idle_seconds = v_idle; s.brightness = v_level;
+    s.home_page = v_home; s.menu_mask = v_mask; s.zh = strcmp(v_lang, "en") != 0;
+  }
   if (valid || s.settings_rev)
     *out = s;
   return valid || s.settings_rev;
@@ -218,20 +304,66 @@ static int exchange(const char *request, char *reply, size_t cap) {
   return ok;
 }
 #else
-static char test_request[4096];
+/* Preview: the last request, all requests since the log was cleared, canned replies. */
+static char test_request[4096], test_log[8192];
+static const char *stub_groups, *stub_nodes, *stub_job = "OK 1\n";
 static int exchange(const char *r, char *out, size_t cap) {
   snprintf(test_request, sizeof(test_request), "%s", r);
-  snprintf(out, cap, "OK 1\n");
+  size_t used = strlen(test_log);
+  snprintf(test_log + used, sizeof(test_log) - used, "%s", r);
+  const char *reply = !strncmp(r, "groups ", 7) ? stub_groups : !strncmp(r, "nodes ", 6) ? stub_nodes : stub_job;
+  if (!reply) return -1;
+  snprintf(out, cap, "%s", reply);
   return 0;
 }
 #endif
+static void fetch_groups(void);
+static int parent(int p);
+/* Starts an agent job: one at a time, answered with its number. A stale node list is
+ * reloaded; other refusals are explained in a dialog. */
+static int send_job(const char *req, int kind, unsigned long long revision) {
+  char reply[128] = "";
+  if (blocked())
+    return -1;
+  pending_revision = revision;
+  if (exchange(req, reply, sizeof(reply)) == 0 && sscanf(reply, "OK %llu", &pending) == 1 && pending) {
+    pending_kind = kind;
+    pending_deadline = monotonic_ms() + job_wait_ms(kind);
+    dialog = 0;
+    notice[0] = 0;
+    need_draw = 1;
+    return 0;
+  }
+  pending = 0;
+  pending_kind = 0;
+  failure_text[0] = 0;
+  if (!strncmp(reply, "ERR Stale", 9)) {
+    snprintf(notice, sizeof(notice), "%s", L("The node list changed. Reloaded.", "节点列表已变化，已重新加载。"));
+    dialog = 0;
+    if (page == GROUP) page = NODES;
+    fetch_groups();
+  } else {
+    snprintf(notice, sizeof(notice), "%s", !strncmp(reply, "ERR Busy", 8)
+        ? L("Another action is still running.", "另一项操作仍在进行。")
+        : L("Request failed. Try again.", "请求失败，请重试。"));
+    dialog = 3;
+  }
+  need_draw = 1;
+  return -1;
+}
 static void submit(int toggle, int value) {
-  char req[4096], reply[128];
+  char req[4096];
   if (blocked())
     return;
+  int kind = JOB_WG;
   if (toggle == 2)
     snprintf(req, sizeof(req), "profile %llu %llu\n", chosen_revision, chosen_profile);
-  else if (toggle)
+  else if (toggle && data.backend.has) {
+    /* The backend switch turns Clash off in the same transaction; toggle cannot. Off
+     * names WireGuard, the backend this page shows as on. */
+    snprintf(req, sizeof(req), "backend %llu %s\n", data.rev, value ? "wireguard" : "off wireguard");
+    kind = JOB_BACKEND;
+  } else if (toggle)
     snprintf(req, sizeof(req), "toggle %llu %d\n", data.rev, value);
   else {
     size_t n = (size_t)snprintf(req, sizeof(req), "devices %llu ", draft.rev);
@@ -245,24 +377,97 @@ static void submit(int toggle, int value) {
     }
     if (!count) {
       dirty = 0;
-      page = WG;
+      page = parent(DEVICES);
       return;
     }
     snprintf(req + n, sizeof(req) - n, "\n");
   }
-  pending_revision = toggle == 2 ? chosen_revision : toggle ? data.rev : draft.rev;
-  if (exchange(req, reply, sizeof(reply)) == 0 &&
-      sscanf(reply, "OK %llu", &pending) == 1) {
-    dialog = 0;
-    notice[0] = 0;
-  } else {
-    snprintf(notice, sizeof(notice), "%s", L("Request failed. Try again.", "请求失败，请重试。"));
-    dialog = 3;
-    pending = 0;
-  }
-  need_draw = 1;
+  send_job(req, kind, toggle == 2 ? chosen_revision : toggle ? data.rev : draft.rev);
 }
 #include "devui/actions.h"
+static const char *job_failure(int kind, int result) {
+  if (result == 1)
+    return kind == JOB_CORE ? L("A core job or deployment is running.", "内核任务或部署正在进行。")
+                            : L("Settings changed. Refresh.", "设置已被更改，请刷新。");
+  switch (kind) {
+  case JOB_DELAY: return L("Delay test failed.", "测速失败。");
+  case JOB_SELECT: return L("Could not select the node.", "无法选择该节点。");
+  case JOB_REFRESH: return L("Subscription update failed.", "订阅更新失败。");
+  case JOB_CORE: return L("The core request was refused.", "内核请求被拒绝。");
+  case JOB_DIAG: return L("Diagnostics could not start.", "无法启动诊断。");
+  default: return L("Apply failed. Check OpenUI.", "应用失败，请在 OpenUI 中检查。");
+  }
+}
+/* A finished job ends the pending state once the records show its outcome. Agents
+ * before the J record's fresh field only signal WireGuard jobs, by a higher revision. */
+static void settle_jobs(void) {
+  if (!pending)
+    return;
+  /* The agent numbers jobs from 1 after a restart: the pending job's outcome is lost. */
+  if (data.job < pending) {
+    pending = 0;
+    pending_kind = 0;
+    snprintf(notice, sizeof(notice), "%s", L("The agent restarted. Check the result.", "Agent 已重启，请检查结果。"));
+    return;
+  }
+  int kind = pending_kind;
+  int finished = data.done >= pending && (!data.has_fresh || data.fresh >= pending);
+  if (finished && data.result) {
+    snprintf(failure_text, sizeof(failure_text), "%s", data.failed_job == pending ? data.failure : "");
+    snprintf(notice, sizeof(notice), "%s", job_failure(kind, data.result));
+    pending = 0;
+    pending_kind = 0;
+    dialog = 3;
+    return;
+  }
+  if (!finished || (!data.has_fresh && data.rev <= pending_revision)) {
+    /* An outcome that never comes must not block the panel. */
+    if (monotonic_ms() >= pending_deadline) {
+      failure_text[0] = 0;
+      snprintf(notice, sizeof(notice), "%s", L("No result from the agent in time. Check the result.", "Agent 未及时返回结果，请检查。"));
+      pending = 0;
+      pending_kind = 0;
+      return_after_save = 0;
+      dialog = 3;
+    }
+    return;
+  }
+  pending = 0;
+  pending_kind = 0;
+  notice[0] = 0;
+  if (kind == JOB_WG) {
+    dirty = 0;
+    if (page == DEVICES) {
+      draft = data;
+      for (int i = 0; i < draft.n; i++)
+        original_selection[i] = draft.rows[i].selected;
+      if (return_after_save)
+        page = parent(DEVICES);
+    }
+    return_after_save = 0;
+  }
+  if (kind == JOB_SELECT || kind == JOB_DELAY)
+    refresh_page();
+}
+/* After each status: settings, the device draft, pages that are no longer shown, jobs. */
+static void track_status(int changed) {
+  if (changed == 2) {
+    page = settings_home;
+    if (page == DEVICES) enter_devices();
+    else refresh_page();
+  }
+  if (page == DEVICES && !dirty && !pending && !dialog) {
+    draft = data;
+    for (int i = 0; i < draft.n; i++) original_selection[i] = draft.rows[i].selected;
+    if (offset >= draft.n) offset = 0;
+  }
+  /* A shorter check list (a new run clears it) keeps diagnostics on a page it has. */
+  int last_checks = data.diag.n > 0 ? (data.diag.n - 1) / 4 * 4 : 0;
+  if (diag_offset > last_checks) diag_offset = last_checks;
+  if (!reachable(page) && !dirty && !pending && !dialog) page = MENU;
+  settle_jobs();
+  need_draw = 1;
+}
 #ifndef SCREEN_PREVIEW
 static void putfile(const char *path, const char *s) {
   char tmp[256];
@@ -661,39 +866,14 @@ static int panel(int heartbeat, int idle_seconds) {
           if (changed) {
             on_level = settings_brightness;
             if (screen_awake && !first && old_brightness != on_level) brightness(on_level);
-            if (changed == 2) { page = settings_home; if (page == DEVICES) enter_devices(); }
           }
-          if (page == DEVICES && !dirty && !pending && !dialog) {
-            draft = data;
-            for (int i = 0; i < draft.n; i++) original_selection[i] = draft.rows[i].selected;
-            if (offset >= draft.n) offset = 0;
-          }
-          if (!visible_page(page) && !dirty && !pending && !dialog) page = MENU;
-          need_draw = 1;
-          if (pending && data.done >= pending) {
-            if (data.result) {
-              pending = 0;
-              snprintf(notice, sizeof(notice), "%s", data.result == 1
-                  ? L("Settings changed. Refresh.", "设置已被更改，请刷新。")
-                  : L("Apply failed. Check OpenUI.", "应用失败，请在 OpenUI 中检查。"));
-              dialog = 3;
-            } else if (data.rev > pending_revision) {
-              pending = 0;
-              dirty = 0;
-              notice[0] = 0;
-              if (page == DEVICES) {
-                draft = data;
-                for (int i = 0; i < draft.n; i++)
-                  original_selection[i] = draft.rows[i].selected;
-                if (return_after_save)
-                  page = WG;
-              }
-              return_after_save = 0;
-            }
-          }
+          track_status(changed);
         }
       }
     }
+    /* Node pages read their lists from the agent's cached view. */
+    if ((page == NODES || page == GROUP) && now >= page_fetch_at && screen_awake)
+      refresh_page();
     if (now - contact > 15000)
       break;
     if (settling && now >= settle_at && !screen_awake) {
@@ -902,7 +1082,7 @@ int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--self-test"))
     return input_self_test();
   if (argc == 2 && !strcmp(argv[1], "--version")) {
-    puts("openui-screen 4 DevUI / live settings / four-press shortcut");
+    puts("openui-screen 5 DevUI / live settings / four-press shortcut / proxy and Clash");
     return 0;
   }
   if (argc == 2 && !strcmp(argv[1], "--ipc-check")) {
@@ -910,7 +1090,7 @@ int main(int argc, char **argv) {
     char reply[49152];struct snapshot snap;
     for(int i=0;i<8;i++) {
       if(exchange("status\n",reply,sizeof(reply))==0&&parse_snapshot(reply,&snap)&&snap.stamp) {
-        printf("Agent IPC: %d profiles, %d devices, overview=%s\n",snap.np,snap.n,snap.uptime?"ready":"unavailable");
+        printf("Agent IPC: %d profiles, %d devices, overview=%s, proxy=%s\n",snap.np,snap.n,snap.uptime?"ready":"unavailable",snap.backend.has?"ready":"unavailable");
         return snap.uptime?0:1;
       }
       usleep(500000);
@@ -959,8 +1139,21 @@ static void dump(struct drm_buf *b, const char *path) {
   }
   fclose(f);
 }
+static size_t html_peak;
+static char html_peak_page[64];
+/* Every page must fit the HTML buffer whole: a truncated document drops controls. */
 static void capture(struct drm_buf *b,const char *dir,const char *name) {
-  char path[512];render(b);snprintf(path,sizeof(path),"%s/%s.ppm",dir,name);dump(b,path);
+  char path[512];render(b);
+  assert(strstr(html,"</body></html>")&&html_used<sizeof(html)-512);
+  if(html_used>html_peak){html_peak=html_used;snprintf(html_peak_page,sizeof(html_peak_page),"%s",name);}
+  snprintf(path,sizeof(path),"%s/%s.ppm",dir,name);dump(b,path);
+}
+/* The same page in Chinese and English ("en-" prefix). */
+static void capture_both(struct drm_buf *b,const char *dir,const char *name) {
+  char en[64];int zh=settings_zh;
+  settings_zh=1;capture(b,dir,name);
+  settings_zh=0;snprintf(en,sizeof(en),"en-%s",name);capture(b,dir,en);
+  settings_zh=zh;
 }
 static void press_id(struct drm_buf *b,const char *id) {
   render(b);
@@ -969,6 +1162,318 @@ static void press_id(struct drm_buf *b,const char *id) {
   assert(html_view_rect(selector,&x,&y,&w,&h));
   assert(w>=48&&h>=48&&x>=0&&y>=0&&x+w<=W&&y+h<=H);
   tap(x+w/2,y+h/2);
+}
+#define CJK48 "超长名称测试超长名称测试超长名称测试超长名称测试超长名称测试超长名称测试超长名称测试超长名称测试"
+/* A status from an agent with proxy support; names are worst-case CJK. */
+static void proxy_snapshot(char *out, size_t cap) {
+  unsigned long long now=(unsigned long long)time(NULL);
+  size_t n=(size_t)snprintf(out,cap,
+    "S 7 1 0 0 0 0 134217728 25165824 1 %llu\n"
+    "P\t1\t1\tHome VPN\nD\t02:11:22:33:44:55\t1\t1\t192.0.2.2\tWork laptop\n"
+    "O 83 320 18372 34.5 12.4\n"
+    "B\tclash\t0\t7\t1\t-\t0\t12\t1\t-\t0\n"
+    "K\t12\t1\t1\t1\trule\t3600\t43008\t3\t1\tv1.19.13\t-\n"
+    "U\t3\t1\t1\t%llu\t1073741824\t5368709120\t107374182400\t%llu\t42\t0\t\xF0\x9F\x87\xAD\xF0\x9F\x87\xB0 香港 Premium\n"
+    "U\t4\t0\t1\t%llu\t0\t2147483648\t0\t0\t17\t0\t" CJK48 "\n"
+    "U\t5\t0\t0\t0\t0\t0\t0\t0\t0\t0\t" CJK48 "\n"
+    "U\t6\t0\t1\t%llu\t1\t1\t1073741824\t%llu\t9\t1\t" CJK48 "\n"
+    "U\t7\t0\t1\t%llu\t0\t0\t1073741824\t%llu\t9\t0\t" CJK48 "\n"
+    "M\t1\tv1.19.13\tpinned\tv1.19.12\tv1.19.14\t2026-09-30\t1\tupdate\trunning\tdownloading\t5242880\t31457280\t209715200\t-\n"
+    "X\t0\t%llu\tnodes\n"
+    "x\tclock\tpass\t3\t1\t-\t-\nx\tcore\tpass\t1\t1\t-\t-\nx\tdns\tpass\t1\t0\t-\t-\n"
+    "x\tnodes\tfail\t-\t-\t0\t24\nx\tfetch\tfail\t200\t-\t-\t-\nx\tdevices\twarn\t0\t5\t-\t-\n"
+    "x\troute\tskip\t-\t-\t-\t-\nx\tfirewall\twarn\t0\t1\t0\t12\n"
+    "C 9 120 128 2 27 zh\nV 9 120 128 2 113 zh\nJ 0 3 3 0 3\n.\n",
+    now,now-7200,now+30*86400,now-86400*3,now-60,now+3*86400,now-600,now-86400,now-120);
+  assert(n<cap);
+}
+static const char groups_page1[]=
+  "G\t1\t4242\t9\t0\n"
+  "g\t0\t1\t6\t5\tSelector\t\xF0\x9F\x9A\x80 节点选择\t\xF0\x9F\x87\xAD\xF0\x9F\x87\xB0 香港 01\n"
+  "g\t1\t0\t12\t0\tURLTest\t\xE2\x99\xBB\xEF\xB8\x8F 自动选择\t\xF0\x9F\x87\xAF\xF0\x9F\x87\xB5 东京 02\n"
+  "g\t2\t1\t3\t0\tSelector\tStreaming\tDIRECT\n"
+  "g\t3\t1\t2\t1\tFallback\t" CJK48 "\t" CJK48 "\n.\n";
+static const char groups_page2[]=
+  "G\t1\t4242\t9\t4\ng\t4\t1\t2\t0\tSelector\tGLOBAL\tDIRECT\n.\n";
+static const char nodes_page2[]=
+  "N\t4242\t0\t6\t4\t1\t5\tSelector\t\xF0\x9F\x9A\x80 节点选择\n"
+  "n\t4\t88\tTrojan\t\xF0\x9F\x87\xAD\xF0\x9F\x87\xB0 香港 01 " CJK48 "\n"
+  "n\t5\t0\tVmess\t\xF0\x9F\x87\xAF\xF0\x9F\x87\xB5 东京 02\n.\n";
+static const char nodes_page1[]=
+  "N\t4242\t0\t6\t0\t1\t5\tSelector\t\xF0\x9F\x9A\x80 节点选择\n"
+  "n\t0\t-1\tURLTest\t\xE2\x99\xBB\xEF\xB8\x8F 自动选择\n"
+  "n\t1\t1234\tShadowsocks\t" CJK48 "\n"
+  "n\t2\t156\tVless\t\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8 United States 03\n"
+  "n\t3\t420\tHysteria2\t\xF0\x9F\x87\xB8\xF0\x9F\x87\xAC 新加坡 04\n.\n";
+static const char nodes_auto[]=
+  "N\t4242\t1\t2\t0\t0\t0\tURLTest\t\xE2\x99\xBB\xEF\xB8\x8F 自动选择\n"
+  "n\t0\t88\tTrojan\tHK 01\nn\t1\t0\tVmess\tJP 02\n.\n";
+static void expect_request(const char *want) {
+  if(strcmp(test_request,want)){fprintf(stderr,"request %s, want %s",test_request,want);assert(0);}
+}
+static void reset_job(void) { pending=0;pending_kind=0;dialog=0;notice[0]=0;test_request[0]=0; }
+/* Every character whole: no sequence cut short. */
+static int utf8_whole(const char *s) {
+  for(const unsigned char *p=(const unsigned char *)s;*p;) {
+    int n=*p<0x80?1:(*p&0xe0)==0xc0?2:(*p&0xf0)==0xe0?3:(*p&0xf8)==0xf0?4:0;
+    if(!n)return 0;
+    for(int i=1;i<n;i++)if((p[i]&0xc0)!=0x80)return 0;
+    p+=n;
+  }
+  return 1;
+}
+static void proxy_tests(struct drm_buf *b,const char *dir) {
+  char text[512],full[16384];
+  /* Display text: flags become letters; other non-BMP characters, selectors and broken UTF-8 go. */
+  const char *cases[][2]={
+    {"\xF0\x9F\x87\xAD\xF0\x9F\x87\xB0 香港 01","HK 香港 01"},
+    {"\xF0\x9F\x9A\x80 节点选择","节点选择"},
+    {"\xE2\x99\xBB\xEF\xB8\x8F 自动选择","\xE2\x99\xBB 自动选择"},
+    {"\xF0\x9F\x87\xAF\xF0\x9F\x87\xB5Tokyo","JPTokyo"},
+    {"  a  \xF0\x9F\x8E\x89  b  ","a b"},
+    {"\xFF\xFE""A\x80""B","AB"},
+    {"cut \xE4\xB8","cut"},
+    {"\xF0\x9F\x8E\x89","",}};
+  for(size_t i=0;i<sizeof(cases)/sizeof(cases[0]);i++) {
+    snprintf(text,sizeof(text),"%s",cases[i][0]);display_text(text);
+    if(strcmp(text,cases[i][1])){fprintf(stderr,"display_text(%s)=%s\n",cases[i][0],text);assert(0);}
+  }
+  /* A field longer than its buffer ends before the first character that does not fit. */
+  char small[8];
+  copy_field(small,sizeof(small),"abc机器人");assert(!strcmp(small,"abc机"));
+  copy_field(small,sizeof(small),"abcd机器");assert(!strcmp(small,"abcd机"));
+  copy_field(small,sizeof(small),"abcde机");assert(!strcmp(small,"abcde"));
+  copy_field(small,sizeof(small),"abcdefghij");assert(!strcmp(small,"abcdefg"));
+  copy_field(small,sizeof(small),"-");assert(!small[0]);
+  struct snapshot cut;
+  char long_text[1024];
+  snprintf(long_text,sizeof(long_text),"V 1 90 200 2 113 zh\nK\t1\t1\t0\t0\trule\t0\t0\t0\t1\tv1-%s\ta%s\nE\t4\t%s\n.\n",
+           "版版版版版版版版版版版版","错错错错错错错错错错错错错错错错错错错错错错错错错错错错错错错错错","失败失败失败失败失败失败失败失败失败失败失败失败失败失败失败失败失败");
+  assert(parse_snapshot(long_text,&cut)&&cut.clash.has&&cut.failed_job==4);
+  assert(!strcmp(cut.clash.version,"v1-版版版版版版版版版")&&strlen(cut.clash.error)==94);
+  assert(utf8_whole(cut.clash.version)&&utf8_whole(cut.clash.error)&&utf8_whole(cut.failure)&&strlen(cut.failure)==96);
+  /* Settings: V wins over C in either order; an invalid V falls back to C; C alone is an
+   * agent before Proxy and Clash, whose screen has neither page. */
+  struct snapshot prefs;
+  char both[]="V 20 90 200 5 113 en\nC 20 90 200 2 17 en\n.\n";
+  assert(parse_snapshot(both,&prefs)&&update_settings(&prefs)&&settings_menu==113&&settings_home==PROXY&&!settings_zh);
+  char bad_v[]="C 21 90 200 4 17 zh\nV 21 90 200 4 145 zh\n.\n";
+  assert(parse_snapshot(bad_v,&prefs)&&update_settings(&prefs)&&settings_menu==17&&settings_home==OVERVIEW&&settings_zh);
+  char hidden_home[]="C 22 90 200 2 17 zh\nV 22 90 200 6 49 zh\n.\n";
+  assert(parse_snapshot(hidden_home,&prefs)&&update_settings(&prefs)&&settings_menu==17&&settings_home==MENU);
+  char old_agent[]="C 23 90 200 2 27 zh\n.\n";
+  assert(parse_snapshot(old_agent,&prefs)&&update_settings(&prefs)&&settings_menu==27);
+  assert(!visible_page(PROXY)&&!visible_page(CLASH)&&!reachable(NODES)&&!reachable(DIAG));
+  page=MENU;capture(b,dir,"menu-old-agent");assert(!strstr(html,"act:proxy")&&!strstr(html,"act:clash"));
+  /* The new default; profiles and devices stay reachable through WireGuard. */
+  proxy_snapshot(full,sizeof(full));
+  assert(parse_snapshot(full,&data)&&update_settings(&data)==1&&settings_menu==113);
+  assert(data.backend.has&&data.backend.active==BK_CLASH&&data.backend.rev[0]==7&&data.backend.rev[1]==12);
+  assert(data.clash.has&&data.clash.rev==12&&data.clash.running&&!strcmp(data.clash.version,"v1.19.13")&&!data.clash.error[0]);
+  assert(data.nsubs==5&&!strcmp(data.subs[0].name,"HK 香港 Premium")&&data.subs[3].failed&&!data.subs[2].downloaded);
+  assert(data.core.available&&data.core.newer&&!strcmp(data.core.latest,"v1.19.14")&&!strcmp(data.core.state,"running"));
+  assert(data.diag.has&&data.diag.n==8&&data.diag.checks[3].v[0]==NO_FIGURE&&data.diag.checks[3].v[3]==24);
+  assert(data.has_fresh&&data.fresh==3&&data.n==1&&data.np==1);
+  assert(!visible_page(PROFILES)&&reachable(PROFILES)&&reachable(DEVICES)&&reachable(DIAG));
+  page=MENU;capture_both(b,dir,"menu-proxy");
+  assert(strstr(html,"act:proxy")&&strstr(html,"act:clash")&&!strstr(html,"act:profiles"));
+  page=WG;render(b);assert(strstr(html,"act:profiles")&&strstr(html,"act:devices"));
+  /* Proxy page: confirmation before every switch, with the right revision. */
+  page=MENU;press_id(b,"proxy");assert(page==PROXY);capture_both(b,dir,"proxy");
+  press_id(b,"bk2");assert(!dialog); /* the active backend */
+  press_id(b,"bk1");assert(dialog==5&&confirm_what==CF_BACKEND&&confirm_target==BK_WG);
+  capture_both(b,dir,"proxy-confirm");
+  press_id(b,"dismiss");assert(!dialog&&!test_request[0]);
+  press_id(b,"bk1");press_id(b,"confirm");expect_request("backend 7 wireguard\n");
+  assert(pending==1&&pending_kind==JOB_BACKEND&&!dialog);
+  capture(b,dir,"proxy-switching");press_id(b,"bk0");assert(!dialog);
+  reset_job();press_id(b,"bk0");assert(dialog==5);capture_both(b,dir,"proxy-off-confirm");
+  /* Off names the backend shown as on, which the agent checks is still the one on. */
+  press_id(b,"confirm");expect_request("backend 12 off clash\n");
+  reset_job();data.backend.active=BK_WG;data.backend.ready[1]=0;snprintf(data.backend.reason[1],sizeof(data.backend.reason[1]),"sub");
+  capture_both(b,dir,"proxy-not-ready");assert(strstr(html,"Add a subscription in OpenUI"));
+  press_id(b,"bk2");assert(!dialog);
+  data.backend.ready[1]=1;press_id(b,"bk2");press_id(b,"confirm");expect_request("backend 12 clash\n");
+  reset_job();data.backend.active=BK_OFF;data.backend.conflict=0;capture(b,dir,"proxy-off");
+  data.backend.active=BK_WG;data.backend.conflict=1;data.enabled=1;capture(b,dir,"proxy-conflict");
+  /* Both saved on: choosing WireGuard is how the conflict is resolved. */
+  press_id(b,"bk1");assert(dialog==5&&confirm_target==BK_WG);press_id(b,"dismiss");
+  press_id(b,"bk0");assert(dialog==5&&confirm_target==BK_OFF);press_id(b,"confirm");expect_request("backend 7 off wireguard\n");
+  reset_job();
+  press_id(b,"active");assert(page==WG);
+  /* WireGuard switches through the backend verb; toggle only for agents without it. */
+  data.backend.conflict=0;press_id(b,"toggle");assert(dialog==1);press_id(b,"confirm");expect_request("backend 7 off wireguard\n");
+  reset_job();data.enabled=0;data.backend.active=BK_CLASH;capture(b,dir,"wireguard-from-clash");
+  press_id(b,"toggle");assert(dialog==5&&confirm_target==BK_WG);press_id(b,"confirm");expect_request("backend 7 wireguard\n");
+  reset_job();data.backend.active=BK_OFF;press_id(b,"toggle");expect_request("backend 7 wireguard\n");assert(!dialog);
+  reset_job();data.backend.active=BK_CLASH;
+  /* Clash page: modes switch at once, turning off asks first. */
+  page=MENU;press_id(b,"clash");assert(page==CLASH);capture_both(b,dir,"clash");
+  press_id(b,"m0");assert(!test_request[0]);
+  press_id(b,"m1");expect_request("cmode 12 global\n");assert(pending_kind==JOB_MODE);
+  reset_job();press_id(b,"ctoggle");assert(dialog==5&&confirm_target==BK_OFF);press_id(b,"confirm");expect_request("backend 12 off clash\n");
+  reset_job();data.clash.enabled=0;data.clash.running=0;data.backend.active=BK_WG;capture(b,dir,"clash-off");
+  press_id(b,"ctoggle");assert(dialog==5&&confirm_target==BK_CLASH);press_id(b,"confirm");expect_request("backend 12 clash\n");
+  reset_job();data.backend.active=BK_OFF;press_id(b,"ctoggle");expect_request("backend 12 clash\n");assert(!dialog);
+  reset_job();data.backend.active=BK_CLASH;data.clash.enabled=1;data.clash.running=1;
+  snprintf(data.clash.error,sizeof(data.clash.error),"Clash policy is incomplete; automatic recovery is pending");
+  capture(b,dir,"clash-error");data.clash.error[0]=0;
+  /* Nodes: a page of groups, then a page of a group's nodes, by index and generation. */
+  stub_groups=groups_page1;test_log[0]=0;
+  press_id(b,"nodes");assert(page==NODES&&groups.state==1&&groups.n==4&&groups.gen==4242);
+  expect_request("groups 0\n");
+  assert(!strcmp(groups.rows[0].name,"节点选择")&&!strcmp(groups.rows[0].now_name,"HK 香港 01"));
+  capture_both(b,dir,"nodes");
+  stub_groups=groups_page2;press_id(b,"next");expect_request("groups 4\n");assert(group_offset==4&&groups.n==1);
+  capture(b,dir,"nodes-page2");
+  stub_groups=groups_page1;press_id(b,"prev");expect_request("groups 0\n");assert(group_offset==0);
+  stub_nodes=nodes_page2;press_id(b,"g0");assert(page==GROUP&&open_gen==4242&&open_group==0);
+  expect_request("nodes 4242 0 4\n");  /* opens on the page of the current node */
+  assert(nodes.ok&&node_offset==4&&nodes.n==2&&nodes.now==5&&!strncmp(nodes.rows[0].name,"HK 香港 01 ",13));
+  capture_both(b,dir,"group");
+  stub_nodes=nodes_page1;press_id(b,"prev");expect_request("nodes 4242 0 0\n");assert(node_offset==0&&nodes.n==4);
+  capture_both(b,dir,"group-page1");
+  press_id(b,"n2");expect_request("select 4242 0 2\n");assert(pending==1&&pending_kind==JOB_SELECT);
+  capture(b,dir,"group-selecting");
+  reset_job();press_id(b,"test");expect_request("delay 4242 0\n");assert(pending_kind==JOB_DELAY);
+  capture(b,dir,"group-testing");
+  /* Completion waits until the records show the job, then reloads the nodes. */
+  data.busy=0;data.done=1;data.fresh=0;data.result=0;data.has_fresh=1;settle_jobs();assert(pending==1);
+  data.fresh=1;settle_jobs();assert(!pending&&!pending_kind);expect_request("nodes 4242 0 0\n");
+  /* A stale generation reloads the group list. */
+  stub_job="ERR Stale\n";test_log[0]=0;press_id(b,"n3");
+  assert(page==NODES&&!pending&&notice[0]&&strstr(test_log,"select 4242 0 3\n")&&strstr(test_log,"groups 0\n"));
+  capture(b,dir,"nodes-stale");stub_job="OK 1\n";
+  page=GROUP;stub_nodes="ERR Stale\n";refresh_page();assert(page==NODES);
+  /* ...but not under the failure dialog: its message and the page stay until it closes. */
+  page=GROUP;dialog=3;snprintf(notice,sizeof(notice),"%s",job_failure(JOB_SELECT,2));refresh_page();
+  assert(page==GROUP&&dialog==3&&!strcmp(notice,job_failure(JOB_SELECT,2)));
+  press_id(b,"refresh");assert(page==NODES&&!dialog&&strstr(notice,"节点列表已变化"));
+  stub_nodes=nodes_auto;notice[0]=0;press_id(b,"g1");assert(page==GROUP&&!nodes.selectable);
+  capture(b,dir,"group-auto");test_request[0]=0;press_id(b,"n1");assert(!test_request[0]&&!pending);
+  press_id(b,"back");assert(page==NODES);press_id(b,"back");assert(page==CLASH);
+  stub_groups="G\t2\t0\t0\t0\n.\n";press_id(b,"nodes");assert(groups.state==2);capture(b,dir,"nodes-not-running");
+  press_id(b,"back");
+  /* Subscriptions: a dialog to make one current or update it now. */
+  press_id(b,"subs");assert(page==SUBS);capture_both(b,dir,"subs");
+  press_id(b,"s1");assert(dialog==6&&chosen_sub==4&&chosen_sub_rev==12);capture_both(b,dir,"sub-dialog");
+  press_id(b,"activate");expect_request("csub 12 4\n");assert(pending_kind==JOB_SUB&&!dialog);
+  reset_job();press_id(b,"s1");press_id(b,"srefresh");expect_request("crefresh 4\n");assert(pending_kind==JOB_REFRESH);
+  reset_job();press_id(b,"s0");test_request[0]=0;press_id(b,"activate");assert(!test_request[0]&&dialog==6);
+  capture(b,dir,"sub-dialog-active");press_id(b,"dismiss");assert(!dialog);
+  press_id(b,"back");assert(page==CLASH);
+  /* Core and data: no action while a core job runs; update and rollback confirm. */
+  press_id(b,"core");assert(page==CORE);capture_both(b,dir,"core");
+  press_id(b,"ccheck");assert(!test_request[0]);
+  snprintf(data.core.state,sizeof(data.core.state),"done");
+  press_id(b,"ccheck");expect_request("core check\n");assert(pending_kind==JOB_CORE);
+  reset_job();press_id(b,"cupdate");assert(dialog==5&&confirm_what==CF_UPDATE);capture_both(b,dir,"core-confirm");
+  press_id(b,"confirm");expect_request("core update v1.19.14\n");
+  reset_job();press_id(b,"crollback");assert(dialog==5);press_id(b,"confirm");expect_request("core rollback\n");
+  reset_job();press_id(b,"cgeo");assert(dialog==5);press_id(b,"confirm");expect_request("core geodata\n");
+  reset_job();snprintf(data.core.latest,sizeof(data.core.latest),"v1 2");press_id(b,"cupdate");assert(!dialog);
+  /* A tag the agent would refuse draws "Update core" disabled, as tapping it does nothing. */
+  render(b);assert(strstr(html,"id=\"cupdate\" href=\"act:none\""));
+  snprintf(data.core.latest,sizeof(data.core.latest),"v1+build.5");render(b);
+  assert(data.core.newer&&core_idle()&&!core_update_ok()&&strstr(html,"id=\"cupdate\" href=\"act:none\""));
+  press_id(b,"cupdate");assert(!dialog);
+  snprintf(data.core.latest,sizeof(data.core.latest),"v1.19.14");render(b);assert(strstr(html,"id=\"cupdate\" href=\"act:cupdate\""));
+  snprintf(data.core.state,sizeof(data.core.state),"failed");snprintf(data.core.error,sizeof(data.core.error),"Download failed: timeout");
+  capture(b,dir,"core-failed");
+  /* A refused job explains itself with the agent's message. */
+  send_job("core check\n",JOB_CORE,0);data.done=pending;data.fresh=pending;data.result=1;data.failed_job=pending;
+  snprintf(data.failure,sizeof(data.failure),"A core job is already running");
+  settle_jobs();assert(dialog==3&&!pending&&!strcmp(failure_text,"A core job is already running"));
+  capture_both(b,dir,"job-failed");press_id(b,"refresh");assert(!dialog&&page==CORE&&!failure_text[0]);
+  data.result=0;
+  struct core_info saved_core=data.core;memset(&data.core,0,sizeof(data.core));data.core.has=1;
+  test_request[0]=0;capture(b,dir,"core-unavailable");press_id(b,"ccheck");assert(!test_request[0]);data.core=saved_core;
+  press_id(b,"back");press_id(b,"back");assert(page==MENU);
+  /* Diagnostics: two pages of four checks, reached from the proxy page. */
+  press_id(b,"proxy");press_id(b,"diag");assert(page==DIAG&&diag_from==PROXY);capture_both(b,dir,"diag");
+  press_id(b,"next");assert(diag_offset==4);capture_both(b,dir,"diag-page2");
+  press_id(b,"prev");assert(!diag_offset);
+  press_id(b,"drun");expect_request("diag\n");assert(pending_kind==JOB_DIAG);
+  reset_job();data.diag.running=1;capture(b,dir,"diag-running");press_id(b,"drun");assert(!test_request[0]);
+  data.diag.running=0;press_id(b,"back");assert(page==PROXY);press_id(b,"back");assert(page==MENU);
+  /* Diagnostics from the Clash page, with Proxy hidden: Overview, WireGuard and Clash. */
+  char ow_clash[]="C 24 90 200 2 27 zh\nV 24 90 200 2 81 zh\n.\n";
+  assert(parse_snapshot(ow_clash,&prefs)&&update_settings(&prefs)==1&&settings_menu==81);
+  assert(!visible_page(PROXY)&&reachable(DIAG));
+  page=MENU;press_id(b,"clash");assert(page==CLASH);
+  press_id(b,"diag");assert(page==DIAG&&diag_from==CLASH);press_id(b,"back");assert(page==CLASH);
+  /* A shorter check list (a new run clears it) brings the page back to one it has. */
+  press_id(b,"diag");press_id(b,"next");assert(diag_offset==4);
+  data.diag.n=3;track_status(0);assert(!diag_offset);
+  render(b);assert(strstr(html,">1 / 1<")&&strstr(html,"id=\"prev\" href=\"act:none\""));
+  diag_offset=4;data.diag.n=0;track_status(0);assert(!diag_offset);data.diag.n=8;
+  press_id(b,"back");assert(page==CLASH);
+  data.backend.ready[1]=0;data.clash.enabled=0;data.clash.running=0;data.backend.active=BK_OFF;
+  snprintf(data.backend.reason[1],sizeof(data.backend.reason[1]),"download");
+  capture_both(b,dir,"clash-not-ready");assert(strstr(html,"Update the subscription first"));
+  data.backend.ready[1]=1;data.clash.enabled=1;data.clash.running=1;data.backend.active=BK_CLASH;
+  press_id(b,"back");assert(page==MENU);
+  char all_four[]="C 25 120 128 2 27 zh\nV 25 120 128 2 113 zh\n.\n";
+  assert(parse_snapshot(all_four,&prefs)&&update_settings(&prefs)==1&&settings_menu==113);
+  /* Busy and failure replies keep the panel usable. */
+  stub_job="ERR Busy\n";page=CORE;press_id(b,"ccheck");assert(dialog==3&&!pending&&strstr(notice,"仍在进行"));
+  stub_job="OK 1\n";reset_job();
+  /* Agents before `fresh`: a WireGuard job is done once the revision rises. */
+  pending=3;pending_kind=JOB_WG;pending_revision=7;data.has_fresh=0;data.job=3;data.done=3;data.result=0;data.rev=7;
+  pending_deadline=monotonic_ms()+60000;
+  settle_jobs();assert(pending==3);data.rev=8;settle_jobs();assert(!pending);
+  /* A restarted agent no longer knows the job: the panel stops waiting for it. */
+  pending=4;pending_kind=JOB_BACKEND;data.job=0;data.done=0;settle_jobs();assert(!pending&&notice[0]);notice[0]=0;
+  /* An outcome that never comes: the panel waits a bound, then says so. */
+  assert(job_wait_ms(JOB_BACKEND)==180000&&job_wait_ms(JOB_CORE)==180000&&job_wait_ms(JOB_REFRESH)==180000);
+  assert(job_wait_ms(JOB_SELECT)==60000&&job_wait_ms(JOB_DELAY)==60000&&job_wait_ms(JOB_DIAG)==60000);
+  reset_job();data.has_fresh=1;data.result=0;page=CLASH;press_id(b,"m2");
+  expect_request("cmode 12 direct\n");assert(pending==1&&pending_kind==JOB_MODE);
+  long long wait=pending_deadline-monotonic_ms();assert(wait>170000&&wait<=180000);
+  data.job=1;data.done=0;data.fresh=0;settle_jobs();assert(pending==1&&!dialog);
+  pending_deadline=monotonic_ms()-1;settle_jobs();assert(!pending&&!pending_kind&&dialog==3&&strstr(notice,"未及时"));
+  capture(b,dir,"job-timeout");press_id(b,"refresh");assert(!dialog&&page==CLASH);
+  settings_zh=0;press_id(b,"m2");pending_deadline=monotonic_ms()-1;settle_jobs();
+  assert(dialog==3&&strstr(notice,"in time"));capture(b,dir,"en-job-timeout");settings_zh=1;reset_job();
+  /* So does an old agent whose revision never rises. */
+  pending=3;pending_kind=JOB_WG;pending_revision=7;data.has_fresh=0;data.job=3;data.done=3;data.rev=7;
+  pending_deadline=monotonic_ms()-1;settle_jobs();assert(!pending&&dialog==3);reset_job();
+  /* A Clash-only job does not make WireGuard look busy, nor a WireGuard one Clash. */
+  data.busy=0;pending=9;pending_kind=JOB_REFRESH;
+  assert(applying(1)&&!applying(0)&&strcmp(summary(),L("Applying changes","正在应用更改")));
+  assert(!strcmp(clash_summary(),L("Applying changes","正在应用更改")));
+  pending_kind=JOB_SUB;assert(applying(1)&&!applying(0));pending_kind=JOB_MODE;assert(applying(1)&&!applying(0));
+  pending_kind=JOB_WG;assert(applying(0)&&!applying(1)&&strcmp(clash_summary(),L("Applying changes","正在应用更改")));
+  pending_kind=JOB_BACKEND;assert(applying(0)&&applying(1));
+  pending_kind=JOB_DELAY;assert(!applying(0)&&!applying(1));
+  reset_job();data.busy=1;assert(applying(0)&&applying(1));data.busy=0;
+  /* Without WireGuard in the menu, its profile and device pages return to the menu. */
+  char no_wg[]="C 26 90 200 2 26 zh\nV 26 90 200 2 26 zh\n.\n";
+  assert(parse_snapshot(no_wg,&prefs)&&update_settings(&prefs)==1&&!reachable(WG)&&reachable(DEVICES));
+  data.stamp=(unsigned long long)time(NULL);
+  page=MENU;press_id(b,"devices");assert(page==DEVICES);press_id(b,"d0");assert(dirty);
+  press_id(b,"back");assert(dialog==2);press_id(b,"discard");assert(page==MENU&&!dirty&&!dialog);
+  press_id(b,"devices");press_id(b,"d0");press_id(b,"back");press_id(b,"saveback");assert(pending==1&&return_after_save);
+  data.job=data.done=data.fresh=1;data.has_fresh=1;data.result=0;settle_jobs();assert(!pending&&page==MENU);
+  page=PROFILES;dialog=3;press_id(b,"refresh");assert(page==MENU&&!dialog);
+  enter_devices();dialog=3;press_id(b,"refresh");assert(page==MENU&&!dialog);
+  enter_devices();draft.n=0;submit(0,0);assert(page==MENU&&!pending);
+  char all_four_again[]="C 27 120 128 2 27 zh\nV 27 120 128 2 113 zh\n.\n";
+  assert(parse_snapshot(all_four_again,&prefs)&&update_settings(&prefs)==1&&settings_menu==113);
+  /* Hiding Clash leaves its pages once nothing is pending. */
+  char no_clash[]="C 30 90 200 2 17 zh\nV 30 90 200 2 17 zh\n.\n";
+  page=NODES;assert(parse_snapshot(no_clash,&prefs)&&update_settings(&prefs)==1);
+  track_status(0);assert(page==MENU);
+  /* A full status with 128 CJK device names stays within the reply the panel reads. */
+  size_t used=(size_t)snprintf(full,sizeof(full),"S 7 1 1 1 0 0 0 0 1 %llu\n",(unsigned long long)time(NULL));
+  static char big[49152];
+  memcpy(big,full,used);
+  for(int i=0;i<128;i++)used+=(size_t)snprintf(big+used,sizeof(big)-used,"D\t02:11:22:33:%02x:%02x\t1\t1\t192.0.2.%d\t" CJK48 "\n",i/256,i%256,i);
+  used+=(size_t)snprintf(big+used,sizeof(big)-used,"V 31 90 200 2 113 zh\nJ 0 0 0 0 0\n.\n");
+  assert(used<40*1024&&parse_snapshot(big,&data)&&data.n==128);
+  update_settings(&data);enter_devices();capture(b,dir,"devices-cjk");
+  printf("PASS proxy, Clash, nodes, subscriptions, core and diagnostics pages (zh/en), switch requests, stale generations, job completion, flags and settings records; largest page %zu bytes (%s), status %zu bytes\n",
+         html_peak,html_peak_page,used);
 }
 int main(int argc, char **argv) {
   power_self_test();
@@ -1042,8 +1547,10 @@ int main(int argc, char **argv) {
   char legacy[]="C 6 60 200 2 27\n.\n"; /* An agent without the field keeps Chinese. */
   assert(parse_snapshot(legacy,&prefs)&&update_settings(&prefs)==1&&settings_zh);
   page=MENU;capture(&b,argv[1],"menu-zh");assert(strstr(html,"原厂界面"));
-  page=MENU;press_id(&b,"stock");assert(quitting);
-  free(b.map);puts("PASS DevUI HTML hit testing, menu navigation, profile version capture, device pagination/drafts, escaping, confirmations, disabled states and rotation");
+  page=MENU;press_id(&b,"stock");assert(quitting);quitting=0;
+  puts("PASS DevUI HTML hit testing, menu navigation, profile version capture, device pagination/drafts, escaping, confirmations, disabled states and rotation");
+  proxy_tests(&b,argv[1]);
+  free(b.map);
   return 0;
 }
 #endif

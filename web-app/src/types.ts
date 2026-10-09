@@ -682,7 +682,7 @@ export type ClashCoreAction =
   | { action: 'rollback' }
   | { action: 'geodata'; route?: ClashCoreRoute; mirror?: string }
 
-export type DevUIPageId = 'overview' | 'wireguard' | 'profiles' | 'devices'
+export type DevUIPageId = 'overview' | 'proxy' | 'wireguard' | 'clash' | 'profiles' | 'devices'
 export interface DevUISettings {
   revision: number
   shortcut_enabled: boolean

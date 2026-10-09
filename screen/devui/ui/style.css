@@ -8,6 +8,8 @@ a { text-decoration:none; color:#eef2f8; }
 .primary { background:#2f6fed; border-color:#4a84f5; }
 .danger { background:#3a1d24; border-color:#7a3340; color:#ffb3b3; }
 .disabled { background:#141c2a; color:#5d6b82; border-color:#1f2a3b; }
+/* The current choice among buttons (backend, proxy mode). */
+.chosen { background:#12291f; border-color:#2f7a55; color:#4ade9a; }
 .card { background:#131c2b; border:1px solid #223049; border-radius:14px; }
 .title { font-size:24px; line-height:32px; font-weight:bold; }
 .head { font-weight:bold; }

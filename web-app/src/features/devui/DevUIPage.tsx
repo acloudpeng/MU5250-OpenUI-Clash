@@ -8,10 +8,14 @@ import { N_, t, tm } from '../../i18n'
 
 const pages: { id: DevUIPageId; title: string; description: string }[] = [
   { id: 'overview', title: N_('Overview'), description: N_('Battery, temperature, uptime and system load') },
+  { id: 'proxy', title: N_('Proxy'), description: N_('Choose Off, WireGuard or Clash and run diagnostics') },
   { id: 'wireguard', title: N_('WireGuard'), description: N_('Tunnel status, traffic and on / off control') },
+  { id: 'clash', title: N_('Clash'), description: N_('Status, proxy mode, nodes and delay tests, subscriptions, core and geo data') },
   { id: 'profiles', title: N_('Saved profiles'), description: N_('Switch between your saved VPN profiles') },
   { id: 'devices', title: N_('Device routing'), description: N_('Choose which devices use WireGuard') },
 ]
+/** Rows that fit the device menu. */
+const MAX_MENU_ITEMS = 4
 // i18n-ignore: each language is named in its own language
 const LANGUAGES = { zh: '中文', en: 'English' }
 const labels: Record<string, string> = { idle: N_('Stock UI'), starting: N_('Opening'), active: N_('DevUI active'), restoring: N_('Restoring'), error: N_('Recovery needs attention') }
@@ -105,8 +109,8 @@ export default function DevUIPage() {
       </div> : <p className="text-sm text-ink2">{t('Loading display preferences…')}</p>}
     </Card>
     <Card title={t('Menu features')}>
-      <p className="mb-3 text-xs text-ink2">{t('Choose the controls shown on the device. Hiding a menu item does not disable its network feature. Stock UI and Back remain available.')}</p>
-      <div className="divide-y divide-line/10">{pages.map(p => <label key={p.id} className="flex cursor-pointer items-center gap-3 py-3"><input type="checkbox" className="h-4 w-4 accent-accent" checked={draft?.menu_items.includes(p.id) ?? false} disabled={busy || !draft} onChange={e => { if (!draft) return; const items = e.target.checked ? [...draft.menu_items, p.id] : draft.menu_items.filter(id => id !== p.id); edit({ menu_items: items, home_page: draft.home_page !== 'menu' && !items.includes(draft.home_page) ? 'menu' : draft.home_page }) }} /><span><span className="block text-[13px] font-medium text-ink">{t(p.title)}</span><span className="text-xs text-ink2">{t(p.description)}</span></span></label>)}</div>
+      <p className="mb-3 text-xs text-ink2">{t('Choose the controls shown on the device. Hiding a menu item does not disable its network feature. Stock UI and Back remain available.')} {t('Up to four items fit the device menu. Saved profiles and Device routing stay reachable from the WireGuard page.')}</p>
+      <div className="divide-y divide-line/10">{pages.map(p => <label key={p.id} className="flex cursor-pointer items-center gap-3 py-3"><input type="checkbox" className="h-4 w-4 accent-accent" checked={draft?.menu_items.includes(p.id) ?? false} disabled={busy || !draft || (!draft.menu_items.includes(p.id) && draft.menu_items.length >= MAX_MENU_ITEMS)} onChange={e => { if (!draft) return; const items = e.target.checked ? [...draft.menu_items, p.id] : draft.menu_items.filter(id => id !== p.id); edit({ menu_items: items, home_page: draft.home_page !== 'menu' && !items.includes(draft.home_page) ? 'menu' : draft.home_page }) }} /><span><span className="block text-[13px] font-medium text-ink">{t(p.title)}</span><span className="text-xs text-ink2">{t(p.description)}</span></span></label>)}</div>
     </Card>
     <div className="sticky bottom-2 rounded-xl border border-line/10 bg-surface p-3 shadow-sm">
       {stale && <p role="alert" className="mb-2 text-xs text-danger">{t('Settings changed in another session. Reload before saving.')}</p>}

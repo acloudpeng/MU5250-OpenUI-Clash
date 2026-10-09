@@ -1,10 +1,21 @@
 # DevUI device screen
 
-Open **DevUI** in the OpenUI sidebar. This page manages the device's English
-320×480 touchscreen separately from the WireGuard page. It provides **Open DevUI
-screen**, **Restore stock UI**, a four-press power-button shortcut, and saved
-preferences. Closing the browser does not close the device screen. Leaving DevUI
-never disables WireGuard or changes saved device routing.
+Open **DevUI** in the OpenUI sidebar. This page manages the device's 320×480
+touchscreen, which follows the web panel's language (Chinese or English). It provides
+**Open DevUI screen**, **Restore stock UI**, a four-press power-button shortcut, and
+saved preferences. Closing the browser does not close the device screen. Leaving DevUI
+never turns a proxy off or changes saved device routing.
+
+## Quick start
+
+1. Deploy the screen with `--screen` (together with the agent of the same version) and
+   run `scripts/verify-screen.py` once; until it passes, the webpage button and the
+   shortcut stay disabled.
+2. Open it with **DevUI → Open DevUI screen**, or enable **Press four times to open
+   DevUI**, save, and press the power button four times from the stock UI.
+3. Tap a menu row to open it; **‹ Back** is at the top right and **Stock UI** on the
+   main menu leaves DevUI. A short power press turns the display off or on. DevUI
+   returns to the stock UI after the idle time (two minutes by default).
 
 ## Power button and stock UI shortcut
 
@@ -38,10 +49,12 @@ modify factory menus, binaries, boot scripts, power-off or hardware-reset behavi
 | Brightness | 20–255, shown as a percentage; updates while awake without waking a sleeping panel |
 | Idle return | 30–600 seconds; default 120 seconds, measured from touch or a short power press |
 | Startup page | Main menu or any visible feature; applies on the next opening |
-| Menu features | Show or hide Overview, WireGuard, Saved profiles and Device routing |
+| Menu features | Up to four of Overview, Proxy, WireGuard, Clash, Saved profiles and Device routing; default Overview, Proxy, WireGuard, Clash |
 
-At least one feature must remain visible. **Stock UI** and **Back** are always
-available. Hiding a feature only changes the screen menu; it does not disable its
+At least one feature must remain visible and at most four fit the menu. A saved list
+of exactly the four old defaults moves to the new default once. Saved profiles and
+Device routing stay reachable from the WireGuard page even when hidden from the menu.
+**Stock UI** and **Back** are always available. Hiding a feature only changes the screen menu; it does not disable its
 network service. A hidden page with unsaved work remains open until the draft or
 operation is resolved. The configured idle timeout discards unsaved device
 routing choices and returns to stock UI, even when the display is asleep.
@@ -59,9 +72,27 @@ scripts or shell commands.
 - **Overview:** a battery icon with a proportional fill and large percentage,
   a low-battery color at 20% or below, battery temperature, uptime, CPU and memory.
   Missing battery data displays `--%`. The main menu also shows a battery badge.
+- **Proxy:** Off / WireGuard / Clash, with a confirmation before switching or turning
+  off and the reason when a backend is not ready; a status card for the active one and
+  a **Diagnostics** row (the same checks as the web page: verdict and eight checks over
+  two pages). Switching goes through the agent's proxy switch, which turns the other
+  backend off in the same transaction.
 - **WireGuard:** configuration state, handshake age, per-run tunnel traffic and
-  enable/disable. Disabling requires confirmation. A recent handshake does not
-  claim verified internet access. Keys and configuration imports stay in OpenUI.
+  on/off through the proxy switch (switching away from Clash asks first). A recent
+  handshake does not claim verified internet access. Keys and configuration imports
+  stay in OpenUI.
+- **Clash:** running/connected state, active subscription, core version and memory;
+  on/off; proxy mode (rule, global, direct); rows to Nodes, Subscriptions, Core & data
+  and Diagnostics.
+  - **Nodes:** groups four per page, then a group's nodes with their last delay; tap a
+    node to select it in a selectable group, **Test** measures the whole group. Flag
+    emoji in names are shown as letters (🇭🇰 → HK); the font has no colour glyphs.
+  - **Subscriptions:** up to five with traffic and expiry; **Use this subscription**
+    or **Update now**. Adding and editing stay on the webpage (no text entry on the
+    screen, and the URL is a credential).
+  - **Core & data:** installed, previous and latest core versions with their source,
+    free space and job progress; **Check**, **Update**, **Roll back** and **Update GEO**
+    (each change asks first and restarts a running core).
 - **Saved profiles:** up to five named profiles. Switching preserves the current
   enable state and device routing; confirmation remembers the profile ID and
   WireGuard revision to prevent overwriting concurrent webpage edits.
@@ -135,11 +166,30 @@ python3 scripts/verify-devui-settings.py --gateway 192.168.0.1 --port 2222 \
 - Private `/tmp/openui-screen/control.sock`: mode 0600, parent directory 0700.
   The screen receives redacted `S`, `P`, `D`, `O`, `C` and `J` records. `C` contains
   the DevUI revision, timeout, brightness, startup page, visible-page bitmask and
-  language (`zh`/`en`; a record without it means Chinese).
+  language (`zh`/`en`; a record without it means Chinese). `C` only carries pages an
+  older screen knows (with WireGuard, Proxy or Clash chosen it keeps the WireGuard, Saved
+  profiles and Device routing pages for them); `V` carries the full choice (pages 5 Proxy
+  and 6 Clash).
+  Tab-separated proxy records follow: `B` (active backend, conflict, per-backend
+  revision, readiness and reason code), `K` (Clash summary), `U` (subscriptions, no
+  URLs), `M` (core versions and job), `X`/`x` (diagnostics verdict and checks) and `E`
+  (the agent's message for the last failed job). `J` ends with the newest job the
+  records already reflect. The reply stays under 40 KiB.
+- Queries `groups <offset>` and `nodes <gen> <group> <offset>` return four rows at a
+  time from a proxies view the agent refreshes only while the screen asks; groups and
+  nodes are addressed by index and a generation hash, never by name, and a stale
+  generation answers `ERR Stale`.
   No private keys, PSKs, endpoints or login credentials appear in this projection.
-- WireGuard actions are narrow local `toggle`, `devices` and `profile` messages,
-  each carrying a WireGuard revision. Jobs execute in the agent and continue
-  after screen exit. Status older than ten seconds disables mutation controls.
+- Actions are narrow local messages: `backend <rev> wireguard|clash`,
+  `backend <rev> off <wireguard|clash>` (naming the backend the screen shows as on, so a
+  switch made elsewhere meanwhile answers 409 instead of turning off the other one), `cmode`,
+  `csub`, `crefresh`, `select`, `delay`, `core check|update <tag>|rollback|geodata`
+  and `diag`, plus the WireGuard `toggle`, `devices` and `profile` kept for older
+  screens. Revisioned actions return 409 conflicts as "Settings changed". One job runs
+  at a time; jobs execute in the agent and continue after screen exit. A job always
+  reports a result, even if its thread fails; the screen stops waiting after 180 s
+  (60 s for node selection, delay tests and diagnostics) and says no result arrived. Status older
+  than ten seconds disables mutation controls.
 
 The independent supervisor checks factory boot synchronization and records the
 stock UI, touch process and brightness before taking over. The display uses RGB565

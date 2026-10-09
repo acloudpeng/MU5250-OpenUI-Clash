@@ -408,6 +408,7 @@ export default {
   'Brightness must be between 20 and 255': '亮度必须在 20 到 255 之间',
   'Idle return must be between 30 and 600 seconds': '空闲返回时间必须在 30 到 600 秒之间',
   'Choose at least one menu item': '请至少选择一个菜单项',
+  'Choose at most four menu items': '最多选择四个菜单项',
   'Invalid or duplicate menu item': '菜单项无效或重复',
   'The startup page must be visible in the menu': '启动页面必须在菜单中可见',
   'Waiting for power key': '正在等待电源键',

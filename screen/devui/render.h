@@ -23,16 +23,25 @@ static void escaped(const char *s) {
     }
   }
 }
-/* Escaped text cut on a UTF-8 boundary with "..." to fit `width` pixels at `size`. */
+/* Escaped text cut on a UTF-8 boundary with "..." to fit `width` pixels at `size`.
+ * Glyph advances add up (Unifont has no kerning), so each character is measured once. */
 static void shortened(const char *text, int width, int size) {
   char label[512];snprintf(label,sizeof(label),"%s",text);
   if(html_view_text_width_px(label,size)>width) {
-    size_t n=strlen(label);
-    while(n>0) {
-      do { n--; } while(n>0&&((unsigned char)label[n]&0xc0)==0x80);
-      strcpy(label+n,"...");
-      if(html_view_text_width_px(label,size)<=width)break;
+    int room=width-html_view_text_width_px("...",size),used=0;
+    size_t n=0;
+    while(label[n]) {
+      size_t k=n+1;
+      while(label[k]&&((unsigned char)label[k]&0xc0)==0x80)k++;
+      char glyph[8];size_t len=k-n<sizeof(glyph)-1?k-n:sizeof(glyph)-1;
+      memcpy(glyph,label+n,len);glyph[len]=0;
+      int w=html_view_text_width_px(glyph,size);
+      if(used+w>room)break;
+      used+=w;n=k;
     }
+    if(n>sizeof(label)-4)n=sizeof(label)-4;
+    while(n>0&&((unsigned char)label[n]&0xc0)==0x80)n--;
+    strcpy(label+n,"...");
   }
   escaped(label);
 }
@@ -40,13 +49,19 @@ static void box(int x, int y, int w, int h, const char *cls, const char *label) 
   add("<div class=\"box %s\" style=\"left:%dpx;top:%dpx;width:%dpx;height:%dpx\">", cls, x,y,w,h);
   escaped(label); add("</div>");
 }
+/* A one-line box whose text is cut with "..." instead of clipped. */
+static void sbox(int x, int y, int w, int h, const char *cls, const char *label) {
+  add("<div class=\"box %s\" style=\"left:%dpx;top:%dpx;width:%dpx;height:%dpx\">", cls, x,y,w,h);
+  shortened(label,w,16); add("</div>");
+}
 static void rect(int x, int y, int w, int h, const char *cls, const char *color) {
   add("<div class=\"box %s\" style=\"left:%dpx;top:%dpx;width:%dpx;height:%dpx%s%s\"></div>",cls,x,y,w,h,color?";background:":"",color?color:"");
 }
-enum { PLAIN, PRIMARY, DANGER };
+/* CHOSEN marks the current choice of a group of buttons; it is not tappable. */
+enum { PLAIN, PRIMARY, DANGER, CHOSEN };
 static void linkbox(int x, int y, int w, int h, const char *id, const char *label, int enabled, int tone) {
-  add("<a id=\"%s\" href=\"act:%s\" class=\"box btn %s\" style=\"left:%dpx;top:%dpx;width:%dpx;height:%dpx;line-height:%dpx\">",id,enabled?id:"none",
-      !enabled?"disabled":tone==PRIMARY?"primary":tone==DANGER?"danger":"",x,y,w,h,h-2);
+  add("<a id=\"%s\" href=\"act:%s\" class=\"box btn %s\" style=\"left:%dpx;top:%dpx;width:%dpx;height:%dpx;line-height:%dpx\">",id,enabled&&tone!=CHOSEN?id:"none",
+      tone==CHOSEN?"chosen":!enabled?"disabled":tone==PRIMARY?"primary":tone==DANGER?"danger":"",x,y,w,h,h-2);
   shortened(label,w-24,16); add("</a>");
 }
 /* A tappable list row: bold title, muted detail line and a chevron. */
@@ -55,9 +70,12 @@ static void open_row(int x, int y, int w, int h, const char *id, int enabled, co
 }
 static void chevron(int h) { add("<div class=\"chev\" style=\"line-height:%dpx\">&#8250;</div>",h-2); }
 static void nav_row(int x, int y, int w, int h, const char *id, const char *title, const char *detail, const char *detail_cls, int enabled) {
+  /* Rows under 52 px centre their two lines; taller ones keep the stylesheet's. */
+  char top[2][32]={"",""};
+  if(h<52){snprintf(top[0],sizeof(top[0])," style=\"top:%dpx\"",(h-44)/2);snprintf(top[1],sizeof(top[1])," style=\"top:%dpx\"",(h-44)/2+22);}
   open_row(x,y,w,h,id,enabled,"");
-  add("<div class=\"name\">");shortened(title,w-50,16);
-  add("</div><div class=\"sub %s\">",enabled?detail_cls:"");shortened(detail,w-50,16);
+  add("<div class=\"name\"%s>",top[0]);shortened(title,w-50,16);
+  add("</div><div class=\"sub %s\"%s>",enabled?detail_cls:"",top[1]);shortened(detail,w-50,16);
   add("</div>");chevron(h);add("</a>");
 }
 /* Row with a label on the left and a value on the right, vertically centred. */
@@ -69,19 +87,19 @@ static void value_row(int x, int y, int w, int h, const char *id, const char *la
 }
 static const char *summary(void) {
   return !data.stamp ? L("Loading status","正在加载状态") : stale() ? L("Status is stale","状态已过期") :
-    pending || data.busy ? L("Applying changes","正在应用更改") : !data.has ? L("No configuration","尚未配置") :
+    applying(0) ? L("Applying changes","正在应用更改") : !data.has ? L("No configuration","尚未配置") :
     data.error ? L("Tunnel error","隧道错误") : !data.enabled ? L("Off","已关闭") :
     data.connected ? L("Recent handshake","握手正常") : L("Waiting for handshake","等待握手");
 }
 /* Colour of the summary above: red for trouble, green when connected, amber in between. */
 static const char *summary_class(void) {
-  return !data.stamp || pending || data.busy ? "warn" : stale() || data.error ? "bad" :
+  return !data.stamp || applying(0) ? "warn" : stale() || data.error ? "bad" :
     !data.has || !data.enabled ? "muted" : data.connected ? "good" : "warn";
 }
-static const char *summary_color(void) {
-  const char *c = summary_class();
+static const char *tone_color(const char *c) {
   return !strcmp(c,"good") ? "#4ade9a" : !strcmp(c,"bad") ? "#ff8a8a" : !strcmp(c,"warn") ? "#fbbf5a" : "#5d6b82";
 }
+static const char *summary_color(void) { return tone_color(summary_class()); }
 static const char *active_profile(void) {
   for (int i=0;i<data.np;i++) if(data.profiles[i].active) return data.profiles[i].name;
   return L("None selected","未选择");
@@ -120,6 +138,7 @@ static void dialog_card(int y, int h) {
   rect(0,65,W,H-65,"shade",NULL);
   add("<div class=\"box card\" style=\"left:12px;top:%dpx;width:296px;height:%dpx\"></div>",y,h);
 }
+#include "pages.h"
 static void render(struct drm_buf *b) {
   static int initialized;
   static uint16_t pixels[W * H];
@@ -131,8 +150,10 @@ static void render(struct drm_buf *b) {
   add("<!DOCTYPE html><html lang=\"%s\"><head><meta charset=\"UTF-8\"><style>%s</style></head><body>",L("en","zh"),style_asset);
   char tmp[256],rx[32],tx[32];
   if (dialog) {
-    header("WireGuard");
-    if (dialog==1 || dialog==4) {
+    header(page_title());
+    if (dialog==5) render_confirm();
+    else if (dialog==6) render_sub_dialog();
+    else if (dialog==1 || dialog==4) {
       dialog_card(112,244);
       box(28,128,264,32,"title",dialog==1?L("Disable WireGuard?","关闭 WireGuard？"):L("Switch profile?","切换配置？"));
       box(28,170,264,60,"wrap",dialog==1?L("Devices will return to the normal network.","设备将恢复为普通网络。"):
@@ -152,8 +173,10 @@ static void render(struct drm_buf *b) {
       dialog_card(112,244);
       box(28,128,264,32,"title bad",L("Action failed","操作失败"));
       box(28,170,264,40,"wrap",notice);
-      box(28,214,264,40,"wrap muted",L("Reload status before trying again.","请先刷新状态再重试。"));
-      linkbox(24,284,272,56,"refresh",L("Refresh and back","刷新并返回"),1,PRIMARY);
+      /* The agent's own message, when it gave one (English). */
+      box(28,214,264,60,"wrap muted",failure_text[0]?failure_text:L("Reload status before trying again.","请先刷新状态再重试。"));
+      /* WireGuard pages go back to WireGuard; the others reload where they are. */
+      linkbox(24,284,272,56,"refresh",page==WG||page==PROFILES||page==DEVICES?L("Refresh and back","刷新并返回"):L("Refresh","刷新"),1,PRIMARY);
     }
   } else if(page==MENU) {
     box(16,10,180,32,"title","OpenUI");
@@ -162,15 +185,21 @@ static void render(struct drm_buf *b) {
     add("<div class=\"box card\" style=\"left:12px;top:72px;width:296px;height:56px\"></div>");
     battery_badge(28,92,0);
     rect(108,84,1,32,"line",NULL);
-    dot(122,83,summary_color());box(138,78,160,20,"muted","WireGuard");
-    add("<div class=\"box head %s\" style=\"left:122px;top:100px;width:178px;height:20px\">",summary_class());shortened(summary(),176,16);add("</div>");
-    const int pages[] = {OVERVIEW,WG,PROFILES,DEVICES};
-    const char *ids[] = {"overview","wireguard","profiles","devices"};
-    const char *titles[] = {L("Overview","概览"),"WireGuard",L("Saved profiles","已保存配置"),L("Device routing","设备分流")};
-    const char *details[] = {L("Battery, uptime and load","电池、运行时间与系统负载"),L("Tunnel status and on / off","隧道状态与开关"),
+    /* The active proxy backend when the agent reports it, else WireGuard as before. */
+    const struct backend_info *bk=&data.backend;
+    const char *cls=bk->has?proxy_class():summary_class();
+    dot(122,83,tone_color(cls));
+    box(138,78,160,20,"muted",!bk->has||bk->active==BK_WG?"WireGuard":bk->active==BK_CLASH?"Clash":L("Proxy","代理"));
+    add("<div class=\"box head %s\" style=\"left:122px;top:100px;width:178px;height:20px\">",cls);shortened(bk->has?proxy_summary():summary(),176,16);add("</div>");
+    const int pages[] = {OVERVIEW,PROXY,WG,CLASH,PROFILES,DEVICES};
+    const char *ids[] = {"overview","proxy","wireguard","clash","profiles","devices"};
+    const char *titles[] = {L("Overview","概览"),L("Proxy","代理"),"WireGuard","Clash",L("Saved profiles","已保存配置"),L("Device routing","设备分流")};
+    const char *details[] = {L("Battery, uptime and load","电池、运行时间与系统负载"),
+                             !bk->has||bk->active==BK_OFF?L("Off / WireGuard / Clash","关闭 / WireGuard / Clash"):bk->active==BK_WG?L("Active: WireGuard","当前：WireGuard"):L("Active: Clash","当前：Clash"),
+                             L("Tunnel status and on / off","隧道状态与开关"),L("Nodes, subscriptions and core","节点、订阅与内核"),
                              L("Switch between up to 5 configs","在最多 5 个配置之间切换"),L("Choose WireGuard or direct","选择走 WireGuard 或直连")};
     int row=0;
-    for(int i=0;i<4;i++) if(visible_page(pages[i]))
+    for(int i=0;i<6&&row<4;i++) if(visible_page(pages[i]))
       nav_row(12,140+68*row++,296,60,ids[i],titles[i],details[i],"",1);
     box(16,418,292,20,"muted",L("Power key: tap to sleep / wake.","电源键短按：息屏 / 唤醒"));
     snprintf(tmp,sizeof(tmp),L("Stock UI returns after %d s idle.","空闲 %d 秒后返回原厂界面"),settings_idle);
@@ -190,10 +219,12 @@ static void render(struct drm_buf *b) {
     add("<div class=\"box card\" style=\"left:12px;top:180px;width:142px;height:64px\"></div><div class=\"box card\" style=\"left:166px;top:180px;width:142px;height:64px\"></div>");
     box(26,188,120,20,"muted",L("↓ Downloaded","↓ 下载"));box(180,188,120,20,"muted",L("↑ Uploaded","↑ 上传"));
     box(26,208,124,32,"title",rx);box(180,208,124,32,"title",tx);
-    linkbox(12,256,296,56,"toggle",data.enabled?L("Disable WireGuard","关闭 WireGuard"):L("Enable WireGuard","开启 WireGuard"),!blocked()&&data.has,data.enabled?DANGER:PRIMARY);
-    value_row(12,324,296,50,"profiles",L("Profile","当前配置"),active_profile(),visible_page(PROFILES));
+    linkbox(12,256,296,56,"toggle",data.enabled?L("Disable WireGuard","关闭 WireGuard"):
+            data.backend.has&&data.backend.active==BK_CLASH?L("Switch to WireGuard","切换到 WireGuard"):L("Enable WireGuard","开启 WireGuard"),
+            !blocked()&&data.has,data.enabled?DANGER:PRIMARY);
+    value_row(12,324,296,50,"profiles",L("Profile","当前配置"),active_profile(),reachable(PROFILES));
     snprintf(tmp,sizeof(tmp),"%d / %d",selected_count(),data.n);
-    value_row(12,382,296,50,"devices",L("Device routing","设备分流"),tmp,visible_page(DEVICES));
+    value_row(12,382,296,50,"devices",L("Device routing","设备分流"),tmp,reachable(DEVICES));
     if(notice[0])box(16,446,292,20,"bad",notice);
     else box(16,446,292,20,"muted",data.all?L("New devices: WireGuard","新设备：走 WireGuard"):L("New devices: normal network","新设备：走普通网络"));
   } else if(page==PROFILES) {
@@ -253,9 +284,17 @@ static void render(struct drm_buf *b) {
     snprintf(tmp,sizeof(tmp),"%.1f%%",data.cpu);stat_row(230,"CPU",tmp,data.cpu);
     if(data.memory>=0)snprintf(tmp,sizeof(tmp),"%.1f%%",data.memory);else strcpy(tmp,"--");
     stat_row(274,L("Memory","内存"),tmp,data.memory);
-    nav_row(12,334,296,60,"wireguard","WireGuard",summary(),summary_class(),visible_page(WG));
+    if(data.backend.has&&visible_page(PROXY))nav_row(12,334,296,60,"proxy",L("Proxy","代理"),proxy_summary(),proxy_class(),1);
+    else nav_row(12,334,296,60,"wireguard","WireGuard",summary(),summary_class(),visible_page(WG));
     box(16,412,292,40,stale()?"wrap bad":"wrap muted",stale()?L("Status unavailable / stale","状态不可用或已过期"):L("Live status from the OpenUI agent","实时状态来自 OpenUI Agent"));
   }
+  else if(page==PROXY) render_proxy();
+  else if(page==CLASH) render_clash();
+  else if(page==NODES) render_nodes();
+  else if(page==GROUP) render_group();
+  else if(page==SUBS) render_subs();
+  else if(page==CORE) render_core();
+  else if(page==DIAG) render_diag();
   add("</body></html>");
   html_view_render_to(pixels,html);
   for(int y=0;y<H;y++)memcpy((uint8_t*)b->map+y*b->pitch,pixels+y*W,W*2);

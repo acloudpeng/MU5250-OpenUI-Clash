@@ -10,6 +10,26 @@ use std::{
 };
 const DIR: &str = "/data/local/tmp/openui-devui";
 const FILE: &str = "/data/local/tmp/openui-devui/settings.json";
+/// Present once settings have been checked for the pre-proxy menu, so an owner who picks
+/// the old four features again keeps them.
+const MIGRATED: &str = "/data/local/tmp/openui-devui/menu-v2";
+/// Features the screen menu can show, in menu order; at most four at a time.
+const MENU_ITEMS: [&str; 6] = [
+    "overview",
+    "proxy",
+    "wireguard",
+    "clash",
+    "profiles",
+    "devices",
+];
+const DEFAULT_MENU: [&str; 4] = ["overview", "proxy", "wireguard", "clash"];
+/// The default before Proxy and Clash existed: every feature there was.
+const LEGACY_MENU: [&str; 4] = ["overview", "wireguard", "profiles", "devices"];
+/// Pages a screen built before Proxy and Clash knows (bits of its `C` record mask).
+const LEGACY_PAGES: u32 = 0b1_1011;
+/// WireGuard (bit 0) with device routing (1) and saved profiles (3): such a screen opens
+/// those two only while their own bits are set, not through WireGuard.
+const WIREGUARD_PAGES: u32 = 0b1011;
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
@@ -34,9 +54,7 @@ impl Default for Settings {
             brightness: 128,
             idle_seconds: 120,
             home_page: "menu".into(),
-            menu_items: ["overview", "wireguard", "profiles", "devices"]
-                .map(String::from)
-                .to_vec(),
+            menu_items: DEFAULT_MENU.map(String::from).to_vec(),
             language: default_language(),
         }
     }
@@ -49,14 +67,16 @@ impl Settings {
         if !(30..=600).contains(&self.idle_seconds) {
             return Err("Idle return must be between 30 and 600 seconds");
         }
-        if self.menu_items.is_empty() || self.menu_items.len() > 4 {
+        if self.menu_items.is_empty() {
             return Err("Choose at least one menu item");
+        }
+        // The screen has room for four menu rows.
+        if self.menu_items.len() > 4 {
+            return Err("Choose at most four menu items");
         }
         let mut seen = std::collections::HashSet::new();
         for item in &self.menu_items {
-            if !["overview", "wireguard", "profiles", "devices"].contains(&item.as_str())
-                || !seen.insert(item)
-            {
+            if !MENU_ITEMS.contains(&item.as_str()) || !seen.insert(item) {
                 return Err("Invalid or duplicate menu item");
             }
         }
@@ -68,25 +88,73 @@ impl Settings {
         }
         Ok(())
     }
+    /// `C` for screens built before Proxy and Clash, which drop a record naming a page
+    /// they lack: only their pages, all of them when none is chosen, and the menu as the
+    /// startup page in place of a new one. WireGuard, Proxy or Clash brings all of
+    /// WireGuard's pages, so such a screen keeps its profiles and device routing (the
+    /// new screen reaches those through WireGuard). `V` carries the full choice; page
+    /// numbers: wireguard 0, devices 1, menu 2, profiles 3, overview 4, proxy 5, clash 6.
     pub fn projection(&self) -> String {
         let page = |s: &str| match s {
             "wireguard" => 0,
             "devices" => 1,
             "profiles" => 3,
             "overview" => 4,
+            "proxy" => 5,
+            "clash" => 6,
             _ => 2,
         };
         let mask = self.menu_items.iter().fold(0u32, |m, s| m | (1 << page(s)));
-        format!(
-            "C {} {} {} {} {} {}\n",
-            self.revision,
-            self.idle_seconds,
-            self.brightness,
-            page(&self.home_page),
-            mask,
-            self.language
-        )
+        let home = page(&self.home_page);
+        let mut legacy = match mask & LEGACY_PAGES {
+            0 => LEGACY_PAGES,
+            m => m,
+        };
+        let tunnel = |s: &String| matches!(s.as_str(), "wireguard" | "proxy" | "clash");
+        if self.menu_items.iter().any(tunnel) {
+            legacy |= WIREGUARD_PAGES;
+        }
+        let legacy_home = if legacy & (1 << home) != 0 { home } else { 2 };
+        let line = |kind: char, home: u32, mask: u32| {
+            format!(
+                "{kind} {} {} {} {home} {mask} {}\n",
+                self.revision, self.idle_seconds, self.brightness, self.language
+            )
+        };
+        line('C', legacy_home, legacy) + &line('V', home, mask)
     }
+}
+/// Settings saved with the old default menu showed every feature there was; they get the
+/// new default once. Any other list is the owner's choice and stays.
+fn migrate(s: &Settings) -> Option<Settings> {
+    let legacy = s.menu_items.len() == LEGACY_MENU.len()
+        && LEGACY_MENU
+            .iter()
+            .all(|i| s.menu_items.iter().any(|m| m == i));
+    if !legacy {
+        return None;
+    }
+    let menu_items: Vec<String> = DEFAULT_MENU.map(String::from).to_vec();
+    let home_page = if menu_items.contains(&s.home_page) {
+        s.home_page.clone()
+    } else {
+        "menu".into()
+    };
+    Some(Settings {
+        // A running screen applies settings when the revision changes.
+        revision: s.revision.saturating_add(1),
+        menu_items,
+        home_page,
+        ..s.clone()
+    })
+}
+fn persist(s: &Settings) -> std::io::Result<()> {
+    fs::create_dir_all(DIR)?;
+    fs::set_permissions(DIR, fs::Permissions::from_mode(0o700))?;
+    storage::atomic_write(Path::new(FILE), &serde_json::to_vec_pretty(s)?)?;
+    // Best effort: without it the next start checks the menu again.
+    let _ = storage::atomic_write(Path::new(MIGRATED), b"2\n");
+    Ok(())
 }
 fn state() -> &'static Mutex<Settings> {
     static STATE: OnceLock<Mutex<Settings>> = OnceLock::new();
@@ -95,7 +163,22 @@ fn state() -> &'static Mutex<Settings> {
             .ok()
             .and_then(|b| serde_json::from_slice::<Settings>(&b).ok())
             .filter(|s| s.validate().is_ok());
-        Mutex::new(saved.unwrap_or_default())
+        let settings = match saved {
+            Some(s) if !Path::new(MIGRATED).exists() => match migrate(&s) {
+                // Kept in memory even if it cannot be saved; the check repeats next start.
+                Some(next) => {
+                    let _ = persist(&next);
+                    next
+                }
+                None => {
+                    let _ = storage::atomic_write(Path::new(MIGRATED), b"2\n");
+                    s
+                }
+            },
+            Some(s) => s,
+            None => Settings::default(),
+        };
+        Mutex::new(settings)
     })
 }
 pub fn current() -> Settings {
@@ -169,12 +252,7 @@ fn save(prepare: fn(&Settings, &[u8]) -> Prepared, body: &[u8]) -> (u16, Value) 
     if next.revision == saved.revision {
         return (200, json!({"ok":true,"data":*saved}));
     }
-    let persist = || -> std::io::Result<()> {
-        fs::create_dir_all(DIR)?;
-        fs::set_permissions(DIR, fs::Permissions::from_mode(0o700))?;
-        storage::atomic_write(Path::new(FILE), &serde_json::to_vec_pretty(&next)?)
-    };
-    if persist().is_err() {
+    if persist(&next).is_err() {
         return (
             500,
             json!({"ok":false,"error":"Cannot save DevUI settings"}),
@@ -195,6 +273,13 @@ mod tests {
     fn body() -> Value {
         json!({"expected_revision":1,"shortcut_enabled":true,"brightness":160,"idle_seconds":90,"home_page":"overview","menu_items":["overview","wireguard"]})
     }
+    /// The page mask of the `C` record, the one screens before Proxy and Clash read.
+    fn old_screen_mask(s: &Settings) -> u32 {
+        let projection = s.projection();
+        let c = projection.lines().next().unwrap();
+        assert!(c.starts_with("C "), "{c}");
+        c.split(' ').nth(5).unwrap().parse().unwrap()
+    }
     #[test]
     fn validation_and_conflicts() {
         let old = Settings::default();
@@ -202,7 +287,11 @@ mod tests {
         let next = prepare(&old, &serde_json::to_vec(&b).unwrap()).unwrap();
         assert_eq!(next.revision, 2);
         assert!(next.shortcut_enabled);
-        assert_eq!(next.projection(), "C 2 90 160 4 17 zh\n");
+        // An old screen opens profiles and devices only from its menu: WireGuard brings them.
+        assert_eq!(
+            next.projection(),
+            "C 2 90 160 4 27 zh\nV 2 90 160 4 17 zh\n"
+        );
         for (key, value) in [
             ("brightness", json!(0)),
             ("brightness", json!(256)),
@@ -210,6 +299,11 @@ mod tests {
             ("idle_seconds", json!(601)),
             ("menu_items", json!([])),
             ("menu_items", json!(["overview", "overview"])),
+            ("menu_items", json!(["overview", "nodes"])),
+            (
+                "menu_items",
+                json!(["overview", "proxy", "wireguard", "clash", "devices"]),
+            ),
             ("home_page", json!("devices")),
             ("language", json!("fr")),
             ("command", json!("reboot")),
@@ -233,7 +327,10 @@ mod tests {
         let mut english = b.clone();
         english["language"] = json!("en");
         let english = prepare(&old, &serde_json::to_vec(&english).unwrap()).unwrap();
-        assert_eq!(english.projection(), "C 2 90 160 4 17 en\n");
+        assert_eq!(
+            english.projection(),
+            "C 2 90 160 4 27 en\nV 2 90 160 4 17 en\n"
+        );
         // Saving without a language keeps the current one.
         let mut later = b.clone();
         later["expected_revision"] = json!(2);
@@ -263,5 +360,86 @@ mod tests {
         // Settings saved before the language existed still load, as Chinese.
         let legacy: Settings = serde_json::from_value(json!({"revision":4,"shortcut_enabled":false,"brightness":128,"idle_seconds":120,"home_page":"menu","menu_items":["overview"]})).unwrap();
         assert_eq!(legacy.language, "zh");
+    }
+    #[test]
+    fn proxy_and_clash_pages_keep_old_screens_working() {
+        // The new default: old screens get their four pages (Proxy and Clash bring
+        // WireGuard's), the new screen gets the choice.
+        assert_eq!(
+            Settings::default().projection(),
+            "C 1 120 128 2 27 zh\nV 1 120 128 2 113 zh\n"
+        );
+        assert_eq!(old_screen_mask(&Settings::default()) & 0b1_1011, 0b1_1011);
+        let choose = |items: Value, home: &str| {
+            let mut b = body();
+            b["menu_items"] = items;
+            b["home_page"] = json!(home);
+            prepare(&Settings::default(), &serde_json::to_vec(&b).unwrap()).unwrap()
+        };
+        // No page an old screen knows: it shows all of them and starts at the menu.
+        assert_eq!(
+            choose(json!(["proxy", "clash"]), "clash").projection(),
+            "C 2 90 160 2 27 zh\nV 2 90 160 6 96 zh\n"
+        );
+        assert_eq!(
+            choose(
+                json!(["devices", "proxy", "profiles", "overview"]),
+                "devices"
+            )
+            .projection(),
+            "C 2 90 160 1 27 zh\nV 2 90 160 1 58 zh\n"
+        );
+        // Without WireGuard, profiles and devices still reach an old screen through Clash.
+        let clash = choose(json!(["overview", "proxy", "clash"]), "overview");
+        assert_eq!(
+            clash.projection(),
+            "C 2 90 160 4 27 zh\nV 2 90 160 4 112 zh\n"
+        );
+        assert_eq!(old_screen_mask(&clash) & 0b1011, 0b1011);
+        for (items, mask) in [
+            (json!(["clash"]), 0b1_1011),
+            (json!(["wireguard"]), 0b1011),
+            (json!(["proxy", "overview"]), 0b1_1011),
+            // No tunnel chosen: only the pages chosen.
+            (json!(["overview"]), 0b1_0000),
+            (json!(["profiles", "overview"]), 0b1_1000),
+            (json!(["devices"]), 0b10),
+        ] {
+            assert_eq!(
+                old_screen_mask(&choose(items.clone(), "menu")),
+                mask,
+                "{items}"
+            );
+        }
+    }
+    #[test]
+    fn the_old_default_menu_moves_to_the_new_one_once() {
+        let saved = |items: &[&str], home: &str| Settings {
+            revision: 7,
+            menu_items: items.iter().map(|s| s.to_string()).collect(),
+            home_page: home.into(),
+            shortcut_enabled: true,
+            ..Settings::default()
+        };
+        let old = saved(
+            &["devices", "profiles", "wireguard", "overview"],
+            "profiles",
+        );
+        let next = migrate(&old).unwrap();
+        assert_eq!(next.menu_items, DEFAULT_MENU.to_vec());
+        assert_eq!((next.revision, next.home_page.as_str()), (8, "menu"));
+        assert!(next.shortcut_enabled && next.validate().is_ok());
+        // An old screen still shows all four pages it had before the move.
+        assert_eq!(old_screen_mask(&old), LEGACY_PAGES);
+        assert_eq!(old_screen_mask(&next), LEGACY_PAGES);
+        let kept = migrate(&saved(&LEGACY_MENU, "wireguard")).unwrap();
+        assert_eq!(kept.home_page, "wireguard");
+        for custom in [
+            &["overview", "wireguard"][..],
+            &["overview", "wireguard", "profiles", "clash"],
+            &DEFAULT_MENU,
+        ] {
+            assert!(migrate(&saved(custom, "menu")).is_none(), "{custom:?}");
+        }
     }
 }

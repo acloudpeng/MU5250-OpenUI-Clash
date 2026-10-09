@@ -91,8 +91,9 @@ and touch coordinates are rotated **180°** for the U60's display orientation.
 - Show tunnel state, recent handshake, traffic counters, endpoint and MTU.
   A recent handshake does not establish that internet access works.
 - Keep configuration private: the API never returns the saved private key or PSK.
-- Open the device's English 320×480 touchscreen panel from its own **DevUI** sidebar page. The DevUI menu includes Overview, WireGuard,
-  Saved profiles and Device routing.
+- Open the device's 320×480 touchscreen panel from its own **DevUI** sidebar page. The DevUI menu
+  shows up to four of Overview, Proxy (Off / WireGuard / Clash and diagnostics), WireGuard, Clash
+  (mode, nodes and delay tests, subscriptions, core and geo updates), Saved profiles and Device routing.
   View status, toggle the tunnel, and change device selections without handling keys.
 - Restore the stock display and touch services on exit, the configured idle timeout (two minutes by default),
   or a panel failure detected by its supervisor. Exiting the panel preserves routing.

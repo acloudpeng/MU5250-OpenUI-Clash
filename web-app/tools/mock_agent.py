@@ -874,7 +874,7 @@ STATE["core"] = {"installed": {"version": "flclash-d0c8d44-openui-ca20260925", "
                                "source": "pinned"}, "previous": None, "latest": None, "job": None}
 STATE["core_run"] = None
 
-STATE["screen_settings"] = {"revision": 1, "shortcut_enabled": False, "brightness": 128, "idle_seconds": 120, "home_page": "menu", "menu_items": ["overview", "wireguard", "profiles", "devices"], "language": "zh"}
+STATE["screen_settings"] = {"revision": 1, "shortcut_enabled": False, "brightness": 128, "idle_seconds": 120, "home_page": "menu", "menu_items": ["overview", "proxy", "wireguard", "clash"], "language": "zh"}
 STATE["screen"] = {"available": True, "verified": True, "running": False, "state": "idle", "settings_revision": 1, "shortcut": {"available": True, "message": "Shortcut disabled"}}
 
 ROUTES_GET = {
@@ -1053,6 +1053,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send({"ok": False, "error": "DevUI settings changed. Reload before saving."}, 409)
             if not 20 <= body.get("brightness", 0) <= 255 or not 30 <= body.get("idle_seconds", 0) <= 600 or not body.get("menu_items"):
                 return self._send({"ok": False, "error": "Invalid DevUI settings"}, 400)
+            if len(body["menu_items"]) > 4:
+                return self._send({"ok": False, "error": "Choose at most four menu items"}, 400)
             STATE["screen_settings"] = {k: body.get(k, old[k]) for k in old if k != "revision"}
             STATE["screen_settings"]["revision"] = old["revision"] + 1
             STATE["screen"]["settings_revision"] = old["revision"] + 1
