@@ -211,6 +211,7 @@ class TerminalDeployment(unittest.TestCase):
         from unittest.mock import patch
         class Fake:
             def __init__(self, *_): self.pushes = []
+            def reachable(self): pass
             def identity(self): return {'model': 'ZTE MU5250', 'firmware': 'test', 'fingerprint': 'aabb'}
             def shell(self, command): return '1000000\n1000000\n1000000\n100'
             def push(self, *args): self.pushes.append(args); raise AssertionError('dry run attempted a write')
@@ -233,6 +234,7 @@ class TerminalDeployment(unittest.TestCase):
         version = self.module.load_script('prepare-mihomo').VERSION
         class Fake:
             def __init__(self, *_): self.log = []
+            def reachable(self): pass
             def identity(self): return {'model': 'ZTE MU5250', 'firmware': 'test', 'fingerprint': 'aabb'}
             def shell(self, command):
                 self.log.append(('shell', command))

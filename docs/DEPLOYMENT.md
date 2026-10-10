@@ -220,7 +220,16 @@ Optional components go through `scripts/deploy-components.py` in the same snapsh
 and rollback flow: `--screen`, `--wireguard-tools`, `--mihomo` / `--mihomo-geodata`
 (Clash, [CLASH.md](CLASH.md)) and `--lpac` (eSIM, built by `scripts/prepare-lpac.py`
 or the release's `lpac` asset; [ESIM.md](ESIM.md)). Each is checked locally (aarch64,
-pinned checksum) before the device is contacted.
+pinned checksum) before the device is contacted. `--keep-credentials` keeps the
+installed agent password and PIN instead of asking for them, and `--skip-unchanged`
+leaves out components the modem already has at the same checksum.
+
+On Windows, `deploy-windows.cmd` (`scripts/windows/deploy.ps1`) does a whole release
+update in one step. It downloads the release matching the checkout and checks it,
+prepares the geo data, runs a dry run and then the deployment with both options above,
+and finishes with the touchscreen check when the screen program changed (README,
+"Update from Windows in one step"). `deploy-components.py` and `verify-screen.py` run
+natively on Windows: no WSL or wrapper is needed.
 
 ---
 

@@ -89,8 +89,9 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
    **固件更新若导致 suffix 轮换，可能永久失去解锁能力。**
    完整证据见 `docs/reference/suffix-recovery-b31.md`；更新前务必先按
    `docs/AI-OPERATIONS.md` §6.2 抓取指纹。
-9. **Windows 主机执行 `deploy-components.py` 需包装**：管道 `selectors`、
-   `os.killpg`、CRLF 双重转换、宿主机无 `sh -n`（见 `docs/AI-OPERATIONS.md` §7）。
+9. ~~**Windows 主机执行 `deploy-components.py` 需包装**：管道 `selectors`、
+   `os.killpg`、CRLF 双重转换、宿主机无 `sh -n`（见 `docs/AI-OPERATIONS.md` §7）。~~
+   **已解除（2026-10-10）**：部署工具在 Windows 上原生可用，`deploy-windows.cmd` 一键更新。
 10. **rc.local 可能被宿主机引号问题截断**（2026-10-10 实际发生）：见 `docs/SAFETY.md`。
    恢复靠事务快照 `before/etc_rc.local`。
 
@@ -354,3 +355,40 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
 - 发布包新增发布工作流编译的 `lpac`（应等于 `prepare-lpac.py` 里固定的 `66641fd6…2c98`）；`mihomo` 与 v2.5 相同（`df75037f…8985`）；
   `openui-screen` 本机用 Zig 0.14.1 从该标签编译。
 - SCREEN.md 的菜单功能列表补上 eSIM。真机还没验证的项目见发布说明。
+
+### 2026-10-10 — Windows 一键更新（deploy-windows.cmd）
+- 需求：「可以做一个 Windows 的一键脚本吗」。用户在连着设备的 Windows 电脑上部署，之前要手敲 POSIX 命令，
+  `deploy-components.py` 在 Windows 上也跑不起来（PLAN 风险第 9 条）。
+- 部署工具改成 Windows 上原生可用：
+  - `run()` 在 Windows 上改用线程收发管道（`select()` 不支持管道），超时用 `process.kill()`，新进程组挡住控制台的 Ctrl+C；
+  - 输出里的 `\r+\n` 统一成 `\n`；adb 临时文件先关闭再交给 adb；
+  - 本机没有 `sh` 时，启动脚本的 `sh -n` 检查放到设备上做（通过 stdin，只读）；
+  - 推给设备的 `scripts/device/*.sh` 去掉 CRLF；新增 `.gitattributes`（`*.sh` 固定 LF，`*.cmd` 固定 CRLF）。
+- 顺带发现并修复：Windows 用户目录带空格时（如 `C:\Users\John Doe`），ssh 会把 `UserKnownHostsFile=` 的值按空格拆开，
+  主机指纹记错文件、连接失败。现在加了引号（本机实测：不加引号时写到了路径的前半段）。
+  `verify-screen.py` 原来用默认 known_hosts，在没手动连过设备的电脑上会因主机指纹未知失败，现在和部署工具共用 `known_hosts.d/zte`。
+- 新选项：
+  - `deploy-components.py --keep-credentials`：从设备的启动脚本读出现有密码和 PIN，不用再输入；
+  - `deploy-components.py --skip-unchanged`：设备上 sha256 相同的组件不再部署（未变的 agent 不重启，未变的屏幕程序不用重新检查）；
+  - `verify-screen.py --if-needed`：已通过检查的屏幕程序直接跳过。
+  - 试运行阶段就检查触摸屏是否正在显示 OpenUI，不再等到事务中途失败；SSH 连不上时报 ssh 自己的错误（如 Permission denied），
+    原来只有「Management operation failed」。
+- `deploy-windows.cmd` → `scripts/windows/deploy.ps1`（兼容 Windows PowerShell 5.1，中英文提示按系统语言）：
+  1. 找 Python 3.10+ 和 OpenSSH 客户端，缺 Python 时可用 winget 安装；
+  2. 部署与检出版本对应的发布（2.6.0 → v2.6）：`scripts/download-release.py` 从发布页直接下载，走系统代理设置，按 sha256sums.txt 校验，不需要 gh；
+     也可以用 `-AssetsDir` 指定已下载好的文件夹；
+  3. 准备 GEO 数据；
+  4. 试运行 → 确认 → 部署（保留密码和 PIN、跳过未变组件）；
+  5. 屏幕程序变了才跑触摸屏检查。
+  设备地址和私钥在试运行通过后记到 `build/windows-deploy.json`。有更新的发布时提示先 `git pull`。
+  所有设备操作都交给 Python：PowerShell 5.1 给原生命令传带双引号的参数会出错。
+- 测试：
+  - 单元测试 `tests/test_deploy_portability.py`（11 项）：两种 `run()` 的输入、输出上限、超时、CR；替身 ssh 推送二进制；发布文件下载校验；
+    真实 ssh 客户端报连接被拒；保留凭据、跳过未变组件、触摸屏占用、引号路径、启动器编码。
+  - CI 新增 Windows 作业：在 Windows 上跑这些测试；在 Windows PowerShell 5.1 下解析脚本、检查帮助，并做一次冒烟运行。
+  - 端到端新增 S14（`/root/MU5250-e2e/deploy/`）：模拟一台装着 v2.5 的 U60（SSH 2222、ubus/uci 替身，
+    aarch64 程序经主机 qemu binfmt 运行）。用 pwsh 7 跑 deploy.ps1 升级到 v2.6，覆盖：
+    - 升级、再次运行只换网页、已检查的屏幕程序跳过检查；
+    - 触摸屏占用、私钥错误（且不会记住）、设备不可达、发布文件被改、取消，每种情况设备都不变；
+    - CRLF 检出部署后设备上的脚本是 LF。
+  - Windows 本身（PowerShell 5.1、winget、ssh.exe）的完整流程只能在用户电脑上验证。

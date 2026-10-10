@@ -41,6 +41,30 @@ jobs:
           for script in setup.sh deploy.sh deploy-dashboard.sh scripts/zharden.sh scripts/build-offline-bundle.sh scripts/device/*.sh; do
             bash -n "$script"
           done
+  # The one-click update (deploy-windows.cmd) on Windows: real pipes, ssh.exe and PowerShell 5.1.
+  windows-deploy:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
+      - name: Deployment tool on Windows
+        run: python -m unittest discover -s tests -p test_deploy_portability.py -v
+      - name: deploy.ps1 under Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $errors = $null; $tokens = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile("$PWD\scripts\windows\deploy.ps1", [ref]$tokens, [ref]$errors)
+          if ($errors) { $errors | Format-List; exit 1 }
+          if ((Get-Help .\scripts\windows\deploy.ps1).Synopsis -notlike 'Updates a modem*') { Write-Error 'Script help is not recognised'; exit 1 }
+          # Without release files it must stop after finding Python and ssh, before any network or modem access.
+          New-Item -ItemType Directory empty-release | Out-Null
+          $output = powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\deploy.ps1 -AssetsDir empty-release -Yes *>&1 | Out-String
+          Write-Output $output
+          if ($LASTEXITCODE -ne 1 -or $output -notmatch 'Python: ' -or $output -notmatch 'sha256sums.txt is missing') { Write-Error 'Unexpected result without release files'; exit 1 }
+          exit 0
   native-installer:
     strategy:
       fail-fast: false

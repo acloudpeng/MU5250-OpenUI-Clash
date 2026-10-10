@@ -16,19 +16,33 @@ from pathlib import Path
 import re
 import signal
 import selectors
+import shlex
+import shutil
 import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import time
 import uuid
 from device_identity import device_identity
 
 ROOT = Path(__file__).resolve().parents[1]
-q = __import__('shlex').quote
+q = shlex.quote
+
+
+def outcome(returncode, output, errors, raw):
+    if raw:
+        return returncode, output.decode(errors='replace'), errors.decode(errors='replace')
+    if returncode:
+        # Commands and output can contain credentials. Never print them.
+        raise RuntimeError('Management operation failed')
+    # A legacy adb shell ends lines with CRLF, and adb.exe on Windows adds another CR.
+    return re.sub(r'\r+\n', '\n', output.decode('utf-8', errors='replace')).strip()
 
 
 def run(args, data=None, timeout=60, raw=False):
+    if os.name == 'nt': return run_threads(args, data, timeout, raw)
     process = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, start_new_session=True)
     deadline = time.monotonic() + timeout
@@ -68,12 +82,7 @@ def run(args, data=None, timeout=60, raw=False):
                         if len(destination) + len(chunk) > 2 * 1024 * 1024:
                             raise RuntimeError('Unexpectedly large management response')
                         destination.extend(chunk)
-        if raw:
-            return process.returncode, output.decode(errors='replace'), errors.decode(errors='replace')
-        if process.returncode:
-            # Commands and output can contain credentials. Never print them.
-            raise RuntimeError('Management operation failed')
-        return output.decode('utf-8', errors='replace').strip()
+        return outcome(process.returncode, output, errors, raw)
     except BaseException:
         try: os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError: pass
@@ -84,6 +93,59 @@ def run(args, data=None, timeout=60, raw=False):
         selector.close()
         for pipe in [process.stdin, process.stdout, process.stderr]:
             if not pipe.closed: pipe.close()
+
+
+def run_threads(args, data=None, timeout=60, raw=False):
+    # Windows cannot select() on pipes, so threads move the data and this thread keeps
+    # the deadline. A new process group keeps the console's Ctrl+C from the child, as setsid does.
+    process = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               creationflags=getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0))
+    deadline = time.monotonic() + timeout
+    output, errors, failures = bytearray(), bytearray(), []
+
+    def collect(pipe, destination):
+        try:
+            while chunk := os.read(pipe.fileno(), 65536):
+                if len(destination) + len(chunk) > 2 * 1024 * 1024:
+                    failures.append(RuntimeError('Unexpectedly large management response'))
+                    return
+                destination.extend(chunk)
+        except (OSError, ValueError):
+            pass
+
+    def feed():
+        try:
+            remaining = memoryview(data)
+            while remaining: remaining = remaining[os.write(process.stdin.fileno(), remaining[:65536]):]
+        except (OSError, ValueError):
+            pass  # The child exited before reading all of it.
+        finally:
+            try: process.stdin.close()
+            except OSError: pass
+
+    readers = [(pipe, threading.Thread(target=collect, args=(pipe, destination), daemon=True))
+               for pipe, destination in [(process.stdout, output), (process.stderr, errors)]]
+    threads = [thread for _, thread in readers]
+    if data: threads.append(threading.Thread(target=feed, daemon=True))
+    else: process.stdin.close()
+    for thread in threads: thread.start()
+    try:
+        while not failures and (process.poll() is None or any(thread.is_alive() for thread in threads)):
+            if time.monotonic() >= deadline: raise RuntimeError('Management operation timed out')
+            time.sleep(0.02)
+        if failures: raise failures[0]
+        return outcome(process.returncode, output, errors, raw)
+    except BaseException:
+        process.kill()
+        try: process.wait(timeout=0.5)
+        except subprocess.TimeoutExpired: pass
+        raise
+    finally:
+        # Close a pipe only once its reader stops; a grandchild may still hold one open.
+        end = time.monotonic() + 0.5
+        for pipe, thread in readers:
+            thread.join(max(0, end - time.monotonic()))
+            if not thread.is_alive(): pipe.close()
 
 
 class Transport:
@@ -97,7 +159,8 @@ class Transport:
             known.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             self.command = ['ssh', '-p', '2222', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5',
                             '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=2',
-                            '-o', 'StrictHostKeyChecking=accept-new', '-o', f'UserKnownHostsFile={known}', f'root@{gateway}']
+                            # Quoted: ssh splits this value at spaces, which Windows profile paths can contain.
+                            '-o', 'StrictHostKeyChecking=accept-new', '-o', f'UserKnownHostsFile="{known}"', f'root@{gateway}']
             if ssh_key: self.command[1:1] = ['-i', str(Path(ssh_key).expanduser()), '-o', 'IdentitiesOnly=yes']
 
     def shell(self, command, data=None):
@@ -120,15 +183,22 @@ class Transport:
     def push(self, data, destination, executable=False):
         staged = destination + '.new'
         if self.serial:
-            with tempfile.NamedTemporaryFile(prefix='open-u60-transfer-') as source:
+            # Closed before adb opens it: Windows refuses a second open of an open temporary file.
+            with tempfile.NamedTemporaryFile(prefix='open-u60-transfer-', delete=False) as source:
                 source.write(data)
-                source.flush()
-                run(['adb', '-s', self.serial, 'push', source.name, staged])
+            try: run(['adb', '-s', self.serial, 'push', source.name, staged])
+            finally: os.unlink(source.name)
         else:
             self.shell(f'umask 077; cat > {q(staged)}', data)
         checksum = hashlib.sha256(data).hexdigest()
         self.shell(f"set -e; test \"$(sha256sum {q(staged)} | awk '{{print $1}}')\" = {checksum}; "
                    f"chmod {'700' if executable else '600'} {q(staged)}; mv -f {q(staged)} {q(destination)}")
+
+    def reachable(self):
+        # The command is `true`, so stderr holds only ssh's own messages, which are safe to show.
+        if self.serial: return
+        status, _, diagnostic = run([*self.command, 'true'], timeout=30, raw=True)
+        if status: raise RuntimeError('SSH to the modem failed: ' + (diagnostic.strip().splitlines() or ['no answer'])[-1])
 
     def identity(self):
         output = self.shell("set -e; uname -m; id -u; ubus call zwrt_web device_info '{}'", None)
@@ -151,6 +221,57 @@ class Transport:
         response = json.loads(self.shell(' '.join(map(q, command)), json.dumps(body).encode() if body is not None else None))
         if not response.get('ok'): raise RuntimeError('Agent verification failed')
         return response.get('data', {})
+
+
+def device_script(name):
+    # A Windows checkout can carry CRLF line endings, which the modem's shell cannot run.
+    return (ROOT / 'scripts/device' / name).read_bytes().replace(b'\r\n', b'\n')
+
+
+def render_startup(password, pin):
+    spec = importlib.util.spec_from_file_location('startup', ROOT / 'scripts/render-agent-startup.py')
+    startup = importlib.util.module_from_spec(spec); spec.loader.exec_module(startup)
+    return startup.render(password, pin).encode()
+
+
+def check_startup(script, transport):
+    if shutil.which('sh'): run(['sh', '-n'], script)
+    # Windows has no sh: the modem's shell only reads the script with -n.
+    elif not transport.serial: transport.shell('sh -n', script)
+
+
+def current_credentials(transport):
+    # The installed startup script holds the agent's password and PIN (root-only).
+    password, pin = None, ''
+    for line in transport.shell('cat /data/local/tmp/start_zte_agent.sh 2>/dev/null || true').splitlines():
+        if line.startswith(('export ZTE_AGENT_PASSWORD=', 'export ZTE_AGENT_PIN=')):
+            name, value = shlex.split(line)[1].split('=', 1)
+            if name == 'ZTE_AGENT_PASSWORD': password = value
+            else: pin = value
+    if not password: raise RuntimeError('No installed agent password to keep; deploy with a password instead')
+    return password, pin
+
+
+# Where each component is installed; --skip-unchanged leaves alone those already there.
+INSTALLED = {'agent': '/data/zte-agent', 'wg': '/data/bin/wg', 'openui-screen': '/data/bin/openui-screen',
+             'mihomo': '/data/bin/mihomo', 'lpac': '/data/bin/lpac'}
+
+
+def skip_unchanged(transport, prepared, programs):
+    targets = {name: INSTALLED[name] for name in [*prepared, *programs] if name in INSTALLED}
+    targets.update({name: '/data/share/mihomo/' + name[4:] for name in programs if name.startswith('geo/')})
+    if not targets: return []
+    installed = {}
+    for line in transport.shell(f"sha256sum {' '.join(map(q, targets.values()))} 2>/dev/null || true").splitlines():
+        digest, _, path = line.partition('  ')
+        installed[path] = digest
+    skipped = []
+    for name, path in targets.items():
+        source = prepared if name in prepared else programs
+        if installed.get(path) == hashlib.sha256(source[name]).hexdigest():
+            del source[name]
+            skipped.append(name)
+    return skipped
 
 
 def verify_credentials(transport, password, pin):
@@ -245,7 +366,7 @@ def harden(transport, programs, identity):
                     "for k in ed25519 rsa; do f=/etc/dropbear/dropbear_${k}_host_key; [ -s \"$f\" ] || /data/bin/dropbearkey -t $k -f \"$f\" >/dev/null; done; "
                     "cp /etc/dropbear/authorized_keys /etc/dropbear/dropbear_*_host_key /data/dropbear/; chmod 600 /data/dropbear/*")
     for source, target in [('start-dropbear.sh', 'start_dropbear.sh'), ('start-dashboard.sh', 'start_dashboard.sh'), ('update-rc-local.sh', 'open-u60-rc-update.sh')]:
-        transport.push((ROOT / 'scripts/device' / source).read_bytes(), f'/data/local/tmp/{target}', True)
+        transport.push(device_script(source), f'/data/local/tmp/{target}', True)
     transport.shell("set -e; mkdir -p /data/www; if uci -q get uhttpd.dashboard >/dev/null; then uci -q delete uhttpd.dashboard; uci commit uhttpd; /etc/init.d/uhttpd restart; fi; "
                     "sh /data/local/tmp/open-u60-rc-update.sh --remove-debug 'sh /data/local/tmp/start_dropbear.sh' 'sh /data/local/tmp/start_dashboard.sh'")
     transport.shell("set -e; ubus call zwrt_zte_dm set_update_mode '{\"dm_update_mode\":\"0\"}'; test \"$(uci get zwrt_zte_dm.dm_update.dm_update_mode)\" = 0")
@@ -343,14 +464,12 @@ def deploy(args):
         data = read_limited(args.agent)
         if len(data) < 64 or data[:6] != b'\x7fELF\x02\x01' or int.from_bytes(data[18:20], 'little') != 183:
             raise ValueError('Agent must be an aarch64 ELF64 little-endian executable')
-        password = os.environ.get('ZTE_AGENT_PASSWORD') or getpass.getpass('Agent password: ')
-        pin = os.environ.get('ZTE_AGENT_PIN', '')
-        spec = importlib.util.spec_from_file_location('startup', ROOT / 'scripts/render-agent-startup.py')
-        startup = importlib.util.module_from_spec(spec); spec.loader.exec_module(startup)
-        script = startup.render(password, pin).encode()
-        run(['sh', '-n'], script)
+        # --keep-credentials reads them from the modem once it is verified.
+        if not getattr(args, 'keep_credentials', False):
+            password = os.environ.get('ZTE_AGENT_PASSWORD') or getpass.getpass('Agent password: ')
+            pin = os.environ.get('ZTE_AGENT_PIN', '')
+            prepared['startup'] = render_startup(password, pin)
         prepared['agent'] = data
-        prepared['startup'] = script
     if args.dashboard:
         expanded = validate_dashboard(args.dashboard)
         prepared['dashboard'] = read_limited(args.dashboard)
@@ -379,10 +498,27 @@ def deploy(args):
         if len(devices) > 1: raise RuntimeError('Multiple ADB devices connected; select one with --adb-serial')
         if devices: args.adb_serial = devices[0]
     transport = Transport(args.gateway, args.adb_serial, getattr(args, 'ssh_key', None))
+    transport.reachable()
     identity = transport.identity()
     if args.identity_file and json.loads(Path(args.identity_file).read_text()) != identity:
         raise RuntimeError('The management connection is not the modem selected for unlock')
     print(f"Verified {identity['model']} ({identity['firmware']})")
+    if getattr(args, 'skip_unchanged', False):
+        skipped = skip_unchanged(transport, prepared, programs)
+        if 'agent' in skipped:
+            args.agent = None
+            prepared.pop('startup', None)
+        if skipped: print('Already installed, skipped: ' + ', '.join(skipped))
+        if not prepared and not programs:
+            print('Nothing to deploy: the modem already runs these components.')
+            return
+    if args.agent:
+        if 'startup' not in prepared:
+            password, pin = current_credentials(transport)
+            prepared['startup'] = render_startup(password, pin)
+        check_startup(prepared['startup'], transport)
+    if 'openui-screen' in programs and transport.shell('test -e /tmp/openui-screen/owner && echo active || true') == 'active':
+        raise RuntimeError('The touchscreen is running OpenUI; return it to the stock screen before replacing the screen program')
     # Count snapshot plus rollback-copy space, including legacy dashboard files.
     preflight = transport.shell("set -e; for tool in sh sha256sum tar cp mv readlink awk df du sync ubus uci; do command -v \"$tool\" >/dev/null; done; "
                                 "test -x /usr/bin/curl; sh -n /etc/rc.local; test -w /data; test -w /etc; "
@@ -403,8 +539,8 @@ def deploy(args):
     transaction = str(uuid.uuid4())
     transaction_script = '/data/local/tmp/open-u60-transaction.sh'
     transport.shell('mkdir -p /data/local/tmp')
-    transport.push((ROOT / 'scripts/device/stop-owned-listener.sh').read_bytes(), '/data/local/tmp/stop_open_u60_listener.sh', True)
-    transport.push((ROOT / 'scripts/device/transaction.sh').read_bytes(), transaction_script, True)
+    transport.push(device_script('stop-owned-listener.sh'), '/data/local/tmp/stop_open_u60_listener.sh', True)
+    transport.push(device_script('transaction.sh'), transaction_script, True)
     transport.shell(f'sh -n {transaction_script}')
     action = f'sh {transaction_script} {{}} {transaction} {identity["fingerprint"]}'
     transport.shell(action.format('begin'))
@@ -448,7 +584,7 @@ def deploy(args):
             transport.push(prepared['startup'], '/data/local/tmp/start_zte_agent.sh.staged', True)
             transport.shell('set -e; sh -n /data/local/tmp/start_zte_agent.sh.staged; killall zte-agent 2>/dev/null || true')
             transport.shell('set -e; mv /data/zte-agent.staged /data/zte-agent; mv /data/local/tmp/start_zte_agent.sh.staged /data/local/tmp/start_zte_agent.sh')
-            transport.push((ROOT / 'scripts/device/update-rc-local.sh').read_bytes(), '/data/local/tmp/open-u60-rc-update.sh', True)
+            transport.push(device_script('update-rc-local.sh'), '/data/local/tmp/open-u60-rc-update.sh', True)
             transport.shell("sh /data/local/tmp/open-u60-rc-update.sh 'sh /data/local/tmp/start_zte_agent.sh'")
             transport.shell('sh /data/local/tmp/start_zte_agent.sh')
             for attempt in range(5):
@@ -467,7 +603,7 @@ def deploy(args):
                             f'rm -f /data/www.current.new; ln -s {target} /data/www.current.new; mv -Tf /data/www.current.new /data/www.current; '
                             'rm -f /data/local/tmp/dashboard-dist.tar.gz')
             # Deploy the root-pointer-aware service script with the dashboard.
-            transport.push((ROOT / 'scripts/device/start-dashboard.sh').read_bytes(), '/data/local/tmp/start_dashboard.sh', True)
+            transport.push(device_script('start-dashboard.sh'), '/data/local/tmp/start_dashboard.sh', True)
             transport.shell('sh /data/local/tmp/start_dashboard.sh')
             time.sleep(1)
             transport.shell("/usr/bin/curl --fail --silent --show-error --connect-timeout 5 --max-time 10 http://127.0.0.1:8080/ | grep -q '<div id=\"root\"></div>'")
@@ -491,6 +627,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--agent')
     parser.add_argument('--ssh-key', help='SSH private key for the existing installation')
+    parser.add_argument('--keep-credentials', action='store_true', help="keep the installed agent's password and PIN instead of entering them")
+    parser.add_argument('--skip-unchanged', action='store_true', help='leave out components the modem already has at the same checksum')
     parser.add_argument('--screen', help='aarch64 openui-screen binary; web entry remains gated until recovery verification')
     parser.add_argument('--wireguard-tools', help='Verified aarch64 wg binary to include in the deployment snapshot')
     parser.add_argument('--mihomo', help='aarch64 Clash core built by scripts/prepare-mihomo.py')

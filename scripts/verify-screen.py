@@ -4,15 +4,23 @@ No WireGuard configuration or network rule changes. Requires an installed agent 
 """
 import time
 import subprocess,shlex,json,sys
-import argparse, ipaddress
+import argparse, ipaddress, pathlib
 parser=argparse.ArgumentParser(description="Verify temporary screen takeover and recovery on your U60; enables the web entry only on success.")
 parser.add_argument('--gateway',default='192.168.0.1')
 parser.add_argument('--port',default=2222,type=int)
 parser.add_argument('--ssh-key',required=True)
+parser.add_argument('--if-needed',action='store_true',help='do nothing when the installed screen program already passed')
 a=parser.parse_args()
 ipaddress.IPv4Address(a.gateway)
-ssh=['ssh','-i',a.ssh_key,'-p',str(a.port),'-o','BatchMode=yes','-o','ConnectTimeout=8','root@'+a.gateway]
+# The host key deploy-components.py recorded; quoted because ssh splits this value at spaces.
+known=pathlib.Path.home()/'.ssh/known_hosts.d/zte'
+known.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
+ssh=['ssh','-i',str(pathlib.Path(a.ssh_key).expanduser()),'-p',str(a.port),'-o','BatchMode=yes','-o','ConnectTimeout=8','-o','IdentitiesOnly=yes',
+     '-o','StrictHostKeyChecking=accept-new','-o',f'UserKnownHostsFile="{known}"','root@'+a.gateway]
 def remote(cmd,data=None): return subprocess.check_output(ssh+[cmd],input=data,timeout=35)
+# Deployment removes the record whenever it installs a different screen program.
+if a.if_needed and subprocess.run(ssh+['sha256sum -c /data/local/tmp/openui-screen-verified >/dev/null 2>&1'],timeout=35).returncode==0:
+ print('The installed screen program has already passed; nothing to verify.');sys.exit(0)
 s=remote('cat /data/local/tmp/start_zte_agent.sh').decode()
 pw=next(shlex.split(l)[1].split('=',1)[1] for l in s.splitlines() if l.startswith('export ZTE_AGENT_PASSWORD='))
 login=json.loads(remote(f"/usr/bin/curl -fsS --max-time 10 -H 'Content-Type: application/json' --data-binary @- http://{a.gateway}:9090/api/auth/login",json.dumps({'password':pw}).encode()))

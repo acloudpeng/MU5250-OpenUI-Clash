@@ -580,9 +580,20 @@ and quote-free. When in doubt, use the staged-script pattern.
 | `sh -n` fails, no `sh` on host | Windows has no POSIX shell | run the lint on the device: push, `sh -n <path>` |
 | adb selects/waits on the wrong device | bare `adb` invocation | always pass `-s <serial>` explicitly |
 
-`scripts/deploy-components.py` is POSIX-correct as written. On Windows, prefer
-running it under WSL, or wrap it (import the module unmodified, replace only
-`run()`, then call `main()`) rather than editing the repo file.
+`scripts/deploy-components.py` and `scripts/verify-screen.py` handle these on
+Windows themselves:
+- threads instead of `select()` on pipes;
+- `process.kill()`;
+- CR stripping of command output;
+- adb temporary files closed before adb reads them;
+- the startup script's `sh -n` check run on the modem when the host has no `sh`;
+- device scripts sent with LF line endings;
+- the known-hosts path quoted, since ssh splits it at the spaces a Windows profile
+  path can contain.
+
+`.gitattributes` keeps `*.sh` checked out with LF. Run them directly, or use
+`deploy-windows.cmd` (`scripts/windows/deploy.ps1`) for a whole release update.
+CI runs `tests/test_deploy_portability.py` and the script on a Windows runner.
 
 ### 7.3 Proxy / fake-IP DNS
 
