@@ -29,8 +29,8 @@ def get(url, limit=LIMIT):
 
 def download(repo, tag, output, names):
     base = f'https://github.com/{repo}/releases/download/{tag}/'
-    text = get(base + 'sha256sums.txt', 1024 * 1024).decode()
-    sums = {match[2]: match[1].lower() for line in text.splitlines()
+    listing = get(base + 'sha256sums.txt', 1024 * 1024)
+    sums = {match[2]: match[1].lower() for line in listing.decode().splitlines()
             if (match := re.fullmatch(r'([0-9a-fA-F]{64}) [ *](\S+)\s*', line))}
     output.mkdir(parents=True, exist_ok=True)
     for name in names:
@@ -45,7 +45,8 @@ def download(repo, tag, output, names):
         staged.write_bytes(data)
         staged.replace(output / name)
         print(f'{name}: {len(data) / (1024 * 1024):.1f} MiB, checksum matches', flush=True)
-    (output / 'sha256sums.txt').write_text(text)
+    # As published, byte for byte: write_text would turn its line endings into CRLF on Windows.
+    (output / 'sha256sums.txt').write_bytes(listing)
 
 
 def main():

@@ -90,7 +90,8 @@ class Runner(unittest.TestCase):
             listener.bind(('127.0.0.1', 0)); port = listener.getsockname()[1]
         transport = self.module.Transport('127.0.0.1')
         transport.command[transport.command.index('2222')] = str(port)
-        with self.assertRaisesRegex(RuntimeError, f'SSH to the modem failed: .*port {port}.*refused'):
+        # OpenSSH on Windows words it "banner exchange: Connection to UNKNOWN port -1: Connection refused".
+        with self.assertRaisesRegex(RuntimeError, 'SSH to the modem failed: .*Connection refused'):
             transport.reachable()
 
     @unittest.skipUnless(git_bash(), 'a POSIX shell stands in for the modem')
