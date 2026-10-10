@@ -40,7 +40,8 @@ if not font_header.exists():
 ui_header=out/'devui_assets.h'
 ui_header.write_text('\n'.join('static const char '+p.stem.replace('-','_')+'_asset[] = '+json.dumps(p.read_text())+';' for p in sorted((ROOT/'screen/devui/ui').glob('*'))))
 incs=['-I'+str(out),'-I'+str(ft/'include'),'-I'+str(lh/'include'),'-I'+str(lh/'include/litehtml'),'-I'+str(lh/'src/gumbo/include'),'-I'+str(lh/'src/gumbo/include/gumbo'),'-Iscreen/devui/vendor']
-common=['-O2','-ffunction-sections','-fdata-sections']+incs
+# Relative __FILE__ (assert messages): the same binary from any checkout directory.
+common=['-O2','-ffunction-sections','-fdata-sections','-ffile-prefix-map='+str(ROOT)+'/=']+incs
 jobs=[]
 for p in sorted((lh/'src').glob('*.cpp')):jobs.append((p,cxx,['-std=c++17'], 'lh_'))
 for p in sorted((lh/'src/gumbo').glob('*.c')):jobs.append((p,cc,[], 'gumbo_'))

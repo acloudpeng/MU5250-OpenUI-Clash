@@ -49,7 +49,7 @@ modify factory menus, binaries, boot scripts, power-off or hardware-reset behavi
 | Brightness | 20–255, shown as a percentage; updates while awake without waking a sleeping panel |
 | Idle return | 30–600 seconds; default 120 seconds, measured from touch or a short power press |
 | Startup page | Main menu or any visible feature; applies on the next opening |
-| Menu features | Up to four of Overview, Proxy, WireGuard, Clash, Saved profiles and Device routing; default Overview, Proxy, WireGuard, Clash |
+| Menu features | Up to four of Overview, Proxy, WireGuard, Clash, eSIM, Saved profiles and Device routing; default Overview, Proxy, WireGuard, Clash |
 
 At least one feature must remain visible and at most four fit the menu. A saved list
 of exactly the four old defaults moves to the new default once. Saved profiles and
