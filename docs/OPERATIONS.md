@@ -1,11 +1,11 @@
-# AI Operations Runbook — MU5250 (ZTE U60 Pro) unlock, deploy, firmware update
+# Operations Runbook — MU5250 (ZTE U60 Pro) unlock, deploy, firmware update
 
-> **中文摘要**：本文是给 AI 代理执行的结构化手册，用状态机 + 精确命令 + 验收门槛的
+> **中文摘要**：本文是按步骤执行的结构化手册，用状态机 + 精确命令 + 验收门槛的
 > 形式写成。覆盖：① 识别设备当前状态 ② 解锁（取得 root/ADB）③ 部署 OpenUI
 > ④ 验证 ⑤ 固件更新与事后重建。**所有密钥都是运行时输入，仓库内不含任何密钥。**
 > 关键红线在第 8 节，执行前必读。
 
-Machine-oriented. Optimised for an AI agent that must execute without guessing.
+Step by step, for an operator who must execute without guessing.
 Every command is copy-pasteable. Every step states its expected output and its
 abort condition.
 
@@ -14,7 +14,7 @@ Validated on `BD_CNMU5250V1.0.0B31` (2026-10).
 
 ---
 
-## 0. Contract for the executing agent
+## 0. Rules for the operator
 
 | Rule | Detail |
 |---|---|

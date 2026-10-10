@@ -3,7 +3,7 @@
 Captured 2026-10-10 on a rooted ZTE U60 Pro (MU5250), firmware
 `BD_CNMU5250V1.0.0B31`, `CN_ZTE_MU5250V1.0.0B31`.
 
-This backs the claim in [AI-OPERATIONS.md](AI-OPERATIONS.md) §6.5 and the note in
+This backs the claim in [OPERATIONS.md](OPERATIONS.md) §6.5 and the note in
 [DEPLOYMENT.md](DEPLOYMENT.md). **No key value appears in this file** — the
 suffix was passed to the device through a file, never a command line, and the
 file was shredded afterwards.
@@ -97,7 +97,7 @@ On CN B31:
 Practical consequence, already folded into the runbooks:
 
 - Capture firmware fingerprints **before** any update
-  ([AI-OPERATIONS.md](AI-OPERATIONS.md) §6.2).
+  ([OPERATIONS.md](OPERATIONS.md) §6.2).
 - Keep `/data/dropbear/` — it survives FOTA and is what makes post-update
   recovery possible without re-unlocking.
 - Do not rely on being able to re-derive a rotated suffix.

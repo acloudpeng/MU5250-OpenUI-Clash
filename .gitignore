@@ -1,7 +1,4 @@
 /target/
-.claude/
-.agents/
-skills-lock.json
 logs/
 .DS_Store
 device_report.json

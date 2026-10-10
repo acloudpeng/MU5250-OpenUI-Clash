@@ -32,7 +32,7 @@ section core
 pid=$(cat $STATE/mihomo.pid 2>/dev/null)
 echo "pid ${pid:-none}: $(readlink /proc/"$pid"/exe 2>/dev/null) $(grep VmRSS /proc/"$pid"/status 2>/dev/null)"
 echo "version: $(ctl /version 3)"
-grep -q '^ntp:' $STATE/home/config.yaml 2>/dev/null && echo 'profile ntp: yes' || echo 'profile ntp: no (agent older than dfdd08e)'
+grep -q '^ntp:' $STATE/home/config.yaml 2>/dev/null && echo 'profile ntp: yes' || echo 'profile ntp: no (agent older than 60ce186)'
 echo "configs: $(ctl /configs 5 | grep -oE '"mode":"[^"]*"|"tun":\{[^}]*\}' | tr '\n' ' ')"
 echo "node types: $(ctl /proxies 10 | grep -o '"type":"[^"]*"' | sort | uniq -c | tr -s ' \n' ' ')"
 

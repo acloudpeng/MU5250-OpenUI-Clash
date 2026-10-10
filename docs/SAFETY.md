@@ -131,7 +131,7 @@ ubus call zwrt_data get_wwaniface '{"source_module":"zte_topsw_data","cid":1}'
   block. Recovery: the deployment transaction snapshot keeps a pre-write copy at
   `/data/local/tmp/open-u60-transactions/<id>/before/etc_rc.local`. Prevention:
   never inline-quote device commands through a host shell — push a script and
-  run it. See [AI-OPERATIONS.md](AI-OPERATIONS.md) §7.1.
+  run it. See [OPERATIONS.md](OPERATIONS.md) §7.1.
 - **IMEI is QFPROM-fused** — hardware-locked, not modifiable. Don't try.
 - **eSIM**: the CN unit has no usable built-in eUICC. Removable eUICC cards are
   managed with lpac ([ESIM.md](ESIM.md)) through QMI UIM and DMS requests only, never

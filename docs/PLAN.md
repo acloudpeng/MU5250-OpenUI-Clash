@@ -51,7 +51,7 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
 
 | 阶段 | 内容 | 依赖设备 | 状态 |
 |---|---|---|---|
-| **P0** | 解锁（`zunlock.py --dry-run` 先行，需 backup-key 后缀）→ OpenUI `setup.sh` 装基础 + SSH → 只读探测脚本 → `docs/B31-PROBE.md` | 是（**等后缀**） | **完成（2026-10-10 实机）**：B31 解锁成功，suffix 有效；agent + SSH + 网页 + mihomo + geo 已部署，重启自启验证通过。过程见 `docs/AI-OPERATIONS.md` |
+| **P0** | 解锁（`zunlock.py --dry-run` 先行，需 backup-key 后缀）→ OpenUI `setup.sh` 装基础 + SSH → 只读探测脚本 → `docs/B31-PROBE.md` | 是（**等后缀**） | **完成（2026-10-10 实机）**：B31 解锁成功，suffix 有效；agent + SSH + 网页 + mihomo + geo 已部署，重启自启验证通过。过程见 `docs/OPERATIONS.md` |
 | **P1** | mihomo 交叉编译（CI + 本地 Docker）、`prepare-mihomo.py`、sha256 固定；实机基准（内存/CPU/吞吐） | 基准需要 | 构建完成；**内核已在实机部署并校验 sha256**，吞吐基准待测 |
 | **P2** | 从 `wireguard.rs` 抽出 `egress_policy`（设备、标记位、路由表参数化）；WG 行为不变；互斥切换事务与回滚 | 否 | 完成（互斥切换在 P3 实现） |
 | **P3** | `clash.rs`：进程监管、订阅子模块、配置合成、Unix socket 控制客户端、策略应用、revision/409 | 否（mock） | 完成（netns 数据面测试通过）；**`/api/clash` 在实机返回 `core_installed/tun_supported/geodata` 正常**，待配订阅 |
@@ -88,9 +88,9 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
    `/proc/zte_unique_id` 可推导（49 种推导全部失败，用真实备份作 oracle 验证）。
    **固件更新若导致 suffix 轮换，可能永久失去解锁能力。**
    完整证据见 `docs/reference/suffix-recovery-b31.md`；更新前务必先按
-   `docs/AI-OPERATIONS.md` §6.2 抓取指纹。
+   `docs/OPERATIONS.md` §6.2 抓取指纹。
 9. ~~**Windows 主机执行 `deploy-components.py` 需包装**：管道 `selectors`、
-   `os.killpg`、CRLF 双重转换、宿主机无 `sh -n`（见 `docs/AI-OPERATIONS.md` §7）。~~
+   `os.killpg`、CRLF 双重转换、宿主机无 `sh -n`（见 `docs/OPERATIONS.md` §7）。~~
    **已解除（2026-10-10）**：部署工具在 Windows 上原生可用，`deploy-windows.cmd` 一键更新。
 10. **rc.local 可能被宿主机引号问题截断**（2026-10-10 实际发生）：见 `docs/SAFETY.md`。
    恢复靠事务快照 `before/etc_rc.local`。
@@ -348,7 +348,7 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
 - 用户暂时没有 eUICC 卡：真机先用普通 SIM 验证「读取卡片」报「普通 SIM 卡」（即 QRTR/UIM 通路可用），有卡后再验证切换和下载。
 
 ### 2026-10-10 — 发布 v2.6
-- eSIM 批次单独提交（`44faa6f`），之后版本号统一为 2.6.0，重新生成 v2.6 安装器线框图并删掉 v2.5 的（v2.5 标签里仍有）。发布说明 `docs/releases/v2.6.md`。
+- eSIM 批次单独提交（`7217065`），之后版本号统一为 2.6.0，重新生成 v2.6 安装器线框图并删掉 v2.5 的（v2.5 标签里仍有）。发布说明 `docs/releases/v2.6.md`。
 - 发布前在模拟路由器上跑了完整端到端：S1–S13、X1–X4 全部通过（S11 70/70、S12 74/74、S13 29/29）。
 - 屏幕程序原来只在同一目录下编译才可复现：`panel.c` 保留了断言，`__FILE__` 带着检出目录的绝对路径（v2.5 的二进制里有 `/root/MU5250-OpenUI-Clash/screen/panel.c`）。
   `screen/devui/build.py` 加了 `-ffile-prefix-map`，现在在三个不同目录编出的 sha256 相同：`f104ee5e…b3f9`。
@@ -398,3 +398,14 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
 - README 重写为公开首页：控制台、触摸屏、eSIM、安装与更新、文档、致谢和许可。截图仍在 `docs/images/`，首页不再引用。
 - 发布页只保留 v2.6，说明按新首页改写；v2.4、v2.5 的发布已删除，标签保留。
 - 一键更新改为直接从公开的发布页下载，不再需要 GitHub CLI 和登录。
+
+### 2026-10-10 — 1.0
+- 版本号改为 1.0.0（agent、网页、安装器和各自的锁文件），作为第一个公开版本发布 v1.0。原来的 v2.4–v2.6 发布和标签已删除。
+- 提交历史统一了作者信息，所有提交号都变了；本文和 `scripts/device/diagnose-clash.sh` 里引用的提交号已同步更新。
+- README 分成三个文件，顶部互相链接：
+  - 简体中文（`README.md`，首页默认）；
+  - 繁體中文（`README.zh-TW.md`）；
+  - 英文（`README.en.md`）。
+- 操作手册改名为 `docs/OPERATIONS.md`，其他文档里的链接已更新。
+- 重新生成 v1.0 的安装器线框图。发布说明 `docs/releases/v1.0.md` 用三种语言，旧版本的发布说明文件已删除。
+- 安装器测试里表示「版本不匹配」的样例标签从 v1.0 改为 v0.9。

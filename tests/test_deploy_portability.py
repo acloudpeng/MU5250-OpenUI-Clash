@@ -208,19 +208,19 @@ class DownloadRelease(unittest.TestCase):
         module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
         files = {'zte-agent': b'agent', 'lpac': b'lpac'}
         sums = ''.join(f'{hashlib.sha256(data).hexdigest()}  {name}\n' for name, data in files.items())
-        base = 'https://github.com/owner/repo/releases/download/v2.6/'
+        base = 'https://github.com/owner/repo/releases/download/v1.0/'
         served = {base + 'sha256sums.txt': sums.encode(), **{base + name: data for name, data in files.items()}}
         with tempfile.TemporaryDirectory() as temp, patch.object(module, 'get', side_effect=lambda url, limit=0: served[url]), patch('builtins.print'):
             output = Path(temp)
-            module.download('owner/repo', 'v2.6', output, ['zte-agent', 'lpac'])
+            module.download('owner/repo', 'v1.0', output, ['zte-agent', 'lpac'])
             self.assertEqual({path.name: path.read_bytes() for path in output.iterdir()}, {**files, 'sha256sums.txt': sums.encode()})
             for path in list(output.iterdir()): path.unlink()
             served[base + 'lpac'] = b'tampered'
             with self.assertRaisesRegex(SystemExit, 'lpac does not match'):
-                module.download('owner/repo', 'v2.6', output, ['zte-agent', 'lpac'])
+                module.download('owner/repo', 'v1.0', output, ['zte-agent', 'lpac'])
             self.assertEqual(sorted(path.name for path in output.iterdir()), ['zte-agent'], 'no tampered file and no sha256sums.txt')
             with self.assertRaisesRegex(SystemExit, 'not listed'):
-                module.download('owner/repo', 'v2.6', output, ['mihomo'])
+                module.download('owner/repo', 'v1.0', output, ['mihomo'])
         with self.assertRaisesRegex(SystemExit, 'HTTPS'):
             module.get('http://github.com/owner/repo')
 

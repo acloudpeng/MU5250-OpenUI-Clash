@@ -298,7 +298,7 @@ produced these corrections. Read them before relying on the notes above.
   hooks fire before considering FOTA; the update forces exactly that rebuild.
 - The machine-readable procedure, including host-side hazards (Windows pipe
   `selectors`, `os.killpg`, CRLF doubling, host-side `sh -n`, and the
-  never-inline-quote rule), is in [AI-OPERATIONS.md](AI-OPERATIONS.md).
+  never-inline-quote rule), is in [OPERATIONS.md](OPERATIONS.md).
 
 
 ## Credits

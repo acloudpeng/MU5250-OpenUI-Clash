@@ -8,7 +8,7 @@ issue #8. Target device: ZTE U60 Pro (MU5250), firmware `CN_ZTE_MU5250V1.0.0B31`
 > reboot-persistence check all completed successfully on `BD_CNMU5250V1.0.0B31`.
 > The suffix discussed in the issue #8 thread **does** work on CN B31 (previously
 > confirmed only for MU5252). The procedure is written up machine-readably in
-> [AI-OPERATIONS.md](AI-OPERATIONS.md); the corrections below are what the live
+> [OPERATIONS.md](OPERATIONS.md); the corrections below are what the live
 > run changed relative to this document and to `DEPLOYMENT.md`.
 >
 > - The daemon is at **`/usr/bin/zte_web`**, not `/usr/sbin/zte_web`.
@@ -28,7 +28,7 @@ issue #8. Target device: ZTE U60 Pro (MU5250), firmware `CN_ZTE_MU5250V1.0.0B31`
 >   that does survive, which makes post-update recovery straightforward.
 > - On a Windows host, `scripts/deploy-components.py` needs a wrapper (pipe
 >   `selectors`, `os.killpg`, CRLF doubling, host-side `sh -n`). See
->   [AI-OPERATIONS.md](AI-OPERATIONS.md) §7.
+>   [OPERATIONS.md](OPERATIONS.md) §7.
 
 ## TL;DR
 

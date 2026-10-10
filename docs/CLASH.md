@@ -13,7 +13,7 @@ turns the other off. Turning off names the backend the page shows as on (`active
 another one came on elsewhere meanwhile, the agent answers 409 instead of turning it off.
 
 Status: deployed and running on a real B31 modem since 2026-10-10
-([AI-OPERATIONS.md](AI-OPERATIONS.md)); proxied traffic from LAN devices there is still
+([OPERATIONS.md](OPERATIONS.md)); proxied traffic from LAN devices there is still
 being verified (see [PLAN.md](PLAN.md), P6).
 
 ## Build

@@ -14,7 +14,7 @@ Download from [GitHub Releases](https://github.com/dklasens/MU5250-OpenUI/releas
 | macOS 15+ · Intel | `x64.dmg` | `x86_64.app.zip` |
 | Windows x64 | `x64-setup.exe` | MSI for managed installation; portable ZIP |
 
-**v2.4 signing:** Mac packages are ad-hoc signed and not Apple-notarized. Windows
+**Signing:** Mac packages are ad-hoc signed and not Apple-notarized. Windows
 packages are unsigned. The operating system may show an unverified-publisher
 warning. Download only from the linked project release and verify its checksums.
 
@@ -157,7 +157,7 @@ Do not put certificates or passwords in source or issue comments.
 
 ## Wireframes
 
-[View the v2.6 installer wireframes](../docs/INSTALLER-WIREFRAMES.md). They render
+[View the v1.0 installer wireframes](../docs/INSTALLER-WIREFRAMES.md). They render
 the actual React interface through a separate sample-only bridge, which is not
 included in the desktop bundle.
 

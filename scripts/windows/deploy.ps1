@@ -3,7 +3,7 @@
 Updates a modem that runs OpenUI to the release matching this checkout, from Windows.
 
 .DESCRIPTION
-A checkout at version 2.6.0 deploys release v2.6. The script downloads the release
+A checkout at version 1.0.0 deploys release v1.0. The script downloads the release
 files from GitHub and checks them against sha256sums.txt, prepares the geo data,
 and runs scripts/deploy-components.py twice: a dry run, then, once you agree,
 the deployment. The modem keeps its agent password and PIN, and components it

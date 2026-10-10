@@ -238,7 +238,7 @@ mod tests {
     #[test]
     fn rejects_unreviewed_payload_protocol_versions() {
         assert!(compatible_release(&format!("v{}", env!("CARGO_PKG_VERSION"))).is_ok());
-        for tag in ["v999.0", "v1.0", "v2.4-beta", "../../payload", "v2", ""] {
+        for tag in ["v999.0", "v0.9", "v2.4-beta", "../../payload", "v2", ""] {
             assert!(compatible_release(tag).is_err());
         }
     }
