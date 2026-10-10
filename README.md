@@ -234,7 +234,7 @@ original reference archive.
 Each part keeps its authors' copyright:
 - OpenUI: David Klasens and Jesther Silvestre;
 - the fork this project continues: ZweiChen;
-- this repository's additions: their contributors.
+- this repository's additions: acloudpeng.
 
 | Component | License |
 | --- | --- |
