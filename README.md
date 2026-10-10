@@ -1,30 +1,19 @@
-> **MU5250-OpenUI-Clash** — private fork of
-> [czwstc/MU5250-Wireguard](https://github.com/czwstc/MU5250-Wireguard) targeting
-> CN B31, adding a Clash.Meta (FlClash branch) proxy backend that is mutually
-> exclusive with WireGuard. Development plan: [docs/PLAN.md](docs/PLAN.md);
-> building and deploying the core: [docs/CLASH.md](docs/CLASH.md).
-> **Executing agent? Start at [docs/AI-OPERATIONS.md](docs/AI-OPERATIONS.md)** —
-> machine-readable procedure for unlock, deploy, verification and firmware
-> updates, including the hard-won host-side hazards.
-> Everything below is the upstream README.
+# U60Pro-OpenUI
 
-# MU5250-OpenUI-Wireguard
+OpenUI for the **ZTE U60 Pro (MU5250)** on CN B31 firmware. It adds three things to
+the stock firmware:
 
-**OpenUI with WireGuard for the ZTE U60 Pro (MU5250).**
+- a web dashboard;
+- a touchscreen panel;
+- eSIM profile management.
 
-**Author: ZweiChen**
+It continues [MU5250-OpenUI](https://github.com/dklasens/MU5250-OpenUI) and the work
+listed under [Acknowledgements](#acknowledgements).
 
-This project is a full fork of [MU5250-OpenUI](https://github.com/dklasens/MU5250-OpenUI)
-with an integrated WireGuard gateway and a Chinese / English DevUI touchscreen menu
-that follows the web panel's language.
-It retains OpenUI's Home, Signal, Network, Modem and System pages, existing login,
-Rust agent and deployment workflow. WireGuard and Clash share the **Proxy** entry in the left sidebar,
-between Network and Modem: choose which one is on (or neither) at the top of the page, then configure each below.
-
-| Management service | Address |
+| Service | Address |
 | --- | --- |
-| OpenUI dashboard | `http://192.168.0.1:8080/` |
-| Authenticated OpenUI API | `http://192.168.0.1:9090/` |
+| Dashboard | `http://192.168.0.1:8080/` |
+| Authenticated API | `http://192.168.0.1:9090/` |
 
 ## Device
 
@@ -37,102 +26,95 @@ between Network and Modem: choose which one is on (or neither) at the top of the
 | ----------- | ----------------------------------------- |
 | **CPU** | 4x Cortex-A55 (ARMv8.2-A) @ 2.2 GHz |
 
-These are the target device details supplied by the project owner. They do not
+These are the details of the device the project is developed on. They do not
 establish compatibility with other models, hardware revisions or firmware.
+
+## Features
+
+- **Dashboard.** It covers:
+  - home status;
+  - signal, with band and cell controls;
+  - Wi-Fi and router settings, and clients;
+  - APN profiles, SMS, data usage and TTL;
+  - battery controls, logging and system information.
+
+  It is in Simplified Chinese by default, with an English switch. See the
+  [dashboard documentation](docs/DASHBOARD.md).
+- **eSIM.** Manage the profiles on a removable eUICC card (9eSIM, 5ber, eSTK.me and
+  similar) in the SIM tray, as EasyEUICC does on Android.
+  - On the web page: switch, rename and delete profiles, download them from an
+    activation code or a QR image, and handle notifications.
+  - On the touchscreen: switch profiles.
+
+  It uses lpac. See the [eSIM documentation](docs/ESIM.md).
+- **Touchscreen panel (DevUI).** A menu on the device's 320×480 screen, in the
+  dashboard's language. It shows up to four pages, such as the battery and system
+  overview and eSIM. See the [screen documentation](docs/SCREEN.md).
+- **Checked updates.** Each deployment does the following:
+  - verifies the device and every file's checksum;
+  - keeps a snapshot of the previous installation;
+  - restores it if a step fails.
+
+  On Windows, a double-click updates the device to a release.
 
 ## DevUI quick start
 
-1. Open **DevUI** in the OpenUI sidebar and select **Open DevUI screen**.
+1. Open **DevUI** in the dashboard sidebar and select **Open DevUI screen**.
 2. Short-press the power button to sleep or wake the display.
-3. To enter from stock UI, enable **Press four times to open DevUI** and save.
+3. To enter from the stock UI, enable **Press four times to open DevUI** and save.
    Make four short presses within 2.5 seconds, with gaps no longer than 0.7 seconds.
 4. Set brightness, idle return (30–600 seconds), startup page and visible menu
-   features on the same webpage. Save to apply display and menu changes live;
-   the startup page applies on the next opening.
+   features on the same webpage. Saving applies display and menu changes live;
+   the startup page applies the next time DevUI opens.
 
 The shortcut is off by default on new installations. Factory long-press handling
-remains available. Stock UI and Back are always accessible; exiting DevUI leaves
-WireGuard and saved routing intact. The Overview page uses a battery icon, a large
-percentage and a low-battery color. The screen uses the language chosen in the web
-panel (Chinese by default). See [DevUI details](docs/SCREEN.md).
+remains available, and Stock UI and Back are always accessible. Leaving DevUI does
+not affect the network. See [DevUI details](docs/SCREEN.md).
 
-## Screenshots
+## Install and update
 
-Actual browser captures of this fork, using **synthetic demo data**. The endpoint,
-client names, MAC addresses and traffic values below are examples, not a live VPN
-measurement or private device information.
+The steps below update a modem that already runs OpenUI, with SSH on port 2222. To
+unlock a device and install OpenUI for the first time, read
+[docs/SAFETY.md](docs/SAFETY.md), then [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
-![WireGuard settings (captured before WireGuard moved under Proxy)](docs/images/wireguard-sidebar.png)
+### Windows: one step
 
-![DevUI screen settings](docs/images/devui-settings.png)
+On Windows 10 or 11, double-click `deploy-windows.cmd` in a checkout of this
+repository. It updates the modem to the release that matches the checkout; for
+example, version 2.6.0 deploys v2.6. It does the following:
 
-![DevUI menu feature settings](docs/images/devui-features.png)
+1. Finds Python 3.10 or newer and the OpenSSH client. If Python is missing, it offers
+   to install it with winget.
+2. Downloads the release files from GitHub and checks them against `sha256sums.txt`.
+   To use a folder you downloaded yourself instead, pass `-AssetsDir`.
+3. Downloads the geo databases (`scripts/prepare-geodata.py`).
+4. Runs `scripts/deploy-components.py` as a dry run, asks, then deploys. The modem
+   keeps its agent password and PIN, and components it already has are left out.
+5. If the screen program changed, runs the touchscreen check
+   (`scripts/verify-screen.py`, about three minutes).
 
-The small-screen images below are generated by the DevUI/litehtml renderer
-with sample data. They show the logical upright view; the physical framebuffer
-and touch coordinates are rotated **180°** for the U60's display orientation.
+The first run asks for the modem address and SSH key (default `192.168.0.1` and
+`~\.ssh\id_ed25519`). The script remembers them in `build\windows-deploy.json`. For the
+options, run `Get-Help .\scripts\windows\deploy.ps1 -Detailed`. The Python tools
+below also run directly on Windows.
 
-| DevUI menu | Battery and device overview |
-| --- | --- |
-| ![DevUI menu preview](docs/images/screen-menu.png) | ![DevUI overview preview](docs/images/screen-overview.png) |
+### Releases
 
-| Saved profiles | Device routing |
-| --- | --- |
-| ![DevUI profiles preview](docs/images/screen-profiles.png) | ![DevUI device routing preview](docs/images/screen-devices.png) |
+Each [release](https://github.com/acloudpeng/U60Pro-OpenUI/releases) lists its files
+and their SHA-256 checksums. Deploy them with `scripts/deploy-components.py` from a
+checkout of the same version, as shown below.
 
-## WireGuard features
+The desktop installers attached to releases come from upstream OpenUI. They download
+upstream packages and would overwrite this project's additions, so do not use them
+here.
 
-- Save up to **5 named WireGuard client configurations**; import `.conf` files,
-  switch the active profile, rename or delete entries through OpenUI. Device
-  routing choices are shared across profiles. Existing configuration is retained.
-- Send all current and future LAN devices through WireGuard, with individual MAC
-  exclusions; or enable the tunnel only for checked devices.
-- Retain and edit saved offline device selections. Save changes as a batch.
-- Show tunnel state, recent handshake, traffic counters, endpoint and MTU.
-  A recent handshake does not establish that internet access works.
-- Keep configuration private: the API never returns the saved private key or PSK.
-- Open the device's 320×480 touchscreen panel from its own **DevUI** sidebar page. The DevUI menu
-  shows up to four of Overview, Proxy (Off / WireGuard / Clash and diagnostics), WireGuard, Clash
-  (mode, nodes and delay tests, subscriptions, core and geo updates), eSIM (switch profiles), Saved
-  profiles and Device routing.
-  View status, toggle the tunnel, and change device selections without handling keys.
-- Restore the stock display and touch services on exit, the configured idle timeout (two minutes by default),
-  or a panel failure detected by its supervisor. Exiting the panel preserves routing.
-- Check configuration revisions so webpage and touchscreen edits cannot silently
-  overwrite each other.
+### Build from this repository
 
-- Manage the profiles on a removable eUICC card (9eSIM, 5ber, eSTK.me) in the SIM tray, as
-  EasyEUICC does on Android: switch, rename, delete, download by activation code or QR image,
-  and notifications, from the web page; switch from the touchscreen. Uses lpac. See
-  [eSIM documentation](docs/ESIM.md).
-
-The rest of OpenUI is retained: modem signal and band/cell controls, Wi-Fi and
-router settings, clients, APN, SMS, battery controls, logging and system information.
-See [dashboard documentation](docs/DASHBOARD.md).
-
-## Routing behavior
-
-This version manages one **kernel WireGuard IPv4 tunnel**. It needs root access,
-WireGuard support in the existing firmware, iproute2, iptables/ip6tables and `wg`.
-The router's own traffic keeps its normal WAN route.
-
-Checked devices use the tunnel. Unchecked devices keep normal network access.
-Selected clients' IPv6 internet traffic and IPv6 DNS to the router are blocked
-because this implementation does not tunnel IPv6. IPv4 DNS is sent through the
-tunnel. Local management remains accessible. Changing a policy briefly pauses
-forwarded LAN traffic while the rules are replaced; reconnect existing client
-applications after changing their route.
-
-When installed tunnel policy is active, a failed peer does not cause selected
-traffic to fall back to WAN. Turning WireGuard off intentionally restores normal
-routing. Boot and stock-firewall reload intervals are **not** guaranteed to retain
-this blocking policy. See [WireGuard behavior and recovery](docs/WIREGUARD.md).
-
-## Build from this repository
-
-Requires Rust with the `aarch64-unknown-linux-musl` target, `cargo-zigbuild`,
-Zig 0.14.1, Python 3, and Node.js `^20.19.0 || >=22.12.0` with npm.
-Install/configure these development tools before running:
+Requires the following:
+- Rust with the `aarch64-unknown-linux-musl` target, and `cargo-zigbuild`;
+- Zig 0.14.1;
+- Python 3;
+- Node.js `^20.19.0 || >=22.12.0` with npm.
 
 ```sh
 cargo zigbuild --locked --release -p zte-agent --target aarch64-unknown-linux-musl
@@ -142,20 +124,15 @@ npm run build
 cd ..
 mkdir -p build
 tar czf build/dashboard-dist.tar.gz -C web-app/dist .
-python3 scripts/prepare-wireguard.py --output build/wireguard/wg
 ZIG=/path/to/zig sh screen/build.sh
 ZIG=/path/to/zig python3 scripts/prepare-lpac.py
 ```
 
-The `wg` preparer downloads a checksum-pinned official OpenWrt package and
-extracts only the CLI. The screen build fetches checksum-pinned litehtml, FreeType and GNU Unifont.
-The lpac build fetches the checksum-pinned lpac v2.3.0 source and verifies the result's checksum.
-None of these commands contacts or changes your modem.
+The screen build fetches checksum-pinned litehtml, FreeType and GNU Unifont. The lpac
+build fetches the checksum-pinned lpac v2.3.0 source and verifies the checksum of the
+result. None of these commands contacts or changes your modem.
 
-### Update an existing OpenUI installation
-
-Use your existing root SSH access and this repository's locally built components.
-This updates OpenUI itself; it does not start a separate management application.
+### Deploy with deploy-components.py
 
 ```sh
 python3 scripts/deploy-components.py \
@@ -163,44 +140,38 @@ python3 scripts/deploy-components.py \
   --ssh-key '/path/to/id_ed25519' \
   --agent target/aarch64-unknown-linux-musl/release/zte-agent \
   --dashboard build/dashboard-dist.tar.gz \
-  --wireguard-tools build/wireguard/wg \
   --screen build/screen/openui-screen \
   --lpac build/lpac/lpac \
+  --keep-credentials \
   --dry-run
 ```
 
-Enter your **existing OpenUI agent password** when prompted. If you use a PIN,
-provide the existing `ZTE_AGENT_PIN` environment value as well: this script renders
-the startup credentials from these inputs, and an omitted PIN disables PIN login.
-Do not put credentials in a committed file. Review the dry-run result, then repeat
-without `--dry-run` to deploy through OpenUI's snapshot and rollback flow.
-Restore the stock screen before replacing the screen binary.
+- `--keep-credentials` keeps the agent password and PIN that the modem already has.
+  Without it, the script asks for the password. Pass the PIN in `ZTE_AGENT_PIN`; an
+  omitted PIN turns PIN login off.
+- `--skip-unchanged` leaves out components already installed at the same checksum.
+- Review the dry-run result, then repeat without `--dry-run`. The deployment goes
+  through OpenUI's snapshot and rollback flow.
+- Restore the stock screen before replacing the screen program.
 
-After installation, run the supervised recovery verification before enabling the
-webpage's screen entry:
+After installation, run the supervised recovery check before using the webpage's
+screen entry:
 
 ```sh
 python3 scripts/verify-screen.py --gateway 192.168.0.1 \
   --port 2222 --ssh-key '/path/to/id_ed25519'
 ```
 
-This verification temporarily takes over the physical display and tests normal,
-idle, crash and stalled-panel recovery. Short-press the power button to turn the
-DevUI backlight off or wake it; touch actions are ignored while dark. The existing
-configured idle return still applies (two minutes by default). Long presses remain with the factory handler. Details: [screen documentation](docs/SCREEN.md).
-
-The inherited desktop installer and upstream release downloads are retained as
-OpenUI tooling; they are **not release packages for this fork's WireGuard feature**.
-An upstream installer/update can overwrite the additions. Use the source build
-and component deployment above for this fork. For devices without working OpenUI
-or SSH, consult [upstream setup and firmware compatibility](docs/DEPLOYMENT.md).
+The check temporarily takes over the display, and tests normal, idle, crash and
+stalled-panel recovery. See [docs/SCREEN.md](docs/SCREEN.md) and
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the other components and options.
 
 ## Local demo and checks
 
 Run these in two terminals:
 
 ```sh
-python3 web-app/tools/mock_agent.py --port 19090 --wireguard-demo
+python3 web-app/tools/mock_agent.py --port 19090
 ```
 
 ```sh
@@ -210,9 +181,8 @@ npm run demo
 ```
 
 Open the Vite URL and sign in with any nonempty demo password. Both development
-servers should remain on loopback. The mock holds data only in memory and does
-not contact the device. Production builds use the normal device API on `9090`
-and do not include the demo banner or demo API address.
+servers stay on loopback. The mock holds data only in memory and does not contact
+the device.
 
 ```sh
 cargo test --locked -p zte-agent -p process-runner
@@ -226,59 +196,56 @@ cd ..
 sh screen/build.sh --preview
 ```
 
-The agent, dashboard and DevUI screen were deployed to the target B31 device on
-2026-09-14. Checks verified matching artifact hashes, unchanged login settings,
-saved profiles and device routing. The real-device screen tests passed short
-Atomic takeover, crash recovery, stalled-child recovery, duplicate web opens,
-web close and the default 120-second idle return to the stock UI. The local
-socket returned two saved profiles, three devices and a system overview.
-WireGuard remained off; this update did not test live VPN egress. Local Rust,
-Python and frontend checks passed, along with DevUI rendering and actual HTML
-hit tests for profile switching, device paging, drafts and disabled states.
-Deployment recovery snapshots are retained on the device.
+## Documentation
 
-The DevUI settings update was verified on the same B31 device: live brightness
-changes, revision conflicts, private settings storage, configurable 30-second
-idle return and the default 120-second recovery path passed. The device owner
-confirmed that **four short power-button presses open DevUI and the first frame
-appears immediately without touching the screen**. The shortcut is enabled on
-the test device; new installations still default to disabled. Project documentation
-is in English. The web panel is bilingual: Simplified Chinese by default,
-with an English switch (see [DASHBOARD.md](docs/DASHBOARD.md#language)).
+- [Deployment](docs/DEPLOYMENT.md): unlock, install, update and recovery
+- [Safety](docs/SAFETY.md): rules that keep the device recoverable
+- [Dashboard](docs/DASHBOARD.md), [touchscreen panel](docs/SCREEN.md) and [eSIM](docs/ESIM.md)
+- [Agent API](docs/AGENT.md)
+- [AI operations](docs/AI-OPERATIONS.md): the procedure for automated agents working
+  on a device
 
 ## Acknowledgements
 
-- [dklasens/MU5250-OpenUI](https://github.com/dklasens/MU5250-OpenUI) — the OpenUI
-  backend, dashboard, installer and deployment foundation used by this fork.
-- [jesther-ai/open-u60-pro](https://github.com/jesther-ai/open-u60-pro) — the original
-  open U60 project and device access work on which OpenUI is based.
-- [amenekowo/mu5250_tweaking](https://github.com/amenekowo/mu5250_tweaking) — MU5250
-  hardware research and the Atomic DRM example used for the touchscreen component.
+- [dklasens/MU5250-OpenUI](https://github.com/dklasens/MU5250-OpenUI): the OpenUI
+  backend, dashboard, installer and deployment foundation.
+- [ZweiChen](https://github.com/czwstc): the fork this project continues, including the
+  bilingual touchscreen menu.
+- [jesther-ai/open-u60-pro](https://github.com/jesther-ai/open-u60-pro): the original
+  open U60 project and the device access work that OpenUI is based on.
+- [amenekowo/mu5250_tweaking](https://github.com/amenekowo/mu5250_tweaking): MU5250
+  hardware research, and the Atomic DRM example used for the touchscreen panel.
+- [33333s/u60pro-devui](https://github.com/33333s/u60pro-devui): the HTML/CSS RGB565
+  renderer used by the DevUI menu.
+- [scoltzero/u60pro-devui-remix](https://github.com/scoltzero/u60pro-devui-remix): a
+  reference for device controls in the touchscreen menu.
+- [estkme-group/lpac](https://github.com/estkme-group/lpac) and
+  [OpenEUICC](https://gitea.angry.im/PeterCxy/OpenEUICC): the eSIM LPA this project
+  runs, and the app whose features its eSIM page follows.
+- [SadykovIV/ZTE_U60Pro](https://github.com/SadykovIV/ZTE_U60Pro): the eSIM switching
+  sequence verified on B31.
 
-- [u60pro-devui by 33333s](https://github.com/33333s/u60pro-devui) — the
-  HTML/CSS RGB565 renderer used by the DevUI menu. We retain our Atomic display,
-  touch handling, supervisor and OpenUI agent instead of its device service scripts.
-- [scoltzero/u60pro-devui-remix](https://github.com/scoltzero/u60pro-devui-remix) —
-  reference for putting VPN controls in a device menu; its UFI-TOOLS WireGuard
-  backend is not used.
-
-Thanks also to litehtml, FreeType, GNU Unifont and the WireGuard project. Original author and license
-notices are preserved; no ZTE firmware, private configuration or original reference
-archive is included in this repository.
+Thanks also to litehtml, FreeType and GNU Unifont. Original author and license notices
+are preserved. This repository includes no ZTE firmware, private configuration or
+original reference archive.
 
 ## Copyright and licenses
 
-Copyright © 2026 **ZweiChen** for this fork's additions.
-Existing contributions retain their original authors' copyrights.
+Each part keeps its authors' copyright:
+- OpenUI: David Klasens and Jesther Silvestre;
+- the fork this project continues: ZweiChen;
+- this repository's additions: their contributors.
 
 | Component | License |
 | --- | --- |
 | OpenUI agent, dashboard and general tooling | [MIT](LICENSE), preserving David Klasens and Jesther Silvestre notices |
 | Separate native screen program and adapted DRM code | [GPL-3.0-or-later](screen/LICENSE) |
 | Embedded GNU Unifont OTF | [SIL Open Font License 1.1](screen/FONT-LICENSE) |
+| lpac, the separate eSIM program | [AGPL-3.0-only](licenses/lpac/), with libeuicc LGPL-2.1-only and cJSON MIT |
 | Dependencies and downloaded tools | Their respective upstream licenses |
 
-See [NOTICE](NOTICE), [screen notices](screen/NOTICE) and [preserved upstream
-licenses](licenses/). The root MIT license does not relicense GPL screen code or
+See [NOTICE](NOTICE), the [screen notices](screen/NOTICE) and the [preserved upstream
+licenses](licenses/). The root MIT license does not relicense the GPL screen code or
 third-party fonts. Distributing the GPL screen executable requires its corresponding
-source and applicable notices; the screen source and build scripts are provided here.
+source and the applicable notices; the screen source and build scripts are in this
+repository.

@@ -392,3 +392,9 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
     - 触摸屏占用、私钥错误（且不会记住）、设备不可达、发布文件被改、取消，每种情况设备都不变；
     - CRLF 检出部署后设备上的脚本是 LF。
   - Windows 本身（PowerShell 5.1、winget、ssh.exe）的完整流程只能在用户电脑上验证。
+
+### 2026-10-10 — 仓库公开
+- 仓库设为公开，改名为 `U60Pro-OpenUI`（GitHub 会把旧地址跳转到新地址）。`deploy.ps1` 的默认仓库已同步。
+- README 重写为公开首页：控制台、触摸屏、eSIM、安装与更新、文档、致谢和许可。截图仍在 `docs/images/`，首页不再引用。
+- 发布页只保留 v2.6，说明按新首页改写；v2.4、v2.5 的发布已删除，标签保留。
+- 一键更新改为直接从公开的发布页下载，不再需要 GitHub CLI 和登录。
