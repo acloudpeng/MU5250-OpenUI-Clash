@@ -1,17 +1,18 @@
-MU5250-OpenUI-Wireguard
-Copyright (c) 2026 ZweiChen.
+U60Pro-OpenUI
+Copyright (c) 2026 acloudpeng
+Copyright (c) 2026 ZweiChen
 
-This project is a fork of MU5250-OpenUI, with integrated WireGuard gateway
-and touchscreen controls. It uses OpenUI's existing authentication, API,
-deployment flow and management interface. It is not an independent VPN app.
+This project builds on MU5250-OpenUI and ZweiChen's fork of it, for the ZTE U60 Pro
+(MU5250): a touchscreen panel, eSIM management and deployment tooling. It uses
+OpenUI's existing authentication, API, deployment flow and management interface.
 
 MIT-licensed OpenUI components retain their original notices:
 Copyright (c) 2026 David Klasens
 Copyright (c) 2025-present Jesther Silvestre (portions from open-u60-pro).
 See LICENSE and licenses/ for the preserved texts.
 Source: https://github.com/dklasens/MU5250-OpenUI
-Base checkout: fabaf8b53678dc50e3c3fa2fa3de8b51061967cc, with local WireGuard
-and screen additions included. Source copied on 2026-09-13.
+Base checkout: fabaf8b53678dc50e3c3fa2fa3de8b51061967cc, with local additions
+included. Source copied on 2026-09-13.
 
 The separately built screen/panel.c and screen/qpic.h are GPL-3.0-or-later,
 including adapted DRM code from https://github.com/amenekowo/mu5250_tweaking.
@@ -33,3 +34,7 @@ program under AGPL-3.0-only (libeuicc LGPL-2.1-only, cJSON MIT); see licenses/lp
 The MIT-licensed agent starts it and talks to it over standard input and output.
 The dashboard's QR decoder is jsQR (Apache-2.0), shipped with its licence.
 The eSIM root certificates in agent/certs/ are the public GSMA CI certificates.
+
+The core program attached to releases as `mihomo` is GPL-3.0. scripts/prepare-mihomo.py
+names the source repository and commit it is built from, and the changes in
+scripts/mihomo-patches/ are GPL-3.0 as well; the root MIT license does not relicense them.
