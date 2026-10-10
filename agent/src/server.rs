@@ -1,5 +1,4 @@
 use crate::process::BoundedCommand;
-use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -46,7 +45,7 @@ pub fn start(threads: usize, state: Arc<AppState>) {
     loop {
         let bind = state.binding.address();
         let generation = state.binding.generation.load(Ordering::Acquire);
-        let server = match listen(&bind) {
+        let server = match Server::http(&bind) {
             Ok(s) => {
                 retry = RETRY_MIN;
                 Arc::new(s)
@@ -147,102 +146,6 @@ fn is_lan_origin(origin: &str) -> bool {
         || (octets[0] == 192 && octets[1] == 168)
 }
 
-/// Longest pause a core upload may make between reads.
-const UPLOAD_STALL: Duration = Duration::from_secs(60);
-
-/// Accepted connections inherit keepalive from the listener, so a client that vanished
-/// without closing (out of Wi-Fi range, powered off) errors out of a blocked read after
-/// about a minute; tiny_http sets no timeouts. Read timeouts cannot go on the listener:
-/// they would also time out tiny_http's accept loop.
-fn listen(bind: &str) -> Result<Server, Box<dyn std::error::Error + Send + Sync + 'static>> {
-    let listener = std::net::TcpListener::bind(bind)?;
-    let fd = listener.as_raw_fd();
-    for (level, option, value) in [
-        (libc::SOL_SOCKET, libc::SO_KEEPALIVE, 1),
-        (libc::IPPROTO_TCP, libc::TCP_KEEPIDLE, 30),
-        (libc::IPPROTO_TCP, libc::TCP_KEEPINTVL, 10),
-        (libc::IPPROTO_TCP, libc::TCP_KEEPCNT, 3),
-    ] {
-        let value: libc::c_int = value;
-        // SAFETY: fd is the listener's open socket and value outlives the call.
-        unsafe {
-            libc::setsockopt(
-                fd,
-                level,
-                option,
-                &value as *const libc::c_int as *const libc::c_void,
-                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
-            );
-        }
-    }
-    Server::from_listener(listener, None)
-}
-
-/// Bounds how long reads on the connection from `peer` may stall. tiny_http hides the
-/// socket, so find it among this process's descriptors by its peer address.
-fn limit_read_stall(peer: std::net::SocketAddr, stall: Duration) {
-    let Ok(entries) = std::fs::read_dir("/proc/self/fd") else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let Some(fd) = entry
-            .file_name()
-            .to_str()
-            .and_then(|n| n.parse::<i32>().ok())
-        else {
-            continue;
-        };
-        let socket = std::fs::read_link(entry.path())
-            .is_ok_and(|target| target.to_string_lossy().starts_with("socket:"));
-        if socket && peer_of(fd) == Some(peer) {
-            let timeout = libc::timeval {
-                tv_sec: stall.as_secs() as libc::time_t,
-                tv_usec: 0,
-            };
-            // SAFETY: fd is an open socket of this process and timeout outlives the call.
-            unsafe {
-                libc::setsockopt(
-                    fd,
-                    libc::SOL_SOCKET,
-                    libc::SO_RCVTIMEO,
-                    &timeout as *const libc::timeval as *const libc::c_void,
-                    std::mem::size_of::<libc::timeval>() as libc::socklen_t,
-                );
-            }
-            return;
-        }
-    }
-}
-fn peer_of(fd: i32) -> Option<std::net::SocketAddr> {
-    // SAFETY: getpeername writes at most `len` bytes into the zeroed storage.
-    let mut storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
-    let mut len = std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
-    let ok = unsafe {
-        libc::getpeername(
-            fd,
-            &mut storage as *mut libc::sockaddr_storage as *mut libc::sockaddr,
-            &mut len,
-        )
-    } == 0;
-    if !ok {
-        return None;
-    }
-    // SAFETY: ss_family says which sockaddr type the kernel wrote.
-    match storage.ss_family as i32 {
-        libc::AF_INET => {
-            let a = unsafe { &*(&storage as *const _ as *const libc::sockaddr_in) };
-            let ip = std::net::Ipv4Addr::from(u32::from_be(a.sin_addr.s_addr));
-            Some((ip, u16::from_be(a.sin_port)).into())
-        }
-        libc::AF_INET6 => {
-            let a = unsafe { &*(&storage as *const _ as *const libc::sockaddr_in6) };
-            let ip = std::net::Ipv6Addr::from(a.sin6_addr.s6_addr);
-            Some((ip, u16::from_be(a.sin6_port)).into())
-        }
-        _ => None,
-    }
-}
-
 fn handle_request(mut request: Request, state: &AppState) {
     let method = request.method().clone();
     let url = request.url().to_string();
@@ -322,19 +225,14 @@ fn handle_request(mut request: Request, state: &AppState) {
         }
     }
 
-    // A core upload streams to disk instead of through the 1 MiB body buffer below. It is
-    // refused before its body is accepted, and a sender that stops mid-way (a phone going
-    // to sleep) must not hold this worker and the core job forever.
+    // A core upload streams to disk instead of through the 1 MiB body buffer below, and is
+    // refused before its body is accepted. The patched tiny_http times out a sender that
+    // stops mid-way, which ends the upload job.
     if let (&Method::Put, "/api/clash/core/upload") = (&method, path.as_str()) {
         let length = request.body_length().map(|n| n as u64);
         let (status, body_json) = match clash_core::upload_rejection(length) {
             Some(rejected) => rejected,
-            None => {
-                if let Some(peer) = request.remote_addr().copied() {
-                    limit_read_stall(peer, UPLOAD_STALL);
-                }
-                clash_core::upload(request.as_reader(), length)
-            }
+            None => clash_core::upload(request.as_reader(), length),
         };
         respond(request, status, body_json, origin_ref);
         return;
@@ -771,19 +669,51 @@ fn respond(request: Request, status: u16, body: Value, origin: Option<&str>) {
 mod tests {
     use super::is_at_command_allowed;
 
+    /// One request to a real tiny_http server on loopback; returns the raw reply.
+    fn exchange(raw: &[u8], respond: fn(tiny_http::Request)) -> String {
+        use std::io::{Read, Write};
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let addr = server.server_addr().to_ip().unwrap();
+        let handler = std::thread::spawn(move || {
+            if let Ok(Some(request)) = server.recv_timeout(std::time::Duration::from_secs(2)) {
+                respond(request);
+            }
+        });
+        let mut client = std::net::TcpStream::connect(addr).unwrap();
+        client
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        client.write_all(raw).unwrap();
+        client.shutdown(std::net::Shutdown::Write).unwrap();
+        let mut reply = Vec::new();
+        let _ = client.read_to_end(&mut reply);
+        handler.join().unwrap();
+        String::from_utf8_lossy(&reply).into_owned()
+    }
     #[test]
-    fn a_stalled_upload_connection_times_out() {
-        use std::io::Read;
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
-        let (mut accepted, peer) = listener.accept().unwrap();
-        assert_eq!(peer, client.local_addr().unwrap());
-        super::limit_read_stall(peer, std::time::Duration::from_secs(1));
-        let started = std::time::Instant::now();
-        let mut buf = [0u8; 8];
-        assert!(accepted.read(&mut buf).is_err(), "the read must time out");
-        assert!(started.elapsed() < std::time::Duration::from_secs(5));
-        drop(client);
+    fn a_huge_content_length_is_not_allocated() {
+        // Unpatched tiny_http allocated the whole remaining length when the body was left
+        // unread, aborting the agent.
+        let raw = b"POST /x HTTP/1.1\r\nHost: a\r\nContent-Length: 999999999999999\r\n\r\nabc";
+        let reply = exchange(raw, |request| {
+            let _ = request.respond(tiny_http::Response::empty(413));
+        });
+        assert!(reply.starts_with("HTTP/1.1 413"), "{reply}");
+    }
+    #[test]
+    fn header_lines_and_counts_are_bounded() {
+        let long = format!(
+            "GET /x HTTP/1.1\r\nX-Long: {}\r\n\r\n",
+            "a".repeat(64 * 1024)
+        );
+        assert_eq!(exchange(long.as_bytes(), |_| panic!("served")), "");
+        let many: String = (0..200).map(|i| format!("X-{i}: 1\r\n")).collect();
+        let raw = format!("GET /x HTTP/1.1\r\n{many}\r\n");
+        assert!(exchange(raw.as_bytes(), |_| panic!("served")).starts_with("HTTP/1.1 400"));
+        let ok = exchange(b"GET /x HTTP/1.1\r\nHost: a\r\n\r\n", |request| {
+            let _ = request.respond(tiny_http::Response::empty(204));
+        });
+        assert!(ok.starts_with("HTTP/1.1 204"), "{ok}");
     }
 
     #[test]

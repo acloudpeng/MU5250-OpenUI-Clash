@@ -21,3 +21,8 @@ and screen/FONT-COPYING. Dependencies retain their own respective licenses.
 
 The DevUI renderer is adapted from 33333s/u60pro-devui (MIT); its copyright
 and dependency licenses are preserved in screen/THIRD-PARTY-LICENSES.
+
+vendor/tiny_http is tiny_http 0.12.0 (https://github.com/tiny-http/tiny-http,
+MIT OR Apache-2.0; its license texts are kept in that directory) with resource
+limits added for the agent's HTTP server. The changes are listed in
+vendor/tiny_http/OPENUI-PATCH.md and marked in each modified file.

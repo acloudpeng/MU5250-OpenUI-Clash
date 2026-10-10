@@ -1,6 +1,12 @@
 [workspace]
 members = ["agent", "installer/src-tauri", "process-runner"]
+exclude = ["vendor"]
 resolver = "2"
+
+# tiny_http with bounded body drains, header limits and connection timeouts; see
+# vendor/tiny_http/OPENUI-PATCH.md.
+[patch.crates-io]
+tiny_http = { path = "vendor/tiny_http" }
 
 [profile.release]
 opt-level = "z"

@@ -276,3 +276,12 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
   状态刷新拆成三个线程，WG 锁被占用时屏幕不再变灰。
 - 验证：agent 测试、`screen/build.sh --preview` 新页面中英文点按测试（触控区 ≥48×48、翻页、对话框、代数过期、标志转换、最大页面 5220 字节、状态 23 KB）；
   zig 0.14.1 交叉编译 aarch64 通过。**未在真机运行**：部署屏幕后需跑 `verify-screen.py` 并手动走一遍。
+
+### 2026-10-10 — agent HTTP 服务：tiny_http 资源上限
+- 问题（原有，审查时发现）：tiny_http 0.12 丢弃未读完的请求体时按剩余 `Content-Length` 一次分配内存，局域网内任何客户端
+  （无需登录）发一个声称几 TB 的请求就能让 agent 崩溃；请求行/请求头长度和数量也没有上限；连接没有读写超时，停发数据的客户端会一直占着线程。
+- 修复：`vendor/tiny_http`（0.12.0 原样 + 补丁，根 `Cargo.toml` 用 `[patch.crates-io]` 引入并排除出 workspace；说明见 `OPENUI-PATCH.md`）：
+  未读请求体按 8 KiB 分块丢弃、最多 1 MiB，超出则关闭连接；请求行和请求头单行 8 KiB、最多 100 个请求头；每个连接 60 秒读写超时
+  （空闲的长连接一分钟后关闭）。随之删掉 `server.rs` 里给上传连接单独设超时的绕路代码。`Cargo.lock` 只有 tiny_http 一项改为本地路径。
+- 验证：agent 新增回归测试（真实 socket：声称 999999999999999 字节的请求得到 413 而进程不崩；超长请求头行被断开、200 个请求头得到 400、正常请求不受影响）；
+  139 个测试、clippy、fmt 通过，`cargo check --target aarch64-unknown-linux-musl` 通过。
