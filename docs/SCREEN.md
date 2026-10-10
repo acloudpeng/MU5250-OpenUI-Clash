@@ -93,6 +93,12 @@ scripts or shell commands.
   - **Core & data:** installed, previous and latest core versions with their source,
     free space and job progress; **Check**, **Update**, **Roll back** and **Update GEO**
     (each change asks first and restarts a running core).
+- **eSIM:** the card in the SIM tray (eUICC, ordinary SIM or none), the running or last
+  eSIM job, and up to eight profiles, four per page, by name with the last four ICCID
+  digits; tap one to switch to it after a confirmation. **Read again** reads the card;
+  the page also reads it on entry until it has been read once. **Restart device** is
+  enabled only while a switch waits for the firmware, and asks first. Downloading,
+  renaming, deleting and notifications stay on the webpage. See [ESIM.md](ESIM.md).
 - **Saved profiles:** up to five named profiles. Switching preserves the current
   enable state and device routing; confirmation remembers the profile ID and
   WireGuard revision to prevent overwriting concurrent webpage edits.
@@ -168,12 +174,14 @@ python3 scripts/verify-devui-settings.py --gateway 192.168.0.1 --port 2222 \
   the DevUI revision, timeout, brightness, startup page, visible-page bitmask and
   language (`zh`/`en`; a record without it means Chinese). `C` only carries pages an
   older screen knows (with WireGuard, Proxy or Clash chosen it keeps the WireGuard, Saved
-  profiles and Device routing pages for them); `V` carries the full choice (pages 5 Proxy
-  and 6 Clash).
+  profiles and Device routing pages for them); `V` carries the choice for screens built
+  before eSIM (pages 5 Proxy and 6 Clash; the menu instead of an eSIM startup page); `W`
+  carries the full choice (page 7 eSIM). Each screen uses the newest record it accepts.
   Tab-separated proxy records follow: `B` (active backend, conflict, per-backend
   revision, readiness and reason code), `K` (Clash summary), `U` (subscriptions, no
   URLs), `M` (core versions and job), `X`/`x` (diagnostics verdict and checks) and `E`
-  (the agent's message for the last failed job). `J` ends with the newest job the
+  (the agent's message for the last failed job), `Q` and `q` (eSIM card, job and
+  profiles; no EID, only an ICCID's last four digits). `J` ends with the newest job the
   records already reflect. The reply stays under 40 KiB.
 - Queries `groups <offset>` and `nodes <gen> <group> <offset>` return four rows at a
   time from a proxies view the agent refreshes only while the screen asks; groups and
@@ -184,7 +192,9 @@ python3 scripts/verify-devui-settings.py --gateway 192.168.0.1 --port 2222 \
   `backend <rev> off <wireguard|clash>` (naming the backend the screen shows as on, so a
   switch made elsewhere meanwhile answers 409 instead of turning off the other one), `cmode`,
   `csub`, `crefresh`, `select`, `delay`, `core check|update <tag>|rollback|geodata`
-  and `diag`, plus the WireGuard `toggle`, `devices` and `profile` kept for older
+  `diag`, `esim scan`, `esim enable <generation> <index>` (a profile of the list the
+  screen shows; a newer list answers `ERR Stale`) and `esim reboot` (only while a switch
+  waits for a restart), plus the WireGuard `toggle`, `devices` and `profile` kept for older
   screens. Revisioned actions return 409 conflicts as "Settings changed". One job runs
   at a time; jobs execute in the agent and continue after screen exit. A job always
   reports a result, even if its thread fails; the screen stops waiting after 180 s

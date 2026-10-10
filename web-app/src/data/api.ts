@@ -16,6 +16,8 @@ import type {
   ClashConnections,
   ClashCore,
   ClashCoreAction,
+  EsimAction,
+  EsimStatus,
   ClashDiagnostics,
   ClashProxies,
   ClashStatus,
@@ -655,6 +657,11 @@ export const api = {
   clashDiagnose: () => req('POST', '/api/clash/diagnostics', undefined, undefined, 10_000).then(d => d as unknown as ClashDiagnostics),
   // Core and geo data updates: each action answers at once and runs as a job that
   // clashCore() reports; an upload streams the file (up to 64 MiB), then installs as one.
+  // eSIM on a removable eUICC: each action answers at once and runs as a job that esim() reports.
+  esim: () => get('/api/esim').then(d => d as unknown as EsimStatus),
+  esimAction: (body: EsimAction) => req('POST', '/api/esim', body).then(d => d as unknown as EsimStatus),
+  esimDelete: (iccid: string) =>
+    req('POST', '/api/esim/delete', { iccid }, { 'X-Confirm': 'true' }).then(d => d as unknown as EsimStatus),
   clashCore: () => get('/api/clash/core').then(d => d as unknown as ClashCore),
   clashCoreAction: (body: ClashCoreAction) => req('POST', '/api/clash/core', body).then(d => d as unknown as ClashCore),
   clashCoreUpload: (file: Blob, onProgress?: (sent: number, total: number) => void) =>

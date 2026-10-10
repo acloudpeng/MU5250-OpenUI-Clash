@@ -1,0 +1,47 @@
+name: lpac
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/prepare-lpac.py
+      - scripts/lpac-patches/**
+      - tests/lpac_stdio.py
+      - .github/workflows/lpac.yml
+  pull_request:
+    paths:
+      - scripts/prepare-lpac.py
+      - scripts/lpac-patches/**
+      - tests/lpac_stdio.py
+      - .github/workflows/lpac.yml
+  workflow_call:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      # The pinned lpac checksum holds for this Zig release only.
+      - name: Install Zig 0.14.1 (checksum-pinned)
+        run: |
+          curl -fsSL -o /tmp/zig.tar.xz https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz
+          echo "24aeeec8af16c381934a6cd7d95c807a8cb2cf7df9fa40d359aa884195c4716c  /tmp/zig.tar.xz" | sha256sum -c
+          tar xJf /tmp/zig.tar.xz -C /tmp
+          echo "ZIG=/tmp/zig-x86_64-linux-0.14.1/zig" >> "$GITHUB_ENV"
+      - name: Build pinned lpac (checksum-verified)
+        run: python3 scripts/prepare-lpac.py
+      - name: stdio drivers under qemu
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq qemu-user
+          version=$(python3 -c 'import runpy; print(runpy.run_path("scripts/prepare-lpac.py")["VERSION"])')
+          qemu-aarch64 build/lpac/lpac version | tee /dev/stderr | grep -qF "$version"
+          python3 tests/lpac_stdio.py build/lpac/lpac qemu-aarch64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lpac-linux-arm64
+          path: |
+            build/lpac/lpac
+            build/lpac/lpac.sha256
+          retention-days: 30

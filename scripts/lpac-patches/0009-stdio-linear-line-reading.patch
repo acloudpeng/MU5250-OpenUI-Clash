@@ -1,0 +1,119 @@
+Read stdio driver replies with getline() (OpenUI patch).
+
+afgets() appended one character at a time with strcat() and realloc(), so reading a
+line took time quadratic in its length. The reply carrying a bound profile package is
+hex of the SM-DP+ JSON, hundreds of kilobytes: 6 s for a 400 KB line on an x86 VM, far
+longer on the modem. lpac is built here only for Linux, where getline() is available.
+
+diff --git a/driver/apdu/stdio.c b/driver/apdu/stdio.c
+index 356d347..7decf05 100644
+--- a/driver/apdu/stdio.c
++++ b/driver/apdu/stdio.c
+@@ -10,42 +10,22 @@
+ #include <euicc/interface.h>
+ #include <lpac/utils.h>
+ 
+-// getline is a GNU extension, Mingw32 macOS and FreeBSD don't have (a working) one
++// One line from fp, without its newline. getline() is linear in the line length; the
++// portable loop it replaces appended one character at a time with strcat and realloc,
++// which took seconds for the hex of a bound profile package on the modem.
+ static int afgets(char **obuf, FILE *fp) {
+-    uint32_t len = 0;
+-    char buffer[2];
+-    char *obuf_new = NULL;
++    size_t capacity = 0;
+ 
+-    *obuf = malloc(1);
+-    if ((*obuf) == NULL) {
+-        goto err;
+-    }
+-    (*obuf)[0] = '\0';
+-
+-    while (fgets(buffer, sizeof(buffer), fp) != NULL) {
+-        uint32_t fgets_len = strlen(buffer);
+-
+-        len += fgets_len + 1;
+-        obuf_new = realloc(*obuf, len);
+-        if (obuf_new == NULL) {
+-            goto err;
+-        }
+-        *obuf = obuf_new;
+-        strcat(*obuf, buffer);
+-
+-        if (buffer[fgets_len - 1] == '\n') {
+-            break;
+-        }
++    *obuf = NULL;
++    if (getline(obuf, &capacity, fp) < 0) {
++        free(*obuf);
++        *obuf = NULL;
++        return -1;
+     }
+ 
+     (*obuf)[strcspn(*obuf, "\n")] = 0;
+ 
+     return 0;
+-
+-err:
+-    free(*obuf);
+-    *obuf = NULL;
+-    return -1;
+ }
+ 
+ static bool json_request(const char *func, const uint8_t *param, unsigned param_len) {
+diff --git a/driver/http/stdio.c b/driver/http/stdio.c
+index 4bd7984..f0295bf 100644
+--- a/driver/http/stdio.c
++++ b/driver/http/stdio.c
+@@ -11,42 +11,22 @@
+ #include <string.h>
+ #include <unistd.h>
+ 
+-// getline is a GNU extension, Mingw32 macOS and FreeBSD don't have (a working) one
++// One line from fp, without its newline. getline() is linear in the line length; the
++// portable loop it replaces appended one character at a time with strcat and realloc,
++// which took seconds for the hex of a bound profile package on the modem.
+ static int afgets(char **obuf, FILE *fp) {
+-    uint32_t len = 0;
+-    char buffer[2];
+-    char *obuf_new = NULL;
++    size_t capacity = 0;
+ 
+-    *obuf = malloc(1);
+-    if ((*obuf) == NULL) {
+-        goto err;
+-    }
+-    (*obuf)[0] = '\0';
+-
+-    while (fgets(buffer, sizeof(buffer), fp) != NULL) {
+-        uint32_t fgets_len = strlen(buffer);
+-
+-        len += fgets_len + 1;
+-        obuf_new = realloc(*obuf, len);
+-        if (obuf_new == NULL) {
+-            goto err;
+-        }
+-        *obuf = obuf_new;
+-        strcat(*obuf, buffer);
+-
+-        if (buffer[fgets_len - 1] == '\n') {
+-            break;
+-        }
++    *obuf = NULL;
++    if (getline(obuf, &capacity, fp) < 0) {
++        free(*obuf);
++        *obuf = NULL;
++        return -1;
+     }
+ 
+     (*obuf)[strcspn(*obuf, "\n")] = 0;
+ 
+     return 0;
+-
+-err:
+-    free(*obuf);
+-    *obuf = NULL;
+-    return -1;
+ }
+ 
+ static bool json_request(const char *url, const uint8_t *tx, uint32_t tx_len, const char **headers) {

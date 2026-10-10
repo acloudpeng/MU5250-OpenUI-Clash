@@ -75,6 +75,7 @@ struct snapshot {
   struct sub_info subs[5];
   struct core_info core;
   struct diag_info diag;
+  struct esim_info esim;
   char failure[97]; /* the agent's message for failed_job */
   struct row rows[MAX_ROWS];
 };
@@ -85,9 +86,10 @@ static int screen_awake = 1;
 #endif
 /* Menu features first (their numbers are the settings record's page bits), then pages
  * reached from them. */
-enum { WG, DEVICES, MENU, PROFILES, OVERVIEW, PROXY, CLASH, NODES, GROUP, SUBS, CORE, DIAG };
+enum { WG, DEVICES, MENU, PROFILES, OVERVIEW, PROXY, CLASH, ESIM, NODES, GROUP, SUBS, CORE, DIAG };
 #define LEGACY_PAGES 27  /* features of a C record: WireGuard, devices, profiles, overview */
 #define MENU_PAGES 123   /* features of a V record: the above plus proxy and Clash */
+#define ESIM_MENU_PAGES 251 /* features of a W record: the above plus eSIM */
 static int page = MENU, offset, dialog, dirty, quitting, need_draw = 1,
                                                   return_after_save;
 static unsigned long long settings_revision;
@@ -96,7 +98,7 @@ static int settings_idle = 120, settings_brightness = 128, settings_home = MENU,
 /* Screen language follows the web panel (C record); Chinese until the first record. */
 static int settings_zh = 1;
 #define L(en, zh) (settings_zh ? (zh) : (en))
-static int visible_page(int p) { return p == MENU || (p <= CLASH && (settings_menu & (1 << p))); }
+static int visible_page(int p) { return p == MENU || (p <= ESIM && (settings_menu & (1 << p))); }
 /* Saved profiles and device routing belong to WireGuard; node, subscription and core
  * pages to Clash; diagnostics to Clash and Proxy. */
 static int reachable(int p) {
@@ -119,7 +121,7 @@ static unsigned long long pending, pending_revision, chosen_profile, chosen_revi
 static char chosen_name[193];
 static char notice[128], failure_text[97];
 /* What the pending job does, for its labels and its completion. */
-enum { JOB_WG = 1, JOB_BACKEND, JOB_MODE, JOB_SUB, JOB_REFRESH, JOB_SELECT, JOB_DELAY, JOB_CORE, JOB_DIAG };
+enum { JOB_WG = 1, JOB_BACKEND, JOB_MODE, JOB_SUB, JOB_REFRESH, JOB_SELECT, JOB_DELAY, JOB_CORE, JOB_DIAG, JOB_ESIM };
 static int pending_kind;
 /* When the panel stops waiting for the pending job's outcome. */
 static long long pending_deadline;
@@ -132,7 +134,8 @@ static long long monotonic_ms(void) {
  * start, a download or core restart too; a node choice, delay test (20 s at most) or
  * the start of a diagnosis answers in seconds. Past it the job is taken as lost. */
 static long long job_wait_ms(int kind) {
-  return kind == JOB_SELECT || kind == JOB_DELAY || kind == JOB_DIAG ? 60000 : 180000;
+  /* An eSIM action only starts the agent's own job, which its Q record then follows. */
+  return kind == JOB_SELECT || kind == JOB_DELAY || kind == JOB_DIAG || kind == JOB_ESIM ? 60000 : 180000;
 }
 static void amount(char *out, size_t n, unsigned long long v) {
   if (v >= 1073741824)
@@ -157,11 +160,11 @@ static int applying(int clash) {
 /* Proxy groups and the open group's nodes, fetched while their pages are shown. */
 static struct groups_view groups;
 static struct nodes_view nodes;
-static int group_offset, node_offset, open_group, diag_offset, diag_from = MENU;
+static int group_offset, node_offset, open_group, diag_offset, diag_from = MENU, esim_offset;
 static unsigned long long open_gen;
 static long long page_fetch_at;
 /* The confirmation dialog (5) and the subscription dialog (6). */
-enum { CF_BACKEND = 1, CF_UPDATE, CF_ROLLBACK, CF_GEO };
+enum { CF_BACKEND = 1, CF_UPDATE, CF_ROLLBACK, CF_GEO, CF_ESIM, CF_REBOOT };
 static char confirm_req[96];
 static int confirm_what, confirm_target, confirm_job;
 static unsigned long long confirm_rev, chosen_sub, chosen_sub_rev;
@@ -187,8 +190,9 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
   struct snapshot s = {.battery = -1, .temperature = -999, .memory = -1};
   char *save, *line = strtok_r(buf, "\n", &save);
   int valid = 0, v_ok = 0, v_idle = 0, v_level = 0, v_home = 0, v_mask = 0;
-  unsigned long long v_rev = 0;
-  char v_lang[4] = "zh";
+  int w_ok = 0, w_idle = 0, w_level = 0, w_home = 0, w_mask = 0;
+  unsigned long long v_rev = 0, w_rev = 0;
+  char v_lang[4] = "zh", w_lang[4] = "zh";
   while (line) {
     if (line[0] == 'S' &&
         sscanf(line, "S %llu %d %d %d %d %llu %llu %llu %d %llu", &s.rev,
@@ -219,10 +223,22 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
         snprintf(v_lang, sizeof(v_lang), "%s", lang);
       }
     }
+    /* W: the same with eSIM; preferred over V when valid. */
+    else if (line[0] == 'W') {
+      char lang[4] = "";
+      if (sscanf(line, "W %llu %d %d %d %d %3s", &w_rev, &w_idle, &w_level, &w_home, &w_mask, lang) == 6 &&
+          (!strcmp(lang, "zh") || !strcmp(lang, "en")) &&
+          w_idle >= 30 && w_idle <= 600 && w_level >= 20 && w_level <= 255 &&
+          w_home >= 0 && w_home <= ESIM && w_mask > 0 && !(w_mask & ~ESIM_MENU_PAGES) &&
+          (w_home == MENU || (w_mask & (1 << w_home)))) {
+        w_ok = 1;
+        snprintf(w_lang, sizeof(w_lang), "%s", lang);
+      }
+    }
     else if (line[0] == 'J')
       /* fresh, the newest job the records already show, is absent from older agents. */
       s.has_fresh = sscanf(line, "J %d %llu %llu %d %llu", &s.busy, &s.job, &s.done, &s.result, &s.fresh) == 5;
-    else if (line[0] && strchr("BKUMXxE", line[0]) && line[1] == '\t') {
+    else if (line[0] && strchr("BKUMXxEQq", line[0]) && line[1] == '\t') {
       char *f[16];
       int n = split_tabs(line, f, 16);
       switch (f[0][0]) {
@@ -233,6 +249,8 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
       case 'X': parse_diag(f, n, &s.diag); break;
       case 'x': parse_check(f, n, &s.diag); break;
       case 'E': if (n >= 3) { s.failed_job = u64_field(f[1]); COPY(s.failure, f[2]); } break;
+      case 'Q': parse_esim(f, n, &s.esim); break;
+      case 'q': parse_esim_row(f, n, &s.esim); break;
       }
     }
     else if (line[0] == 'O')
@@ -270,7 +288,10 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
     }
     line = strtok_r(NULL, "\n", &save);
   }
-  if (v_ok) {
+  if (w_ok) {
+    s.settings_rev = w_rev; s.idle_seconds = w_idle; s.brightness = w_level;
+    s.home_page = w_home; s.menu_mask = w_mask; s.zh = strcmp(w_lang, "en") != 0;
+  } else if (v_ok) {
     s.settings_rev = v_rev; s.idle_seconds = v_idle; s.brightness = v_level;
     s.home_page = v_home; s.menu_mask = v_mask; s.zh = strcmp(v_lang, "en") != 0;
   }
@@ -337,7 +358,11 @@ static int send_job(const char *req, int kind, unsigned long long revision) {
   pending = 0;
   pending_kind = 0;
   failure_text[0] = 0;
-  if (!strncmp(reply, "ERR Stale", 9)) {
+  if (!strncmp(reply, "ERR Stale", 9) && kind == JOB_ESIM) {
+    /* The card was read again meanwhile: the page shows the new list. */
+    snprintf(notice, sizeof(notice), "%s", L("The profile list changed. Check it again.", "配置文件列表已变化，请重新确认。"));
+    dialog = 0;
+  } else if (!strncmp(reply, "ERR Stale", 9)) {
     snprintf(notice, sizeof(notice), "%s", L("The node list changed. Reloaded.", "节点列表已变化，已重新加载。"));
     dialog = 0;
     if (page == GROUP) page = NODES;
@@ -388,6 +413,7 @@ static void submit(int toggle, int value) {
 static const char *job_failure(int kind, int result) {
   if (result == 1)
     return kind == JOB_CORE ? L("A core job or deployment is running.", "内核任务或部署正在进行。")
+         : kind == JOB_ESIM ? L("An eSIM job is already running.", "已有 eSIM 任务在运行。")
                             : L("Settings changed. Refresh.", "设置已被更改，请刷新。");
   switch (kind) {
   case JOB_DELAY: return L("Delay test failed.", "测速失败。");
@@ -395,6 +421,7 @@ static const char *job_failure(int kind, int result) {
   case JOB_REFRESH: return L("Subscription update failed.", "订阅更新失败。");
   case JOB_CORE: return L("The core request was refused.", "内核请求被拒绝。");
   case JOB_DIAG: return L("Diagnostics could not start.", "无法启动诊断。");
+  case JOB_ESIM: return L("The eSIM request was refused.", "eSIM 请求被拒绝。");
   default: return L("Apply failed. Check OpenUI.", "应用失败，请在 OpenUI 中检查。");
   }
 }
@@ -464,6 +491,8 @@ static void track_status(int changed) {
   /* A shorter check list (a new run clears it) keeps diagnostics on a page it has. */
   int last_checks = data.diag.n > 0 ? (data.diag.n - 1) / 4 * 4 : 0;
   if (diag_offset > last_checks) diag_offset = last_checks;
+  /* Likewise eSIM profiles, after one was deleted or downloaded on the webpage. */
+  if (esim_offset >= data.esim.n) esim_offset = data.esim.n > 0 ? (data.esim.n - 1) / 4 * 4 : 0;
   if (!reachable(page) && !dirty && !pending && !dialog) page = MENU;
   settle_jobs();
   need_draw = 1;
@@ -1475,6 +1504,77 @@ static void proxy_tests(struct drm_buf *b,const char *dir) {
   printf("PASS proxy, Clash, nodes, subscriptions, core and diagnostics pages (zh/en), switch requests, stale generations, job completion, flags and settings records; largest page %zu bytes (%s), status %zu bytes\n",
          html_peak,html_peak_page,used);
 }
+/* The eSIM page: W settings, Q/q records, switching, restart, paging and refusals. */
+static void esim_tests(struct drm_buf *b,const char *dir) {
+  char text[4096];
+  struct snapshot s;
+  unsigned long long now=(unsigned long long)time(NULL);
+  snprintf(text,sizeof(text),
+    "S 7 1 0 0 0 0 0 0 1 %llu\nO 83 320 18372 34.5 12.4\n"
+    "Q\t1\teuicc\t42\t5\t0\t-\t-\t-\t-\t-\n"
+    "q\t0\t1\toperational\t\xF0\x9F\x87\xAD\xF0\x9F\x87\xB0 香港 Hong Kong\t8901\n"
+    "q\t1\t0\toperational\tTruphone\t4567\n"
+    "q\t2\t0\ttest\t" CJK48 "\t0003\n"
+    "q\t3\t0\toperational\tTravel\t0004\n"
+    "q\t4\t0\tprovisioning\tBootstrap\t0005\n"
+    "C 40 90 200 2 27 zh\nV 40 90 200 2 80 zh\nW 40 90 200 2 208 zh\nJ 0 5 5 0 5\n.\n",now);
+  assert(parse_snapshot(text,&s)&&s.esim.has&&s.esim.installed&&s.esim.gen==42&&s.esim.total==5&&s.esim.n==5);
+  assert(!strcmp(s.esim.card,"euicc")&&s.esim.rows[0].enabled&&!strcmp(s.esim.rows[0].name,"HK 香港 Hong Kong"));
+  assert(!strcmp(s.esim.rows[1].tail,"4567")&&!s.esim.kind[0]&&s.esim.firmware_ready==-1&&!s.esim.reboot);
+  data=s;assert(update_settings(&data)&&settings_menu==208&&visible_page(ESIM)&&visible_page(CLASH)&&!visible_page(PROXY));
+  /* W wins over V; without W the V record, which has no eSIM, applies. */
+  char no_w[]="C 41 90 200 2 27 zh\nV 41 90 200 2 80 zh\n.\n",bad_w[]="V 42 90 200 2 80 zh\nW 42 90 200 2 464 zh\n.\n";
+  struct snapshot prefs;
+  assert(parse_snapshot(no_w,&prefs)&&update_settings(&prefs)&&settings_menu==80&&!visible_page(ESIM));
+  assert(parse_snapshot(bad_w,&prefs)&&update_settings(&prefs)&&settings_menu==80);
+  char home_w[]="V 43 90 200 2 80 en\nW 43 90 200 7 208 en\n.\n";
+  assert(parse_snapshot(home_w,&prefs)&&update_settings(&prefs)&&settings_home==ESIM&&!settings_zh);
+  settings_zh=1;settings_menu=208;
+  page=MENU;capture_both(b,dir,"menu-esim");assert(strstr(html,"act:esim")&&strstr(html,"Hong Kong"));
+  test_request[0]=0;press_id(b,"esim");assert(page==ESIM&&!test_request[0]);capture_both(b,dir,"esim");
+  /* The enabled profile is not tappable; another asks first, then names it by index. */
+  press_id(b,"e0");assert(!dialog);
+  press_id(b,"e1");assert(dialog==5&&confirm_what==CF_ESIM&&confirm_rev==42&&!strcmp(chosen_name,"Truphone"));
+  capture_both(b,dir,"esim-confirm");
+  press_id(b,"confirm");expect_request("esim enable 42 1\n");assert(pending_kind==JOB_ESIM&&!dialog);
+  reset_job();
+  press_id(b,"next");assert(esim_offset==4);capture(b,dir,"esim-page2");
+  press_id(b,"e0");assert(dialog==5);press_id(b,"confirm");expect_request("esim enable 42 4\n");reset_job();
+  press_id(b,"prev");assert(!esim_offset);
+  /* A shorter list (a profile deleted on the webpage) keeps the page on one it has. */
+  esim_offset=4;data.esim.n=4;track_status(0);assert(!esim_offset);data.esim.n=5;
+  /* A list read again meanwhile: the agent refuses the old generation. */
+  stub_job="ERR Stale\n";press_id(b,"e3");press_id(b,"confirm");
+  assert(!pending&&!dialog&&!strcmp(notice,L("The profile list changed. Check it again.","配置文件列表已变化，请重新确认。")));
+  capture(b,dir,"esim-stale");stub_job="OK 1\n";notice[0]=0;
+  /* While the agent's job runs, nothing else starts. */
+  snprintf(data.esim.state,sizeof(data.esim.state),"running");snprintf(data.esim.kind,sizeof(data.esim.kind),"enable");
+  snprintf(data.esim.step,sizeof(data.esim.step),"sim_power_cycle");
+  capture_both(b,dir,"esim-switching");test_request[0]=0;
+  press_id(b,"escan");press_id(b,"e1");assert(!test_request[0]&&!dialog);
+  /* The firmware kept the previous profile: a restart is offered, and asks first. */
+  snprintf(data.esim.state,sizeof(data.esim.state),"done");data.esim.reboot=1;data.esim.firmware_ready=0;
+  capture_both(b,dir,"esim-reboot");
+  press_id(b,"ereboot");assert(dialog==5&&confirm_what==CF_REBOOT);capture(b,dir,"esim-reboot-confirm");
+  press_id(b,"confirm");expect_request("esim reboot\n");reset_job();
+  data.esim.reboot=0;data.esim.firmware_ready=1;render(b);assert(strstr(html,"id=\"ereboot\" href=\"act:none\""));
+  capture(b,dir,"esim-switched");
+  press_id(b,"escan");expect_request("esim scan\n");reset_job();
+  /* A failed job shows the agent's message. */
+  snprintf(data.esim.state,sizeof(data.esim.state),"failed");
+  snprintf(data.esim.error,sizeof(data.esim.error),"lpac failed at es10c_enable_profile: the card is busy (catBusy)");
+  capture(b,dir,"esim-failed");assert(strstr(html,"卡片忙"));
+  /* An ordinary SIM, no card read yet (read on entry), and no lpac. */
+  data.esim.n=0;data.esim.total=0;snprintf(data.esim.card,sizeof(data.esim.card),"sim");data.esim.state[0]=0;data.esim.error[0]=0;
+  capture_both(b,dir,"esim-sim");
+  press_id(b,"back");assert(page==MENU);
+  data.esim.card[0]=0;test_request[0]=0;press_id(b,"esim");expect_request("esim scan\n");assert(pending_kind==JOB_ESIM);
+  reset_job();data.esim.installed=0;capture(b,dir,"esim-missing");test_request[0]=0;press_id(b,"escan");assert(!test_request[0]);
+  press_id(b,"back");assert(page==MENU);
+  /* Hidden from the menu: not reachable. */
+  settings_menu=80;assert(!reachable(ESIM));page=MENU;render(b);assert(!strstr(html,"act:esim"));
+  puts("PASS eSIM page (zh/en): W settings record, profile records, switch and restart confirmations, paging, stale generations, running jobs and card states");
+}
 int main(int argc, char **argv) {
   power_self_test();
   if(argc<2)return 2;
@@ -1550,6 +1650,7 @@ int main(int argc, char **argv) {
   page=MENU;press_id(&b,"stock");assert(quitting);quitting=0;
   puts("PASS DevUI HTML hit testing, menu navigation, profile version capture, device pagination/drafts, escaping, confirmations, disabled states and rotation");
   proxy_tests(&b,argv[1]);
+  esim_tests(&b,argv[1]);
   free(b.map);
   return 0;
 }

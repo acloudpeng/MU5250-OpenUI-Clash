@@ -9,7 +9,8 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (id.includes('node_modules')) return 'vendor'
+          // The QR decoder loads only when the eSIM page reads an image.
+          if (id.includes('node_modules') && !id.includes('/jsqr/')) return 'vendor'
         },
       },
     },

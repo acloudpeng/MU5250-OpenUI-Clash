@@ -305,6 +305,17 @@ def prepare_mihomo(path, allow_unpinned):
     return data, pinned.VERSION
 
 
+def prepare_lpac(path, allow_unpinned):
+    data = read_limited(path)
+    if len(data) < 64 or data[:6] != b'\x7fELF\x02\x01' or int.from_bytes(data[18:20], 'little') != 183:
+        raise ValueError('lpac must be an aarch64 ELF64 executable')
+    pinned = load_script('prepare-lpac')
+    if hashlib.sha256(data).hexdigest() != pinned.SHA256 and not allow_unpinned:
+        raise ValueError('lpac does not match the pinned build; rebuild with scripts/prepare-lpac.py')
+    if pinned.VERSION.encode() not in data: raise ValueError('lpac was not built by scripts/prepare-lpac.py')
+    return data, pinned.VERSION
+
+
 def prepare_geodata(directory):
     # Only files listed in the preparer's SHA256SUMS, under the names the core looks for.
     root = Path(directory)
@@ -323,7 +334,7 @@ def prepare_geodata(directory):
 def deploy(args):
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.-]{0,252}', args.gateway): raise ValueError('Invalid gateway')
     if not any((args.agent, args.dashboard, args.harden, getattr(args, 'screen', None), getattr(args, 'wireguard_tools', None),
-                getattr(args, 'mihomo', None), getattr(args, 'mihomo_geodata', None))):
+                getattr(args, 'mihomo', None), getattr(args, 'mihomo_geodata', None), getattr(args, 'lpac', None))):
         raise ValueError('Select at least one component')
     # Finish all local preparation before contacting or mutating a device.
     prepared = {}
@@ -361,6 +372,8 @@ def deploy(args):
         programs['mihomo'], mihomo_version = prepare_mihomo(args.mihomo, getattr(args, 'allow_unpinned_mihomo', False))
     if getattr(args, 'mihomo_geodata', None):
         programs.update(prepare_geodata(args.mihomo_geodata))
+    if getattr(args, 'lpac', None):
+        programs['lpac'], lpac_version = prepare_lpac(args.lpac, getattr(args, 'allow_unpinned_lpac', False))
     if args.auto_adb and not args.adb_serial:
         devices = [line.split()[0] for line in run(['adb', 'devices']).splitlines()[1:] if line.endswith('\tdevice')]
         if len(devices) > 1: raise RuntimeError('Multiple ADB devices connected; select one with --adb-serial')
@@ -413,6 +426,13 @@ def deploy(args):
             transport.shell('mkdir -p /data/bin')
             transport.push(programs['mihomo'], '/data/bin/mihomo.staged', True)
             transport.shell(f'set -e; /data/bin/mihomo.staged -v | grep -qF {q(mihomo_version)}; mv /data/bin/mihomo.staged /data/bin/mihomo')
+        if 'lpac' in programs:
+            # eSIM jobs start lpac per command; none holds the file open between them.
+            transport.shell('mkdir -p /data/bin /data/local/tmp/openui-lpac-licenses')
+            transport.push(programs['lpac'], '/data/bin/lpac.staged', True)
+            transport.shell(f'set -e; /data/bin/lpac.staged version | grep -qF {q(lpac_version)}; mv /data/bin/lpac.staged /data/bin/lpac')
+            for name in ('NOTICE', 'AGPL-3.0-only.txt', 'LGPL-2.1-only.txt', 'cJSON-MIT.txt'):
+                transport.push((ROOT / 'licenses/lpac' / name).read_bytes(), '/data/local/tmp/openui-lpac-licenses/' + name)
         geodata = [name for name in programs if name.startswith('geo/')]
         if geodata:
             transport.shell('mkdir -p /data/share/mihomo')
@@ -476,6 +496,8 @@ def main():
     parser.add_argument('--mihomo', help='aarch64 Clash core built by scripts/prepare-mihomo.py')
     parser.add_argument('--mihomo-geodata', help='Geo data directory prepared by scripts/prepare-geodata.py')
     parser.add_argument('--allow-unpinned-mihomo', action='store_true', help='accept a core whose checksum differs from the pinned build')
+    parser.add_argument('--lpac', help='aarch64 lpac built by scripts/prepare-lpac.py, for eSIM management')
+    parser.add_argument('--allow-unpinned-lpac', action='store_true', help='accept an lpac whose checksum differs from the pinned build')
     parser.add_argument('--prepare-only', action='store_true')
     parser.add_argument('--bundle-output')
     parser.add_argument('--release-agent')

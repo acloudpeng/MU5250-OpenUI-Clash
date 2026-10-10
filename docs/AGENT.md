@@ -12,14 +12,14 @@ canonical routing table; this document summarizes it.
   optional 6-digit mobile PIN); bearer tokens with a sliding 1 h expiry so a
   dashboard left open stays logged in, rate-limited login, LAN-only CORS
 - JSON envelope: `{ "ok": true, "data": … }` / `{ "ok": false, "error": … }`
-- Destructive actions (`/api/device/reboot|shutdown`) require the
+- Destructive actions (`/api/device/reboot|shutdown`, `/api/esim/delete`) require the
   `X-Confirm: true` header
 
 ## Endpoint reference
 
 Every route below has a dashboard consumer, and every call the dashboard makes
 is a route below — `scripts/check-api-contract.py` enforces both directions
-(plus that the mock agent stays in step). 55 paths / 60 method+path pairs.
+(plus that the mock agent stays in step). 74 paths / 90 method+path pairs.
 
 | Family | Endpoints |
 |---|---|
@@ -35,6 +35,7 @@ is a route below — `scripts/check-api-contract.py` enforces both directions
 | Router | `GET+PUT /api/router/dns`, `/api/router/lan`, `/api/router/apn/mode`; `GET+POST /api/router/apn/profiles`; `POST /api/router/apn/profiles/delete`, `/api/router/apn/profiles/activate` |
 | SMS | `POST /api/sms/list`, `/api/sms/send`, `/api/sms/delete`, `/api/sms/read` (delete falls back to direct SQLite for SIM-stored rows the firmware refuses) |
 | SIM | `GET /api/sim/info`, `/api/sim/imei` |
+| eSIM | `GET+POST /api/esim` — read the removable eUICC, switch, disable, rename, download, notifications (jobs); `POST /api/esim/delete` (needs `X-Confirm`). lpac runs per command, its APDUs over QMI UIM (QRTR), its SM-DP+ requests through curl — see [ESIM.md](ESIM.md) |
 | USB | `GET /api/usb/status`, `PUT /api/usb/mode`, `/api/usb/default`, `/api/usb/powerbank` |
 | Power | `GET+PUT /api/device/charge-control` — manual stop/resume + limit enforcer with hysteresis, event-driven off `BSP_CHARGER_EVENT` |
 | Extras | TTL clamping (`GET /api/ttl/status`, `PUT /api/ttl/set`, `DELETE /api/ttl/clear`), AT console (`POST /api/at/send`, `GET /api/at/port`), signal/connection CSV loggers (`/api/logger/*`) |

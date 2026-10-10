@@ -1,0 +1,31 @@
+Backport of upstream lpac 0d7218f: notification: output real error reason of es9p_handle_notification (#451)
+https://github.com/estkme-group/lpac/commit/0d7218fbc1d0ea39f0183303f9bf8506e91bf0fc
+
+A failed notification upload reports the server's reason.
+
+diff --git a/src/applet/notification/process.c b/src/applet/notification/process.c
+index 6102ffb..a9d6673 100644
+--- a/src/applet/notification/process.c
++++ b/src/applet/notification/process.c
+@@ -29,7 +29,7 @@ static int _process_single(uint32_t seqNumber, uint8_t autoremove) {
+ 
+     jprint_progress("es9p_handle_notification", str_seqNumber);
+     if (es9p_handle_notification(&euicc_ctx, notification.b64_PendingNotification)) {
+-        jprint_error("es9p_handle_notification", NULL);
++        jprint_error("es9p_handle_notification", euicc_ctx.http.status.message);
+         return -1;
+     }
+ 
+diff --git a/src/applet/notification/replay.c b/src/applet/notification/replay.c
+index f871ad7..b059399 100644
+--- a/src/applet/notification/replay.c
++++ b/src/applet/notification/replay.c
+@@ -68,7 +68,7 @@ static int handle_notification(const uint32_t seqNumber, const struct es10b_pend
+ 
+     jprint_progress("es9p_handle_notification", str_seqNumber);
+     if (es9p_handle_notification(&euicc_ctx, notification.b64_PendingNotification)) {
+-        jprint_error("es9p_handle_notification", NULL);
++        jprint_error("es9p_handle_notification", euicc_ctx.http.status.message);
+         return -1;
+     }
+ 

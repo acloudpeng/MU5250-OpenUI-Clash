@@ -29,6 +29,33 @@ class DeploymentFlowTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse(touched.exists(), 'Download failure must precede any modem command')
 
+    def test_lpac_must_be_the_pinned_arm64_build(self):
+        import importlib.util
+        import sys
+        sys.path.insert(0, str(ROOT / 'scripts'))
+        try:
+            spec = importlib.util.spec_from_file_location('deploy_components', ROOT / 'scripts/deploy-components.py')
+            deploy = importlib.util.module_from_spec(spec); spec.loader.exec_module(deploy)
+        finally:
+            sys.path.remove(str(ROOT / 'scripts'))
+        pinned = deploy.load_script('prepare-lpac')
+        with tempfile.TemporaryDirectory() as temp:
+            binary = Path(temp) / 'lpac'
+            arm64 = b'\x7fELF\x02\x01' + bytes(12) + (183).to_bytes(2, 'little') + bytes(44)
+            for data, message in [(b'\x7fELF\x02\x01' + bytes(58), 'aarch64'),
+                                  (arm64 + pinned.VERSION.encode(), 'pinned build'),
+                                  (arm64, 'pinned build')]:
+                binary.write_bytes(data)
+                with self.assertRaisesRegex(ValueError, message):
+                    deploy.prepare_lpac(binary, False)
+            binary.write_bytes(arm64)
+            with self.assertRaisesRegex(ValueError, 'not built by'):
+                deploy.prepare_lpac(binary, True)
+            binary.write_bytes(arm64 + pinned.VERSION.encode())
+            self.assertEqual(deploy.prepare_lpac(binary, True)[1], pinned.VERSION)
+        transaction = (ROOT / 'scripts/device/transaction.sh').read_text()
+        self.assertIn('data/bin/lpac\n', transaction)
+
     def test_shell_wrappers_share_the_verified_transaction_path(self):
         for file in ['setup.sh', 'deploy.sh', 'deploy-dashboard.sh', 'scripts/zharden.sh']:
             with self.subTest(file=file):

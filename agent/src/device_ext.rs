@@ -106,6 +106,11 @@ pub fn device_charger(_state: &AppState) -> (u16, Value) {
 }
 
 pub fn device_reboot(_state: &AppState) -> (u16, Value) {
+    reboot()
+}
+
+/// Restarts the device; also the screen's eSIM page, after a switch needs it.
+pub fn reboot() -> (u16, Value) {
     match ubus::call("system", "reboot", Some("{}")) {
         Ok(data) => (200, json!({"ok": true, "data": data})),
         Err(e) => (503, json!({"ok": false, "error": e})),

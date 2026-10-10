@@ -13,6 +13,7 @@ use crate::clash_core;
 use crate::clash_diag;
 use crate::connection_logger;
 use crate::device_ext;
+use crate::esim;
 use crate::handlers::{self, AppState};
 use crate::network_ext;
 use crate::proxy;
@@ -100,6 +101,7 @@ pub fn start(threads: usize, state: Arc<AppState>) {
 
 const DESTRUCTIVE_PATHS: &[&str] = &[
     "/api/device/reboot",
+    "/api/esim/delete",
     "/api/device/shutdown",
     "/api/system/kill-bloat",
 ];
@@ -354,6 +356,9 @@ pub fn route(
         (&Method::Post, "/api/clash/core") => clash_core::post(body),
         (&Method::Get, "/api/clash/diagnostics") => clash_diag::get(),
         (&Method::Post, "/api/clash/diagnostics") => clash_diag::run(),
+        (&Method::Get, "/api/esim") => esim::get(),
+        (&Method::Post, "/api/esim") => esim::post(body),
+        (&Method::Post, "/api/esim/delete") => esim::delete_profile(body),
         (&Method::Post, "/api/system/kill-bloat") => handlers::system_kill_bloat(state, body),
         (&Method::Post, "/api/system/restart-agent") => device_ext::agent_restart(state),
         (&Method::Post, "/api/device/reboot") => device_ext::device_reboot(state),

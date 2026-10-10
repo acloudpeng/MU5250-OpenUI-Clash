@@ -35,6 +35,14 @@ struct diag_info {
   char verdict[17];
   struct check_info checks[8];
 };
+/* eSIM: the card in the tray and its profiles; no EID, only an ICCID's last digits. */
+struct esim_row { int index, enabled; char cls[16], name[97], tail[5]; };
+struct esim_info {
+  int has, installed, reboot, total, n, firmware_ready; /* firmware_ready -1: unknown */
+  unsigned long long gen;
+  char card[9], kind[16], state[12], step[40], error[97];
+  struct esim_row rows[8];
+};
 struct group_row { int index, selectable, members, now; char type[16], name[193], now_name[193]; };
 /* state: -1 no answer, 0 loading, 1 ready, 2 Clash not running. */
 struct groups_view { int state, total, offset, n; unsigned long long gen; struct group_row rows[4]; };
@@ -178,6 +186,31 @@ static void parse_check(char **f, int n, struct diag_info *d) {
   COPY(c->id, f[1]);
   COPY(c->status, f[2]);
   for (int i = 0; i < 4; i++) c->v[i] = figure_field(f[3 + i]);
+}
+/* Q installed card generation count reboot kind state step firmware_ready error */
+static void parse_esim(char **f, int n, struct esim_info *e) {
+  if (n < 11) return;
+  e->has = 1;
+  e->installed = atoi(f[1]) != 0;
+  COPY(e->card, f[2]);
+  e->gen = u64_field(f[3]);
+  e->total = atoi(f[4]);
+  e->reboot = atoi(f[5]) != 0;
+  COPY(e->kind, f[6]);
+  COPY(e->state, f[7]);
+  COPY(e->step, f[8]);
+  e->firmware_ready = !strcmp(f[9], "-") ? -1 : atoi(f[9]) != 0;
+  COPY(e->error, f[10]);
+}
+/* q index enabled class name iccid-tail */
+static void parse_esim_row(char **f, int n, struct esim_info *e) {
+  if (n < 6 || e->n >= 8) return;
+  struct esim_row *r = &e->rows[e->n++];
+  r->index = atoi(f[1]);
+  r->enabled = atoi(f[2]) != 0;
+  COPY(r->cls, f[3]);
+  copy_name(r->name, sizeof(r->name), f[4]);
+  COPY(r->tail, f[5]);
 }
 /* Reply to "groups <offset>": G state generation total offset, g rows. */
 static int parse_groups(char *buf, struct groups_view *out) {

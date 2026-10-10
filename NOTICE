@@ -26,3 +26,10 @@ vendor/tiny_http is tiny_http 0.12.0 (https://github.com/tiny-http/tiny-http,
 MIT OR Apache-2.0; its license texts are kept in that directory) with resource
 limits added for the agent's HTTP server. The changes are listed in
 vendor/tiny_http/OPENUI-PATCH.md and marked in each modified file.
+
+lpac (https://github.com/estkme-group/lpac, v2.3.0 with the patches in
+scripts/lpac-patches/), deployed as /data/bin/lpac for eSIM management, is a separate
+program under AGPL-3.0-only (libeuicc LGPL-2.1-only, cJSON MIT); see licenses/lpac/.
+The MIT-licensed agent starts it and talks to it over standard input and output.
+The dashboard's QR decoder is jsQR (Apache-2.0), shipped with its licence.
+The eSIM root certificates in agent/certs/ are the public GSMA CI certificates.

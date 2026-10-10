@@ -1,0 +1,21 @@
+lpac — the eUICC Local Profile Agent the OpenUI agent runs for eSIM management
+(the same LPA EasyEUICC uses on Android).
+
+Copyright (c) 2023-2025 ESTKME TECHNOLOGY LIMITED, Hong Kong, and lpac contributors.
+Source: https://github.com/estkme-group/lpac, release v2.3.0
+(commit c2fcf5e4b21c712d54e35a11da2ad9ad134fb821, archive SHA-256
+f3e92f08d10121cf3633cce66853ba1260eb5daa35c594f903cc2720fc11f9ee).
+
+The binary deployed as /data/bin/lpac is built from that source with the patches
+in scripts/lpac-patches/ (backports of upstream fixes and OpenUI's own changes,
+each described in its header) by scripts/prepare-lpac.py, which pins the archive,
+the patches and the Zig toolchain. Together these files are the binary's
+complete corresponding source.
+
+Licenses, per lpac's REUSE.toml:
+- src/, driver/, utils/: AGPL-3.0-only (AGPL-3.0-only.txt)
+- euicc/ (libeuicc): LGPL-2.1-only (LGPL-2.1-only.txt), or ESTKME's commercial licence
+- cjson/: MIT (cJSON-MIT.txt)
+
+lpac is a separate program. The MIT-licensed OpenUI agent starts it and talks to it
+over its standard input and output; the agent's licence does not change lpac's.

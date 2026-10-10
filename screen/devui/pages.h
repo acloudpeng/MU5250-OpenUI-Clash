@@ -14,6 +14,7 @@ static const char *page_title(void) {
   case SUBS: return L("Subscriptions","订阅");
   case CORE: return L("Core & data","内核与数据");
   case DIAG: return L("Diagnostics","诊断");
+  case ESIM: return "eSIM";
   default: return "OpenUI";
   }
 }
@@ -480,10 +481,106 @@ static void render_diag(void) {
   linkbox(208,404,100,48,"next",L("Next ›","下页 ›"),diag_offset+4<d->n,PLAIN);
   snprintf(tmp,sizeof(tmp),"%d / %d",diag_offset/4+1,d->n?(d->n+3)/4:1);box(112,418,96,20,"muted center",tmp);
 }
+/* eSIM actions need lpac on the device and no eSIM job running. */
+static int esim_idle(void) {
+  const struct esim_info *e=&data.esim;
+  return e->has&&e->installed&&!blocked()&&strcmp(e->state,"running");
+}
+static const char *esim_kind_text(const char *k) {
+  return !strcmp(k,"scan")?L("Reading","读卡"):!strcmp(k,"enable")?L("Switching","切换"):!strcmp(k,"disable")?L("Disabling","停用"):
+    !strcmp(k,"nickname")?L("Renaming","改名"):!strcmp(k,"delete")?L("Deleting","删除"):!strcmp(k,"download")?L("Downloading","下载"):
+    !strcmp(k,"notifications")?L("Notifications","通知"):k;
+}
+static const char *esim_step_text(const char *s) {
+  static const struct { const char *step, *en, *zh; } steps[] = {
+    {"reading","reading the card","读取卡片"},{"es10c_enable_profile","switching on the card","卡上切换"},
+    {"es10c_disable_profile","disabling on the card","卡上停用"},{"radio_offline","radio off","关闭无线电"},
+    {"sim_power_cycle","restarting the SIM","重启 SIM 卡"},{"radio_online","radio on","打开无线电"},
+    {"sim_reading","modem reads the card","基带读卡"},{"firmware","waiting for the firmware","等待固件"},
+    {"es10c_delete_profile","deleting","删除中"},{"es10c_set_nickname","saving","保存中"},
+    {"es9p_handle_notification","sending notifications","发送通知"},
+  };
+  for(size_t i=0;i<sizeof(steps)/sizeof(steps[0]);i++)if(!strcmp(s,steps[i].step))return L(steps[i].en,steps[i].zh);
+  return !strncmp(s,"es9p_",5)||!strncmp(s,"es10b_",6)||!strncmp(s,"es8p_",5)?L("downloading","下载中"):s;
+}
+static const char *esim_card_text(const struct esim_info *e, const char **cls) {
+  *cls="";
+  if(!e->has)return data.stamp?L("Unavailable","不可用"):L("Loading status","正在加载状态");
+  if(!e->installed){*cls="warn";return L("lpac is not installed","设备上没有安装 lpac");}
+  if(!strcmp(e->card,"euicc"))return L("eUICC card","eUICC 卡");
+  if(!strcmp(e->card,"sim")){*cls="warn";return L("An ordinary SIM card","普通 SIM 卡");}
+  if(!strcmp(e->card,"absent")){*cls="warn";return L("No card in the tray","卡槽中没有卡");}
+  if(!strcmp(e->card,"error")){*cls="bad";return L("The card could not be read","无法读取卡片");}
+  return L("Not read yet","尚未读取");
+}
+/* The agent's message, in a few words for the known ones; others as sent (English). */
+static const char *esim_error_text(const char *e) {
+  static const struct { const char *needle, *en, *zh; } known[] = {
+    {"catBusy","Card busy: restart or reinsert it","卡片忙：请重启设备或重新插卡"},
+    {"did not answer in time","The modem did not answer","基带没有响应"},
+    {"SIM service is not reachable","The modem's SIM service is unavailable","无法连接基带的 SIM 服务"},
+    {"still reads the previous profile","The modem still reads the old profile","基带仍读到原来的配置文件"},
+    {"radio did not","The radio did not switch; restart","无线电未能切换，请重启设备"},
+    {"not an eUICC","Not an eUICC card","不是 eUICC 卡"},
+  };
+  for(size_t i=0;i<sizeof(known)/sizeof(known[0]);i++)if(strstr(e,known[i].needle))return L(known[i].en,known[i].zh);
+  return e;
+}
+/* Menu detail: the enabled profile, or what is in the tray. */
+static const char *esim_summary(void) {
+  const struct esim_info *e=&data.esim;
+  if(e->has&&!strcmp(e->card,"euicc")) {
+    for(int i=0;i<e->n;i++)if(e->rows[i].enabled)return e->rows[i].name[0]?e->rows[i].name:L("Enabled profile","已启用配置");
+    return L("No profile enabled","没有启用的配置文件");
+  }
+  const char *cls;
+  return e->has&&e->card[0]?esim_card_text(e,&cls):L("Profiles on a removable eUICC","可插拔 eUICC 配置文件");
+}
+static void render_esim(void) {
+  const struct esim_info *e=&data.esim;
+  char tmp[256];
+  header("eSIM");
+  add("<div class=\"box card\" style=\"left:12px;top:72px;width:296px;height:68px\"></div>");
+  const char *cls,*card=esim_card_text(e,&cls);
+  if(!strcmp(e->card,"euicc"))snprintf(tmp,sizeof(tmp),L("%s · %d profiles","%s · %d 个配置文件"),card,e->total);
+  else snprintf(tmp,sizeof(tmp),"%s",card);
+  char c[24];snprintf(c,sizeof(c),"head %s",cls);
+  sbox(28,78,268,20,c,tmp);
+  /* The running or last job, or what to do. */
+  int running=!strcmp(e->state,"running");
+  const char *line_cls="muted";
+  if(running){snprintf(tmp,sizeof(tmp),"%s: %s",esim_kind_text(e->kind),esim_step_text(e->step));line_cls="warn";}
+  else if(e->reboot){snprintf(tmp,sizeof(tmp),"%s",L("Restart the device to finish switching.","请重启设备以完成切换。"));line_cls="warn";}
+  else if(!strcmp(e->state,"failed")&&e->error[0]){snprintf(tmp,sizeof(tmp),"%s",esim_error_text(e->error));line_cls="bad";}
+  else if(!strcmp(e->card,"error")&&e->error[0]){snprintf(tmp,sizeof(tmp),"%s",esim_error_text(e->error));line_cls="bad";}
+  else if(!strcmp(e->state,"done")&&!strcmp(e->kind,"enable")&&e->firmware_ready==1){snprintf(tmp,sizeof(tmp),"%s",L("Switched. Mobile data reconnects shortly.","已切换，移动数据稍后恢复。"));line_cls="good";}
+  else if(!strcmp(e->card,"euicc"))snprintf(tmp,sizeof(tmp),"%s",e->n?L("Tap a profile to switch to it.","点击配置文件即可切换。"):L("Add profiles in OpenUI.","请在 OpenUI 中添加配置文件。"));
+  else if(!strcmp(e->card,"sim"))snprintf(tmp,sizeof(tmp),"%s",L("Profiles need an eUICC card.","配置文件需要 eUICC 卡。"));
+  else tmp[0]=0;
+  sbox(28,104,268,20,line_cls,tmp);
+  for(int i=0;i<4&&esim_offset+i<e->n;i++) {
+    const struct esim_row *r=&e->rows[esim_offset+i];
+    char id[8];snprintf(id,sizeof(id),"e%d",i);
+    int on=r->enabled;
+    open_row(12,148+56*i,296,52,id,!on&&esim_idle(),on?"current":"");
+    add("<div class=\"box head\" style=\"left:14px;top:5px;width:%dpx;height:20px\">",on?200:236);shortened(r->name[0]?r->name:"?",on?200:236,16);add("</div>");
+    if(on)add("<div class=\"box badge\" style=\"right:12px;top:14px;width:56px;height:22px\">%s</div>",L("Active","当前"));
+    else chevron(52);
+    snprintf(tmp,sizeof(tmp),"ICCID …%s%s%s",r->tail,!strcmp(r->cls,"test")?L(" · test"," · 测试"):"",!strcmp(r->cls,"provisioning")?L(" · provisioning"," · 预置"):"");
+    add("<div class=\"box muted\" style=\"left:14px;top:27px;width:236px;height:20px\">");shortened(tmp,236,16);add("</div></a>");
+  }
+  if(e->n>4) {
+    linkbox(12,370,100,48,"prev",L("‹ Prev","‹ 上页"),esim_offset>0,PLAIN);
+    linkbox(208,370,100,48,"next",L("Next ›","下页 ›"),esim_offset+4<e->n,PLAIN);
+    snprintf(tmp,sizeof(tmp),"%d / %d",esim_offset/4+1,(e->n+3)/4);box(112,384,96,20,"muted center",tmp);
+  } else footer(384,20,L("Download, rename and delete in OpenUI.","下载、改名和删除请在 OpenUI 中进行。"),"muted");
+  linkbox(12,422,142,50,"escan",running&&!strcmp(e->kind,"scan")?L("Reading","读取中"):L("Read again","重新读取"),esim_idle(),PLAIN);
+  linkbox(166,422,142,50,"ereboot",L("Restart device","重启设备"),e->reboot&&!blocked(),DANGER);
+}
 static void render_confirm(void) {
   const struct backend_info *b=&data.backend;
   const char *title,*text,*button=L("Switch","切换");
-  char detail[160]="";
+  char detail[200]="";
   int tone=PRIMARY;
   if(confirm_what==CF_BACKEND&&confirm_target==BK_OFF) {
     title=L("Turn off the proxy?","关闭代理？");
@@ -507,6 +604,14 @@ static void render_confirm(void) {
     text=L("Restores the previous core. A running core restarts.","恢复上一版本内核；运行中的内核会重启。");
     snprintf(detail,sizeof(detail),"→ %s",data.core.previous[0]?data.core.previous:"--");
     button=L("Roll back","回滚");tone=DANGER;
+  } else if(confirm_what==CF_ESIM) {
+    title=L("Switch profile?","切换配置文件？");
+    text=L("Mobile data stops for 10-30 s while the modem reads the card again.","基带重新读卡期间，移动数据中断约 10-30 秒。");
+    snprintf(detail,sizeof(detail),"%s",chosen_name);
+  } else if(confirm_what==CF_REBOOT) {
+    title=L("Restart the device?","重启设备？");
+    text=L("The firmware still uses the previous profile. The device restarts now.","固件仍在使用原来的配置文件，设备将立即重启。");
+    button=L("Restart","重启");tone=DANGER;
   } else {
     title=L("Update geo data?","更新 GEO 数据？");
     text=L("Downloads the latest geo databases. A running core restarts.","下载最新的 GEO 数据库；运行中的内核会重启。");

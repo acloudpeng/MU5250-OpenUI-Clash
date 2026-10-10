@@ -216,6 +216,12 @@ ssh -p 2222 root@192.168.0.1 'sh /data/local/tmp/start_dashboard.sh; cat /tmp/da
 ./deploy-dashboard.sh    # dashboard
 ```
 
+Optional components go through `scripts/deploy-components.py` in the same snapshot
+and rollback flow: `--screen`, `--wireguard-tools`, `--mihomo` / `--mihomo-geodata`
+(Clash, [CLASH.md](CLASH.md)) and `--lpac` (eSIM, built by `scripts/prepare-lpac.py`
+or the release's `lpac` asset; [ESIM.md](ESIM.md)). Each is checked locally (aarch64,
+pinned checksum) before the device is contacted.
+
 ---
 
 ## Design rule: shell/ssh/adb only — no boot hooks outside rc.local

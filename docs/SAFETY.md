@@ -133,7 +133,11 @@ ubus call zwrt_data get_wwaniface '{"source_module":"zte_topsw_data","cid":1}'
   never inline-quote device commands through a host shell — push a script and
   run it. See [AI-OPERATIONS.md](AI-OPERATIONS.md) §7.1.
 - **IMEI is QFPROM-fused** — hardware-locked, not modifiable. Don't try.
-- **eSIM**: no eUICC chip; not feasible.
+- **eSIM**: the CN unit has no usable built-in eUICC. Removable eUICC cards are
+  managed with lpac ([ESIM.md](ESIM.md)) through QMI UIM and DMS requests only, never
+  AT commands. A switch takes the radio to low power, powers the SIM off and on and
+  sets the radio online again; firmware daemons are never restarted. When the
+  firmware keeps the previous profile, OpenUI offers a restart instead.
 
 
 ## What the deploy path does (and only this)
@@ -268,3 +272,12 @@ panel session. It never disables the init service. It records brightness and
 touch-service state before stopping UI, and restores on exit, idle timeout,
 or display-child failure. The factory UI resumes its own dim/sleep policy.
 No legacy SETCRTC or debugfs image_dump writes are permitted. See [SCREEN.md](SCREEN.md).
+
+## eSIM profile switching
+
+The agent's QMI requests (`agent/src/qmi.rs`) are limited to the UIM service (logical
+channels to the eUICC's ISD-R, APDUs on them, slot and card status, SIM power off/on)
+and the DMS operating mode. A switch always powers the card back on and returns a
+radio that was online to online, even when a step fails; the worst outcome is a
+device without mobile service until it restarts. No firmware daemon is stopped or
+restarted, and no reboot happens without the owner choosing it. See [ESIM.md](ESIM.md).

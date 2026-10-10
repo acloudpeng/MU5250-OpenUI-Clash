@@ -1,0 +1,19 @@
+Backport of upstream lpac 8e741fe: fix(euicc): lpad version (#391)
+https://github.com/estkme-group/lpac/commit/8e741fe6546e13b3ec3ec2d569692b9f6d56f85f
+
+Sends X-Admin-Protocol: gsma/rsp/v2.2.2 to SM-DP+ servers, as current lpac and
+EasyEUICC do.
+
+diff --git a/euicc/es9p.c b/euicc/es9p.c
+index 6508522..6e5cb30 100644
+--- a/euicc/es9p.c
++++ b/euicc/es9p.c
+@@ -9,7 +9,7 @@
+ 
+ static const char *lpa_header[] = {
+     "User-Agent: gsma-rsp-lpad",
+-    "X-Admin-Protocol: gsma/rsp/v2.2.0",
++    "X-Admin-Protocol: gsma/rsp/v2.2.2",
+     "Content-Type: application/json",
+     NULL,
+ };

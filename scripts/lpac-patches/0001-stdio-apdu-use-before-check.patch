@@ -1,0 +1,32 @@
+Backport of upstream lpac a4150b2: fix(stdio): use before check (#340)
+https://github.com/estkme-group/lpac/commit/a4150b2077fe4f253f1861a75e28cc80197ddcb2
+
+The stdio APDU driver freed *data before checking the pointer on its error path.
+
+diff --git a/driver/apdu/stdio.c b/driver/apdu/stdio.c
+index 1d751c1..f7a192d 100644
+--- a/driver/apdu/stdio.c
++++ b/driver/apdu/stdio.c
+@@ -4,7 +4,6 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+-#include <unistd.h>
+ 
+ #include <cjson/cJSON_ex.h>
+ #include <euicc/hexutil.h>
+@@ -144,11 +143,11 @@ static int json_response(int *ecode, uint8_t **data, uint32_t *data_len) {
+ 
+ err:
+     fret = -1;
+-    free(*data);
+-    if (data) {
++    if (data != NULL) {
++        free(*data);
+         *data = NULL;
+     }
+-    if (data_len) {
++    if (data_len != NULL) {
+         *data_len = 0;
+     }
+     *ecode = -1;

@@ -191,15 +191,16 @@ static void render(struct drm_buf *b) {
     dot(122,83,tone_color(cls));
     box(138,78,160,20,"muted",!bk->has||bk->active==BK_WG?"WireGuard":bk->active==BK_CLASH?"Clash":L("Proxy","代理"));
     add("<div class=\"box head %s\" style=\"left:122px;top:100px;width:178px;height:20px\">",cls);shortened(bk->has?proxy_summary():summary(),176,16);add("</div>");
-    const int pages[] = {OVERVIEW,PROXY,WG,CLASH,PROFILES,DEVICES};
-    const char *ids[] = {"overview","proxy","wireguard","clash","profiles","devices"};
-    const char *titles[] = {L("Overview","概览"),L("Proxy","代理"),"WireGuard","Clash",L("Saved profiles","已保存配置"),L("Device routing","设备分流")};
+    const int pages[] = {OVERVIEW,PROXY,WG,CLASH,ESIM,PROFILES,DEVICES};
+    const char *ids[] = {"overview","proxy","wireguard","clash","esim","profiles","devices"};
+    const char *titles[] = {L("Overview","概览"),L("Proxy","代理"),"WireGuard","Clash","eSIM",L("Saved profiles","已保存配置"),L("Device routing","设备分流")};
     const char *details[] = {L("Battery, uptime and load","电池、运行时间与系统负载"),
                              !bk->has||bk->active==BK_OFF?L("Off / WireGuard / Clash","关闭 / WireGuard / Clash"):bk->active==BK_WG?L("Active: WireGuard","当前：WireGuard"):L("Active: Clash","当前：Clash"),
                              L("Tunnel status and on / off","隧道状态与开关"),L("Nodes, subscriptions and core","节点、订阅与内核"),
+                             esim_summary(),
                              L("Switch between up to 5 configs","在最多 5 个配置之间切换"),L("Choose WireGuard or direct","选择走 WireGuard 或直连")};
     int row=0;
-    for(int i=0;i<6&&row<4;i++) if(visible_page(pages[i]))
+    for(int i=0;i<7&&row<4;i++) if(visible_page(pages[i]))
       nav_row(12,140+68*row++,296,60,ids[i],titles[i],details[i],"",1);
     box(16,418,292,20,"muted",L("Power key: tap to sleep / wake.","电源键短按：息屏 / 唤醒"));
     snprintf(tmp,sizeof(tmp),L("Stock UI returns after %d s idle.","空闲 %d 秒后返回原厂界面"),settings_idle);
@@ -295,6 +296,7 @@ static void render(struct drm_buf *b) {
   else if(page==SUBS) render_subs();
   else if(page==CORE) render_core();
   else if(page==DIAG) render_diag();
+  else if(page==ESIM) render_esim();
   add("</body></html>");
   html_view_render_to(pixels,html);
   for(int y=0;y<H;y++)memcpy((uint8_t*)b->map+y*b->pitch,pixels+y*W,W*2);

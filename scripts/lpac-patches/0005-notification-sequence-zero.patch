@@ -1,0 +1,45 @@
+Backport of upstream lpac 8f68d5c: fix: handling of notification with sequence number 0 correctly (#429)
+https://github.com/estkme-group/lpac/commit/8f68d5c7e5c89519e831c2532134b590ed4d108f
+
+Notification sequence number 0 was skipped by process, remove and dump. The
+v2.3.0 condition differs from the one upstream replaced; the fixed line is the same.
+
+diff --git a/src/applet/notification/dump.c b/src/applet/notification/dump.c
+index 74e1648..9cac850 100644
+--- a/src/applet/notification/dump.c
++++ b/src/applet/notification/dump.c
+@@ -84,7 +84,7 @@ static int applet_main(const int argc, char **argv) {
+             // Although POSIX said user should check errno instead of return value,
+             // but errno may not be set when no conversion is performed according to C99.
+             // Check nptr is same as str_end to ensure there is no conversion.
+-            if ((seqNumber == 0 && strcmp(argv[i], str_end)) || errno != 0) {
++            if (argv[i] == str_end || errno != 0) {
+                 continue;
+             }
+             if (!retrieve_notification(eid, seqNumber)) {
+diff --git a/src/applet/notification/process.c b/src/applet/notification/process.c
+index 7afa592..6102ffb 100644
+--- a/src/applet/notification/process.c
++++ b/src/applet/notification/process.c
+@@ -109,7 +109,7 @@ static int applet_main(int argc, char **argv) {
+             // Although POSIX said user should check errno instead of return value,
+             // but errno may not be set when no conversion is performed according to C99.
+             // Check nptr is same as str_end to ensure there is no conversion.
+-            if ((seqNumber == 0 && strcmp(argv[i], str_end)) || errno != 0) {
++            if (argv[i] == str_end || errno != 0) {
+                 continue;
+             }
+             if (_process_single(seqNumber, autoremove)) {
+diff --git a/src/applet/notification/remove.c b/src/applet/notification/remove.c
+index e369d13..a3dc6c9 100644
+--- a/src/applet/notification/remove.c
++++ b/src/applet/notification/remove.c
+@@ -83,7 +83,7 @@ static int applet_main(int argc, char **argv) {
+             // Although POSIX said user should check errno instead of return value,
+             // but errno may not be set when no conversion is performed according to C99.
+             // Check nptr is same as str_end to ensure there is no conversion.
+-            if ((seqNumber == 0 && strcmp(argv[i], str_end)) || errno != 0) {
++            if (argv[i] == str_end || errno != 0) {
+                 continue;
+             }
+ 

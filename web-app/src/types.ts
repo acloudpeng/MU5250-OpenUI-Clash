@@ -682,7 +682,7 @@ export type ClashCoreAction =
   | { action: 'rollback' }
   | { action: 'geodata'; route?: ClashCoreRoute; mirror?: string }
 
-export type DevUIPageId = 'overview' | 'proxy' | 'wireguard' | 'clash' | 'profiles' | 'devices'
+export type DevUIPageId = 'overview' | 'proxy' | 'wireguard' | 'clash' | 'esim' | 'profiles' | 'devices'
 export interface DevUISettings {
   revision: number
   shortcut_enabled: boolean
@@ -702,3 +702,85 @@ export interface ScreenStatus {
   running: boolean
   state: string
 }
+
+// ── eSIM (agent/src/esim.rs) ──────────────────────────────────────────────────
+
+export interface EsimProfile {
+  iccid: string
+  aid: string
+  enabled: boolean
+  name: string
+  provider: string
+  nickname: string
+  /** operational, test or provisioning */
+  class: string
+}
+export interface EsimNotification {
+  seq: number
+  /** install, enable, disable or delete */
+  operation: string
+  iccid: string
+  /** The SM-DP+ the notification goes to. */
+  address: string
+}
+/** The last read of the card in the SIM tray. */
+export interface EsimView {
+  read_at: number
+  card: 'euicc' | 'sim' | 'absent' | 'error'
+  detail: string | null
+  eid: string
+  info: {
+    default_smdp?: string | null
+    root_smds?: string | null
+    sgp22?: string | null
+    profile_version?: string | null
+    firmware?: string | null
+    free_nvm?: number | null
+    installed_apps?: number | null
+    ci_pkids?: string[] | null
+    sas?: string | null
+  } | null
+  profiles: EsimProfile[]
+  notifications: EsimNotification[]
+  /** What the firmware reports; null when it could not be read. */
+  firmware: { iccid: string; state: string | null } | null
+  generation: number
+}
+export type EsimJobKind = 'scan' | 'enable' | 'disable' | 'nickname' | 'delete' | 'download' | 'notifications'
+export interface EsimJob {
+  id: number
+  kind: EsimJobKind
+  state: 'running' | 'done' | 'failed'
+  /** The agent's step (reading, radio_offline…) or lpac's (es9p_authenticate_client…). */
+  step: string
+  error: string | null
+  result: Record<string, unknown> | null
+  started_at: number
+  finished_at: number | null
+}
+export interface EsimStatus {
+  /** lpac is on the device. */
+  installed: boolean
+  job: EsimJob | null
+  view: EsimView | null
+  /** A switch the firmware has not taken up yet; a restart finishes it. */
+  reboot_needed: boolean
+  clash_running: boolean
+}
+/** auto: through the running Clash core, else direct. */
+export type EsimRoute = 'auto' | 'proxy' | 'direct'
+export type EsimAction =
+  | { action: 'scan' }
+  | { action: 'enable' | 'disable'; iccid: string }
+  | { action: 'nickname'; iccid: string; nickname: string }
+  | {
+      action: 'download'
+      activation_code?: string
+      smdp?: string
+      matching_id?: string
+      confirmation_code?: string
+      imei?: string
+      route?: EsimRoute
+      insecure?: boolean
+    }
+  | { action: 'notifications'; operation: 'process' | 'remove'; seq: number[]; route?: EsimRoute }

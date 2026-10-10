@@ -14,11 +14,12 @@ const FILE: &str = "/data/local/tmp/openui-devui/settings.json";
 /// the old four features again keeps them.
 const MIGRATED: &str = "/data/local/tmp/openui-devui/menu-v2";
 /// Features the screen menu can show, in menu order; at most four at a time.
-const MENU_ITEMS: [&str; 6] = [
+const MENU_ITEMS: [&str; 7] = [
     "overview",
     "proxy",
     "wireguard",
     "clash",
+    "esim",
     "profiles",
     "devices",
 ];
@@ -30,6 +31,8 @@ const LEGACY_PAGES: u32 = 0b1_1011;
 /// WireGuard (bit 0) with device routing (1) and saved profiles (3): such a screen opens
 /// those two only while their own bits are set, not through WireGuard.
 const WIREGUARD_PAGES: u32 = 0b1011;
+/// The eSIM page (bit 7), which screens before it reject in a `V` record.
+const ESIM_PAGE: u32 = 1 << 7;
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
@@ -92,8 +95,9 @@ impl Settings {
     /// they lack: only their pages, all of them when none is chosen, and the menu as the
     /// startup page in place of a new one. WireGuard, Proxy or Clash brings all of
     /// WireGuard's pages, so such a screen keeps its profiles and device routing (the
-    /// new screen reaches those through WireGuard). `V` carries the full choice; page
-    /// numbers: wireguard 0, devices 1, menu 2, profiles 3, overview 4, proxy 5, clash 6.
+    /// new screen reaches those through WireGuard). `V` is the same for screens built
+    /// before eSIM, without it; `W` carries the full choice. Page numbers: wireguard 0,
+    /// devices 1, menu 2, profiles 3, overview 4, proxy 5, clash 6, esim 7.
     pub fn projection(&self) -> String {
         let page = |s: &str| match s {
             "wireguard" => 0,
@@ -102,10 +106,18 @@ impl Settings {
             "overview" => 4,
             "proxy" => 5,
             "clash" => 6,
+            "esim" => 7,
             _ => 2,
         };
         let mask = self.menu_items.iter().fold(0u32, |m, s| m | (1 << page(s)));
         let home = page(&self.home_page);
+        let without = |mask: u32, home: u32, pages: u32| {
+            (
+                mask & pages,
+                if pages & (1 << home) != 0 { home } else { 2 },
+            )
+        };
+        let (proxy_mask, proxy_home) = without(mask, home, !ESIM_PAGE);
         let mut legacy = match mask & LEGACY_PAGES {
             0 => LEGACY_PAGES,
             m => m,
@@ -114,14 +126,14 @@ impl Settings {
         if self.menu_items.iter().any(tunnel) {
             legacy |= WIREGUARD_PAGES;
         }
-        let legacy_home = if legacy & (1 << home) != 0 { home } else { 2 };
+        let legacy_home = without(legacy, home, legacy).1;
         let line = |kind: char, home: u32, mask: u32| {
             format!(
                 "{kind} {} {} {} {home} {mask} {}\n",
                 self.revision, self.idle_seconds, self.brightness, self.language
             )
         };
-        line('C', legacy_home, legacy) + &line('V', home, mask)
+        line('C', legacy_home, legacy) + &line('V', proxy_home, proxy_mask) + &line('W', home, mask)
     }
 }
 /// Settings saved with the old default menu showed every feature there was; they get the
@@ -290,7 +302,7 @@ mod tests {
         // An old screen opens profiles and devices only from its menu: WireGuard brings them.
         assert_eq!(
             next.projection(),
-            "C 2 90 160 4 27 zh\nV 2 90 160 4 17 zh\n"
+            "C 2 90 160 4 27 zh\nV 2 90 160 4 17 zh\nW 2 90 160 4 17 zh\n"
         );
         for (key, value) in [
             ("brightness", json!(0)),
@@ -329,7 +341,7 @@ mod tests {
         let english = prepare(&old, &serde_json::to_vec(&english).unwrap()).unwrap();
         assert_eq!(
             english.projection(),
-            "C 2 90 160 4 27 en\nV 2 90 160 4 17 en\n"
+            "C 2 90 160 4 27 en\nV 2 90 160 4 17 en\nW 2 90 160 4 17 en\n"
         );
         // Saving without a language keeps the current one.
         let mut later = b.clone();
@@ -367,7 +379,7 @@ mod tests {
         // WireGuard's), the new screen gets the choice.
         assert_eq!(
             Settings::default().projection(),
-            "C 1 120 128 2 27 zh\nV 1 120 128 2 113 zh\n"
+            "C 1 120 128 2 27 zh\nV 1 120 128 2 113 zh\nW 1 120 128 2 113 zh\n"
         );
         assert_eq!(old_screen_mask(&Settings::default()) & 0b1_1011, 0b1_1011);
         let choose = |items: Value, home: &str| {
@@ -379,7 +391,7 @@ mod tests {
         // No page an old screen knows: it shows all of them and starts at the menu.
         assert_eq!(
             choose(json!(["proxy", "clash"]), "clash").projection(),
-            "C 2 90 160 2 27 zh\nV 2 90 160 6 96 zh\n"
+            "C 2 90 160 2 27 zh\nV 2 90 160 6 96 zh\nW 2 90 160 6 96 zh\n"
         );
         assert_eq!(
             choose(
@@ -387,13 +399,13 @@ mod tests {
                 "devices"
             )
             .projection(),
-            "C 2 90 160 1 27 zh\nV 2 90 160 1 58 zh\n"
+            "C 2 90 160 1 27 zh\nV 2 90 160 1 58 zh\nW 2 90 160 1 58 zh\n"
         );
         // Without WireGuard, profiles and devices still reach an old screen through Clash.
         let clash = choose(json!(["overview", "proxy", "clash"]), "overview");
         assert_eq!(
             clash.projection(),
-            "C 2 90 160 4 27 zh\nV 2 90 160 4 112 zh\n"
+            "C 2 90 160 4 27 zh\nV 2 90 160 4 112 zh\nW 2 90 160 4 112 zh\n"
         );
         assert_eq!(old_screen_mask(&clash) & 0b1011, 0b1011);
         for (items, mask) in [
@@ -441,5 +453,23 @@ mod tests {
         ] {
             assert!(migrate(&saved(custom, "menu")).is_none(), "{custom:?}");
         }
+    }
+    #[test]
+    fn the_esim_page_reaches_only_screens_that_know_it() {
+        let mut b = body();
+        b["menu_items"] = json!(["overview", "esim", "clash"]);
+        b["home_page"] = json!("esim");
+        let s = prepare(&Settings::default(), &serde_json::to_vec(&b).unwrap()).unwrap();
+        // Screens before eSIM read V without it, starting at the menu; W has the choice.
+        assert_eq!(
+            s.projection(),
+            "C 2 90 160 2 27 zh\nV 2 90 160 2 80 zh\nW 2 90 160 7 208 zh\n"
+        );
+        b["menu_items"] = json!(["esim"]);
+        let only = prepare(&Settings::default(), &serde_json::to_vec(&b).unwrap()).unwrap();
+        assert_eq!(
+            only.projection(),
+            "C 2 90 160 2 27 zh\nV 2 90 160 2 0 zh\nW 2 90 160 7 128 zh\n"
+        );
     }
 }

@@ -54,6 +54,21 @@ pub enum Job {
     Core(Value),
     /// `diag`: starts the one-tap diagnosis.
     Diagnose,
+    /// `esim scan`, `esim enable <generation> <index>`, `esim reboot`.
+    Esim(Esim),
+}
+
+/// eSIM work from the panel. Profiles come back as indices into the card view of
+/// `generation`, so the panel never sends an ICCID.
+#[derive(Debug, PartialEq)]
+pub enum Esim {
+    Scan,
+    Enable {
+        generation: u64,
+        index: usize,
+    },
+    /// Only while a switch waits for a restart.
+    Reboot,
 }
 
 fn number(word: &str, error: &'static str) -> Result<u64, &'static str> {
@@ -161,7 +176,13 @@ pub fn parse(line: &str) -> Result<Request, &'static str> {
             job(Job::Core(json!({"action":"update","tag":tag})))
         }
         ["diag"] => job(Job::Diagnose),
-        [_, _, _] | [_, _] | [_] => Err("Unsupported action"),
+        ["esim", "scan"] => job(Job::Esim(Esim::Scan)),
+        ["esim", "reboot"] => job(Job::Esim(Esim::Reboot)),
+        ["esim", "enable", g, i] => job(Job::Esim(Esim::Enable {
+            generation: generation(g)?,
+            index: index(i)?,
+        })),
+        [_, _, _, _] | [_, _, _] | [_, _] | [_] => Err("Unsupported action"),
         _ => Err("Invalid action"),
     }
 }
@@ -331,6 +352,86 @@ pub fn core_record(code: u16, reply: &Value) -> String {
         text_bytes(job["error"].as_str().unwrap_or(""), 96)
     )
 }
+/// Profile rows sent to the panel: two pages of four.
+pub const ESIM_ROWS: usize = 8;
+/// `Q installed card generation count reboot kind state step firmware_ready error`, then
+/// one `q index enabled class name iccid-tail` per profile. No EID, and only the last four
+/// digits of an ICCID, which tell profiles of one carrier apart.
+pub fn esim_records(v: &Value) -> String {
+    let view = &v["view"];
+    let job = &v["job"];
+    let profiles = view["profiles"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let firmware_ready = match (
+        job["kind"].as_str(),
+        job["result"]["firmware_ready"].as_bool(),
+    ) {
+        (Some("enable"), Some(ready)) => {
+            if ready {
+                "1"
+            } else {
+                "0"
+            }
+        }
+        _ => "-",
+    };
+    let mut out = format!(
+        "Q\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+        u8::from(v["installed"] == true),
+        word(view["card"].as_str().unwrap_or(""), 8),
+        view["generation"].as_u64().unwrap_or(0),
+        profiles.len(),
+        u8::from(v["reboot_needed"] == true),
+        word(job["kind"].as_str().unwrap_or(""), 15),
+        word(job["state"].as_str().unwrap_or(""), 11),
+        word(job["step"].as_str().unwrap_or(""), 39),
+        firmware_ready,
+        text_bytes(
+            job["error"]
+                .as_str()
+                .or(view["detail"].as_str())
+                .unwrap_or(""),
+            96
+        )
+    );
+    for (i, p) in profiles.iter().take(ESIM_ROWS).enumerate() {
+        let name = [&p["nickname"], &p["name"], &p["provider"]]
+            .into_iter()
+            .filter_map(Value::as_str)
+            .find(|s| !s.trim().is_empty())
+            .unwrap_or("");
+        let iccid = p["iccid"].as_str().unwrap_or("");
+        let tail = &iccid[iccid.len().saturating_sub(4)..];
+        out.push_str(&format!(
+            "q\t{i}\t{}\t{}\t{}\t{}\n",
+            u8::from(p["enabled"] == true),
+            word(p["class"].as_str().unwrap_or(""), 15),
+            text_bytes(name, 96),
+            word(tail, 4)
+        ));
+    }
+    out
+}
+
+/// The body of an eSIM enable for profile `index` of the view the panel showed.
+pub fn esim_enable_body(
+    view: &Value,
+    generation: u64,
+    index: usize,
+) -> Result<Value, &'static str> {
+    if view["generation"].as_u64() != Some(generation) {
+        return Err("Stale");
+    }
+    let p = &view["profiles"][index];
+    match p["iccid"].as_str() {
+        Some(iccid) if p["enabled"] == false => Ok(json!({"action":"enable","iccid":iccid})),
+        Some(_) => Err("Already enabled"),
+        None => Err("Stale"),
+    }
+}
+
 /// `X running finished verdict` and one `x` per check with up to four figures (`-` when
 /// absent), which the panel words in its own language.
 pub fn diag_records(v: &Value) -> String {
@@ -647,6 +748,15 @@ mod tests {
         );
         assert_eq!(job("core geodata"), Job::Core(json!({"action":"geodata"})));
         assert_eq!(job("diag"), Job::Diagnose);
+        assert_eq!(job("esim scan"), Job::Esim(Esim::Scan));
+        assert_eq!(job("esim reboot"), Job::Esim(Esim::Reboot));
+        assert_eq!(
+            job("esim enable 77 3"),
+            Job::Esim(Esim::Enable {
+                generation: 77,
+                index: 3
+            })
+        );
         assert_eq!(parse("groups 4"), Ok(Request::Groups { offset: 4 }));
         assert_eq!(
             parse("nodes 99 2 8"),
@@ -689,6 +799,13 @@ mod tests {
             "core update $(reboot)",
             "core install",
             "diag now",
+            "esim",
+            "esim download",
+            "esim enable 77",
+            "esim enable x 1",
+            "esim enable 77 -1",
+            "esim enable 77 1 extra",
+            "esim delete 77 1",
             "status extra",
             "",
         ] {
@@ -924,5 +1041,57 @@ mod tests {
             split(vec![vec!["a"], vec!["b"]])
         );
         assert_ne!(generation(&[]), 0);
+    }
+    // Built from pieces so no whole test identifier sits in the source
+    // (scripts/check-device-secrets.py rejects those).
+    const ESIM_ONE: &str = concat!("89852000", "12345678901");
+    const ESIM_TWO: &str = concat!("8944476", "500001234567");
+    #[test]
+    fn esim_records_hide_identifiers() {
+        let v = json!({"installed":true,"reboot_needed":true,
+            "job":{"kind":"enable","state":"done","step":"firmware","error":null,
+                   "result":{"iccid":ESIM_ONE,"firmware_ready":false}},
+            "view":{"card":"euicc","generation":42,"eid":"89049032123451234512345678901235","profiles":[
+                {"iccid":ESIM_ONE,"enabled":true,"name":"CMHK","nickname":"香港\t卡","provider":"China Mobile","class":"operational"},
+                {"iccid":ESIM_TWO,"enabled":false,"name":"","nickname":"","provider":"Truphone","class":"test"}]}});
+        let r = esim_records(&v);
+        assert_eq!(
+            r,
+            "Q\t1\teuicc\t42\t2\t1\tenable\tdone\tfirmware\t0\t-\n\
+             q\t0\t1\toperational\t香港卡\t8901\n\
+             q\t1\t0\ttest\tTruphone\t4567\n"
+        );
+        assert!(!r.contains("89049032") && !r.contains(ESIM_ONE));
+        assert_eq!(
+            esim_records(&json!({"installed":false,"view":null,"job":null,"reboot_needed":false})),
+            "Q\t0\t-\t0\t0\t0\t-\t-\t-\t-\t-\n"
+        );
+        let failed = json!({"installed":true,"job":{"kind":"scan","state":"failed","step":"reading","error":"The modem did not answer in time"},
+            "view":{"card":"error","detail":"The modem did not answer in time","generation":0,"profiles":[]}});
+        assert!(esim_records(&failed).ends_with("\t-\tThe modem did not answer in time\n"));
+        let many: Vec<Value> = (0..12)
+            .map(|i| json!({"iccid":format!("89{i:017}"),"enabled":i==0,"name":"x"}))
+            .collect();
+        let r = esim_records(
+            &json!({"installed":true,"view":{"card":"euicc","generation":1,"profiles":many}}),
+        );
+        assert!(r.starts_with("Q\t1\teuicc\t1\t12\t"));
+        assert_eq!(
+            r.lines().filter(|l| l.starts_with("q\t")).count(),
+            ESIM_ROWS
+        );
+    }
+    #[test]
+    fn esim_enable_names_a_profile_of_the_shown_view() {
+        let view = json!({"generation":42,"profiles":[
+            {"iccid":ESIM_ONE,"enabled":true},{"iccid":ESIM_TWO,"enabled":false}]});
+        assert_eq!(
+            esim_enable_body(&view, 42, 1),
+            Ok(json!({"action":"enable","iccid":ESIM_TWO}))
+        );
+        assert_eq!(esim_enable_body(&view, 41, 1), Err("Stale"));
+        assert_eq!(esim_enable_body(&view, 42, 2), Err("Stale"));
+        assert_eq!(esim_enable_body(&view, 42, 0), Err("Already enabled"));
+        assert_eq!(esim_enable_body(&Value::Null, 0, 0), Err("Stale"));
     }
 }

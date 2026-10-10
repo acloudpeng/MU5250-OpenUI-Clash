@@ -10,6 +10,8 @@ permissions:
 jobs:
   checks:
     uses: ./.github/workflows/checks.yml
+  lpac:
+    uses: ./.github/workflows/lpac.yml
   agent:
     runs-on: ubuntu-latest
     steps:
@@ -78,7 +80,7 @@ jobs:
           path: dashboard-dist.tar.gz
 
   publish:
-    needs: [agent, dashboard, checks]
+    needs: [agent, dashboard, checks, lpac]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -94,6 +96,7 @@ jobs:
           mkdir assets
           cp artifacts/zte-agent/zte-agent assets/zte-agent
           cp artifacts/dashboard-dist/dashboard-dist.tar.gz assets/
+          cp artifacts/lpac-linux-arm64/lpac assets/lpac
           python3 - <<'PYTHON'
           import os
           import zipfile
@@ -104,7 +107,7 @@ jobs:
               for image in images: archive.write(image, image.name)
           PYTHON
           cd assets
-          sha256sum zte-agent dashboard-dist.tar.gz installer-wireframes.zip > sha256sums.txt
+          sha256sum zte-agent dashboard-dist.tar.gz lpac installer-wireframes.zip > sha256sums.txt
           cat sha256sums.txt
 
       - name: Release notes
@@ -124,6 +127,9 @@ jobs:
             native installer. For terminal deployment, run `scripts/zharden.sh`
             once to install the isolated dashboard server, then use
             `deploy-dashboard.sh`; do not add a second ZTE uhttpd UCI instance.
+          - `lpac` — eSIM LPA (aarch64, built from lpac v2.3.0 with the patches in
+            `scripts/lpac-patches/`; AGPL-3.0/LGPL-2.1, see `licenses/lpac/`).
+            Deploy with `scripts/deploy-components.py --lpac`.
           - `sha256sums.txt` — SHA-256 checksums.
 
           **Verify**

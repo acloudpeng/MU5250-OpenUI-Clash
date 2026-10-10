@@ -93,12 +93,18 @@ and touch coordinates are rotated **180°** for the U60's display orientation.
 - Keep configuration private: the API never returns the saved private key or PSK.
 - Open the device's 320×480 touchscreen panel from its own **DevUI** sidebar page. The DevUI menu
   shows up to four of Overview, Proxy (Off / WireGuard / Clash and diagnostics), WireGuard, Clash
-  (mode, nodes and delay tests, subscriptions, core and geo updates), Saved profiles and Device routing.
+  (mode, nodes and delay tests, subscriptions, core and geo updates), eSIM (switch profiles), Saved
+  profiles and Device routing.
   View status, toggle the tunnel, and change device selections without handling keys.
 - Restore the stock display and touch services on exit, the configured idle timeout (two minutes by default),
   or a panel failure detected by its supervisor. Exiting the panel preserves routing.
 - Check configuration revisions so webpage and touchscreen edits cannot silently
   overwrite each other.
+
+- Manage the profiles on a removable eUICC card (9eSIM, 5ber, eSTK.me) in the SIM tray, as
+  EasyEUICC does on Android: switch, rename, delete, download by activation code or QR image,
+  and notifications, from the web page; switch from the touchscreen. Uses lpac. See
+  [eSIM documentation](docs/ESIM.md).
 
 The rest of OpenUI is retained: modem signal and band/cell controls, Wi-Fi and
 router settings, clients, APN, SMS, battery controls, logging and system information.
@@ -138,11 +144,13 @@ mkdir -p build
 tar czf build/dashboard-dist.tar.gz -C web-app/dist .
 python3 scripts/prepare-wireguard.py --output build/wireguard/wg
 ZIG=/path/to/zig sh screen/build.sh
+ZIG=/path/to/zig python3 scripts/prepare-lpac.py
 ```
 
 The `wg` preparer downloads a checksum-pinned official OpenWrt package and
 extracts only the CLI. The screen build fetches checksum-pinned litehtml, FreeType and GNU Unifont.
-Neither command contacts or changes your modem.
+The lpac build fetches the checksum-pinned lpac v2.3.0 source and verifies the result's checksum.
+None of these commands contacts or changes your modem.
 
 ### Update an existing OpenUI installation
 
@@ -157,6 +165,7 @@ python3 scripts/deploy-components.py \
   --dashboard build/dashboard-dist.tar.gz \
   --wireguard-tools build/wireguard/wg \
   --screen build/screen/openui-screen \
+  --lpac build/lpac/lpac \
   --dry-run
 ```
 

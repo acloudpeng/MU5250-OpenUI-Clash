@@ -4,7 +4,7 @@ use crate::{clash, clash_diag, handlers::AppState, network_ext, proxy, system, w
 // declared here so that main.rs needs no change.
 #[path = "screen_ipc.rs"]
 mod ipc;
-use ipc::{Cache, Job, Request};
+use ipc::{Cache, Esim, Job, Request};
 use serde_json::{json, Value};
 use std::{
     fs,
@@ -86,6 +86,8 @@ struct Parts {
     core: String,
     /// `X` and `x`
     diagnostics: String,
+    /// `Q` and `q`
+    esim: String,
     /// The pass that read `B`, `K`/`U` and `X`/`x`, and the one that read `M`.
     proxy_pass: u64,
     core_pass: u64,
@@ -103,6 +105,7 @@ impl Parts {
             clash: String::new(),
             core: String::new(),
             diagnostics: String::new(),
+            esim: String::new(),
             proxy_pass: 0,
             core_pass: 0,
         }
@@ -341,7 +344,7 @@ fn refresh_system(state: &AppState) {
         cpu.overall
     );
 }
-/// `B`, `K`/`U`, `M` and `X`/`x`: quick reads that never take the WireGuard lock. The
+/// `B`, `K`/`U`, `X`/`x`, `Q`/`q` and `M`: quick reads that never take the WireGuard lock. The
 /// periodic refresher and the job thread both run this. `M` is stored after the others:
 /// the first read of a core file hashes it, which can take seconds.
 fn refresh_proxy_parts() {
@@ -354,11 +357,12 @@ fn refresh_proxy_parts() {
         String::new()
     };
     let diagnostics = ipc::diag_records(&clash_diag::get().1["data"]);
-    store_proxy_parts(pass, [backend, clash, diagnostics]);
+    let esim = ipc::esim_records(&crate::esim::status());
+    store_proxy_parts(pass, [backend, clash, diagnostics, esim]);
     let (code, v) = core_status();
     store_core(pass, ipc::core_record(code, &v));
 }
-fn store_proxy_parts(pass: u64, [backend, clash, diagnostics]: [String; 3]) {
+fn store_proxy_parts(pass: u64, [backend, clash, diagnostics, esim]: [String; 4]) {
     let mut p = PARTS.lock().unwrap();
     if !newest(&mut p.proxy_pass, pass) {
         return;
@@ -366,6 +370,7 @@ fn store_proxy_parts(pass: u64, [backend, clash, diagnostics]: [String; 3]) {
     p.backend = backend;
     p.clash = clash;
     p.diagnostics = diagnostics;
+    p.esim = esim;
 }
 fn store_core(pass: u64, core: String) {
     let mut p = PARTS.lock().unwrap();
@@ -419,6 +424,7 @@ fn status() -> String {
             &p.clash,
             &p.core,
             &p.diagnostics,
+            &p.esim,
         ],
         &p.devices,
         &tail,
@@ -434,6 +440,8 @@ enum Work {
     Delay(Value),
     Core(Value),
     Diagnose,
+    Esim(Value),
+    Reboot,
 }
 fn work(job: Job) -> Result<Work, &'static str> {
     let proxies = || PROXIES.lock().unwrap();
@@ -452,6 +460,14 @@ fn work(job: Job) -> Result<Work, &'static str> {
         }
         Job::Core(v) => Work::Core(v),
         Job::Diagnose => Work::Diagnose,
+        Job::Esim(Esim::Scan) => Work::Esim(json!({"action":"scan"})),
+        Job::Esim(Esim::Enable { generation, index }) => {
+            let view = serde_json::to_value(crate::esim::view()).unwrap_or_default();
+            Work::Esim(ipc::esim_enable_body(&view, generation, index)?)
+        }
+        // A restart only to finish a switch the firmware has not taken up.
+        Job::Esim(Esim::Reboot) if crate::esim::status()["reboot_needed"] == true => Work::Reboot,
+        Job::Esim(Esim::Reboot) => return Err("No restart is needed"),
     })
 }
 fn run(work: &Work) -> (u16, Value) {
@@ -467,6 +483,8 @@ fn run(work: &Work) -> (u16, Value) {
         // These two start background work and return; their records show progress.
         Work::Core(v) => core_action(&body(v)),
         Work::Diagnose => clash_diag::run(),
+        Work::Esim(v) => crate::esim::post(&body(v)),
+        Work::Reboot => crate::device_ext::reboot(),
     }
 }
 /// Ends a job on every path, a panic included: publishes its result (failed unless the
@@ -662,7 +680,14 @@ mod tests {
         // and stores after the job thread's pass, which began after the job: the job's
         // outcome must stay, since FRESH already says the records show it.
         let (periodic, job) = (begin_pass(), begin_pass());
-        let parts = |b: &str| [format!("B\t{b}\n"), String::new(), String::new()];
+        let parts = |b: &str| {
+            [
+                format!("B\t{b}\n"),
+                String::new(),
+                String::new(),
+                String::new(),
+            ]
+        };
         store_proxy_parts(job, parts("after"));
         store_proxy_parts(periodic, parts("before"));
         store_core(job, "M\tafter\n".into());

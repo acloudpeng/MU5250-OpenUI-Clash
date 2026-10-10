@@ -1,0 +1,68 @@
+Backport of upstream lpac c0f585f: feat(euicc): return the ICCID in the result of load_bound_profile_package (#420)
+https://github.com/estkme-group/lpac/commit/c0f585f308559a3112f0d3725df2af85c808af40
+
+A finished download reports the new profile's ICCID.
+
+diff --git a/euicc/es10b.c b/euicc/es10b.c
+index b2fd47c..24a503e 100644
+--- a/euicc/es10b.c
++++ b/euicc/es10b.c
+@@ -174,13 +174,14 @@ static int es10b_load_bound_profile_package_tx(struct euicc_ctx *ctx,
+     result->seqNumber = 0;
+     result->bppCommandId = ES10B_BPP_COMMAND_ID_UNDEFINED;
+     result->errorReason = ES10B_ERROR_REASON_UNDEFINED;
++    result->iccid = NULL;
+ 
+     if (es10x_command(ctx, &respbuf, &resplen, reqbuf, reqbuf_len) < 0) {
+         goto err;
+     }
+ 
+     if (resplen > 0) {
+-        struct euicc_derutil_node tmpnode, n_notificationMetadata, n_sequenceNumber, n_finalResult;
++        struct euicc_derutil_node tmpnode, n_notificationMetadata, n_sequenceNumber, n_iccid, n_finalResult;
+ 
+         if (euicc_derutil_unpack_find_tag(&tmpnode, 0xBF37, respbuf, resplen) < 0) // ProfileInstallationResult
+         {
+@@ -215,6 +216,18 @@ static int es10b_load_bound_profile_package_tx(struct euicc_ctx *ctx,
+             result->seqNumber = euicc_derutil_convert_bin2long(n_sequenceNumber.value, n_sequenceNumber.length);
+         }
+ 
++        if (euicc_derutil_unpack_find_tag(&n_iccid, 0x5A, n_notificationMetadata.value, n_notificationMetadata.length)
++            == 0) {
++            result->iccid = malloc((n_iccid.length * 2) + 1);
++            if (result->iccid) {
++                if (euicc_hexutil_bin2gsmbcd(result->iccid, (n_iccid.length * 2) + 1, n_iccid.value, n_iccid.length)
++                    < 0) {
++                    free(result->iccid);
++                    result->iccid = NULL;
++                }
++            }
++        }
++
+         switch (n_finalResult.tag) {
+         case 0xA0: // SuccessResult
+             break;
+diff --git a/euicc/es10b.h b/euicc/es10b.h
+index ea778bb..4df1556 100644
+--- a/euicc/es10b.h
++++ b/euicc/es10b.h
+@@ -59,6 +59,7 @@ enum es10b_cancel_session_reason {
+ 
+ struct es10b_load_bound_profile_package_result {
+     unsigned long seqNumber;
++    char *iccid;
+     enum es10b_bpp_command_id bppCommandId;
+     enum es10b_error_reason errorReason;
+ };
+diff --git a/src/applet/profile/download.c b/src/applet/profile/download.c
+index 62f4f2e..ff018b1 100644
+--- a/src/applet/profile/download.c
++++ b/src/applet/profile/download.c
+@@ -60,6 +60,7 @@ static cJSON *build_download_result_json(const struct es10b_load_bound_profile_p
+         return NULL;
+     }
+     cJSON_AddNumberToObject(jdata, "seqNumber", (double)result->seqNumber);
++    cJSON_AddStringOrNullToObject(jdata, "iccid", result->iccid);
+     cJSON_AddStringToObject(jdata, "bppCommandId", euicc_bppcommandid2str(result->bppCommandId));
+     cJSON_AddStringToObject(jdata, "errorReason", euicc_errorreason2str(result->errorReason));
+     return jdata;

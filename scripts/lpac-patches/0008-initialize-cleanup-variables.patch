@@ -1,0 +1,107 @@
+Zero-initialize variables released by _cleanup_ attributes (OpenUI patch).
+
+These variables are freed when the function returns, but were left uninitialized.
+When an early step failed, e.g. es10c_get_eid in chip info, lpac freed stack garbage
+and crashed before closing its logical channel. The same pattern remains in
+upstream main (82ada9e) for chip info, notification process/replay/dump and the stdio
+drivers.
+
+diff --git a/driver/apdu/stdio.c b/driver/apdu/stdio.c
+index bd3de58..356d347 100644
+--- a/driver/apdu/stdio.c
++++ b/driver/apdu/stdio.c
+@@ -80,8 +80,8 @@ static bool json_request(const char *func, const uint8_t *param, unsigned param_
+ 
+ static int json_response(int *ecode, uint8_t **data, uint32_t *data_len) {
+     int fret = 0;
+-    _cleanup_free_ char *data_json;
+-    _cleanup_cjson_ cJSON *data_jroot;
++    _cleanup_free_ char *data_json = NULL;
++    _cleanup_cjson_ cJSON *data_jroot = NULL;
+     cJSON *data_payload;
+     cJSON *jtmp;
+ 
+diff --git a/driver/http/stdio.c b/driver/http/stdio.c
+index 09069ce..4bd7984 100644
+--- a/driver/http/stdio.c
++++ b/driver/http/stdio.c
+@@ -93,8 +93,8 @@ static bool json_request(const char *url, const uint8_t *tx, uint32_t tx_len, co
+ static int http_interface_transmit(struct euicc_ctx *ctx, const char *url, uint32_t *rcode, uint8_t **rx,
+                                    uint32_t *rx_len, const uint8_t *tx, uint32_t tx_len, const char **headers) {
+     int fret = 0;
+-    _cleanup_free_ char *rx_json;
+-    _cleanup_cjson_ cJSON *rx_jroot;
++    _cleanup_free_ char *rx_json = NULL;
++    _cleanup_cjson_ cJSON *rx_jroot = NULL;
+     cJSON *rx_payload;
+     cJSON *jtmp;
+ 
+diff --git a/src/applet/chip/info.c b/src/applet/chip/info.c
+index 8dd42f9..dbb7912 100644
+--- a/src/applet/chip/info.c
++++ b/src/applet/chip/info.c
+@@ -14,9 +14,9 @@
+ 
+ static int applet_main(int argc, char **argv) {
+     _cleanup_free_ char *eid = NULL;
+-    _cleanup_(es10a_euicc_configured_addresses_free) struct es10a_euicc_configured_addresses addresses;
+-    _cleanup_es10b_rat_list_ struct es10b_rat *ratList;
+-    _cleanup_(es10c_ex_euiccinfo2_free) struct es10c_ex_euiccinfo2 euiccinfo2;
++    _cleanup_(es10a_euicc_configured_addresses_free) struct es10a_euicc_configured_addresses addresses = {0};
++    _cleanup_es10b_rat_list_ struct es10b_rat *ratList = NULL;
++    _cleanup_(es10c_ex_euiccinfo2_free) struct es10c_ex_euiccinfo2 euiccinfo2 = {0};
+     cJSON *jaddresses = NULL, *jratList = NULL, *jeuiccinfo2 = NULL, *jdata = NULL;
+ 
+     if (es10c_get_eid(&euicc_ctx, &eid)) {
+diff --git a/src/applet/notification/dump.c b/src/applet/notification/dump.c
+index 9cac850..ef245db 100644
+--- a/src/applet/notification/dump.c
++++ b/src/applet/notification/dump.c
+@@ -13,7 +13,7 @@
+ #include <unistd.h>
+ 
+ static bool retrieve_notification(const char *eid, const uint32_t seqNumber) {
+-    _cleanup_(es10b_pending_notification_free) struct es10b_pending_notification notification;
++    _cleanup_(es10b_pending_notification_free) struct es10b_pending_notification notification = {0};
+ 
+     if (es10b_retrieve_notifications_list(&euicc_ctx, &notification, seqNumber)) {
+         jprint_error("es10b_retrieve_notifications_list", NULL);
+diff --git a/src/applet/notification/process.c b/src/applet/notification/process.c
+index a9d6673..552ffed 100644
+--- a/src/applet/notification/process.c
++++ b/src/applet/notification/process.c
+@@ -15,7 +15,7 @@
+ static int _process_single(uint32_t seqNumber, uint8_t autoremove) {
+     int ret;
+     char str_seqNumber[11];
+-    _cleanup_(es10b_pending_notification_free) struct es10b_pending_notification notification;
++    _cleanup_(es10b_pending_notification_free) struct es10b_pending_notification notification = {0};
+ 
+     snprintf(str_seqNumber, sizeof(str_seqNumber), "%u", seqNumber);
+ 
+diff --git a/src/applet/notification/replay.c b/src/applet/notification/replay.c
+index b059399..649714c 100644
+--- a/src/applet/notification/replay.c
++++ b/src/applet/notification/replay.c
+@@ -92,7 +92,7 @@ static int applet_main(const int argc, char **argv) {
+ 
+     size_t n;
+ 
+-    _cleanup_(es10b_pending_notification_free) struct es10b_pending_notification notification;
++    _cleanup_(es10b_pending_notification_free) struct es10b_pending_notification notification = {0};
+ 
+     while (getline(&input, &n, stdin) != -1) {
+         _cleanup_cjson_ cJSON *jroot = cJSON_ParseWithLength(input, n);
+diff --git a/src/applet/profile/list.c b/src/applet/profile/list.c
+index b01a7e8..4caefe6 100644
+--- a/src/applet/profile/list.c
++++ b/src/applet/profile/list.c
+@@ -11,7 +11,7 @@
+ #include <unistd.h>
+ 
+ static int applet_main(int argc, char **argv) {
+-    _cleanup_es10c_profile_info_list_ struct es10c_profile_info_list *profiles;
++    _cleanup_es10c_profile_info_list_ struct es10c_profile_info_list *profiles = NULL;
+     struct es10c_profile_info_list *rptr;
+     cJSON *jdata = NULL;
+ 

@@ -32,7 +32,9 @@ data/bin/mihomo
 data/share/mihomo
 data/bin/openui-screen
 data/local/tmp/openui-screen-verified
-data/local/tmp/openui-screen-licenses"
+data/local/tmp/openui-screen-licenses
+data/bin/lpac
+data/local/tmp/openui-lpac-licenses"
 
 case "$action" in
 begin)

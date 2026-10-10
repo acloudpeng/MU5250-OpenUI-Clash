@@ -315,3 +315,33 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
   以及本机用 Zig 0.14.1 从该标签编译的 `openui-screen`（两次编译 sha256 相同：`77640772…ed82`）。GEO 数据不附带，用 `prepare-geodata.py` 准备。
 - 桌面安装器从上游 `dklasens/MU5250-OpenUI` 下载包，不能用来更新本分支（发布说明已注明）。
   后续可做：发布工作流直接编译屏幕程序并附带内核；安装器改为指向本仓库，或不再随本分支发布。
+
+### 2026-10-10 — eSIM 管理（可插拔 eUICC，对标 EasyEUICC）
+- 需求：「新增 eSIM 管理，看看能不能内置 EasyEUICC」。结论：EasyEUICC 是 Android 应用，靠 Android 电话框架访问 SIM，装不到设备上；
+  它的核心 lpac 能在 Linux 上跑。做法是内置 lpac，由 agent 转发它的卡指令和 SM-DP+ 请求，网页「蜂窝 → eSIM」和小屏 eSIM 页提供 EasyEUICC 的功能。
+  只支持卡槽里的可插拔 eUICC（9eSIM、5ber、eSTK.me 等）；普通 SIM 会识别出来但不能下载；个别机型的 ZTE 内置 eSIM 不支持。
+- 设备依据：社区项目 SadykovIV/ZTE_U60Pro 在 B31 上用 9eSIM V0 实测过（QMI over QRTR；切换后低功耗 → SIM 断电上电 → 联网），
+  faying 的 manager 在 B27 上用 lpac 的 qmi_qrtr。SadykovIV 的 QMI/ES10 代码许可证不明确，只参考事实没有照抄，协议按 libqmi 的服务定义自己实现。
+- lpac：固定 v2.3.0（上游新主线的驱动全部 dlopen，静态程序用不了），只编 stdio 的 APDU/HTTP 驱动，`scripts/prepare-lpac.py` 用 Zig 0.14.1 直接编译，
+  源码包、补丁和输出 sha256 都固定（可复现）。9 个补丁：7 个上游修复的回移（v2.3.0 的 stdio APDU 驱动把成功当失败，根本用不了）；
+  2 个自己的：① 带 `_cleanup_` 的变量没初始化，`chip info` 读 EID 失败（插普通 SIM）时释放野指针崩溃，逻辑通道也没关，上游主线同样有这个问题；
+  ② stdio 驱动逐字符 strcat 读行，读 400 KB 的行要 6 秒（设备上更慢），下载配置包会卡，改用 getline 后 2 MB 只要 0.05 秒。
+  CI 新增 `lpac` 工作流（固定 Zig、核对 sha256、qemu 下跑 `tests/lpac_stdio.py`），发布工作流自动附带 `lpac`。
+- agent：`qmi.rs`（QRTR 名字服务查找 + QMI UIM：开逻辑通道、发 APDU、关通道、卡槽/卡状态、SIM 上下电；DMS 工作模式），
+  `lpac.rs`（运行 lpac，转发 APDU 和 HTTP，超时杀进程，残留通道收尾），`esim.rs`（读卡、切换、停用、改名、删除、下载、通知、单任务、接口）。
+  SM-DP+ 走设备 curl，TLS 信任 GSMA 的三个正式 CI 根（RSP2 Root CI1、OISTE GSMA CI G1、Entrust eSIM CA，同 EasyEUICC）加系统根证书；
+  Clash 运行时默认经 Clash。下载/删除后自动发通知（同 EasyEUICC 默认），切换的通知留在卡上手动处理。
+  切换：`lpac profile enable <iccid> 0` → 回读卡确认 → 低功耗 → SIM 断电上电 → 联网 → 等基带读到新 ICCID、USIM 就绪 → 等固件
+  `get_sim_info` 报新 ICCID；固件没跟上就提示重启（用户要求：只提示，不自动重启），不重启任何固件守护进程。
+  基带不支持「读卡槽状态」时以固件为准。调试版 agent 可用 `OPENUI_QMI_SOCKET_DIR` 走 Unix 套接字，供端到端测试模拟基带。
+- 网页：「蜂窝」新增 eSIM 标签页（卡片信息、配置文件列表、切换/停用/改名/删除（输入名称确认）、激活码/二维码图片（jsQR 按需加载）/手填下载、
+  确认码、IMEI、连接方式、通知）。小屏：新增 eSIM 菜单项和页面（列表、切换、重新读取、需要时重启）；菜单设置新增 `W` 记录（含 eSIM 页），
+  旧屏幕继续读不含 eSIM 的 `V`。部署脚本新增 `--lpac`（固定哈希、暂存自检、纳入回滚快照）。
+- 端到端：新增 S12（容器里：模拟基带 QMI UIM/DMS + 模拟 eUICC（ES10a/b/c、61xx 分段、下载会话、通知）+ HTTPS 模拟 SM-DP+ + 假 ubus，
+  真实 agent 和 lpac，70 项）和 S13（主机上用浏览器走查 eSIM 页，中文桌面 × 英文手机）。发现并已修复：
+  - `scan()` 在持有 `REBOOT_NEEDED` 锁时又加同一把锁：切换后固件没跟上、之后再读卡时任务线程死锁，随后所有 `GET /api/esim` 卡住，
+    工作线程被占满后整个 API 无响应。改为只加一次锁，判断逻辑抽成纯函数并加测试。
+  - 激活码第 5 段为 1（要求确认码）却没填确认码时，agent 照样开任务，lpac 在 PrepareDownload 才失败；现在直接 400「这个激活码需要填写确认码」。
+  - 下载在写卡阶段失败（如 ICCID 已在卡上）时，卡上生成的错误安装结果没有发给 SM-DP+；按 SGP.22 现在失败时也发送，SM-DP+ 才知道这次下载失败。
+  - 网页：删除完成的提示用删除后的列表找名字，只能显示 ICCID；现在记住页面见过的名字。
+- 用户暂时没有 eUICC 卡：真机先用普通 SIM 验证「读取卡片」报「普通 SIM 卡」（即 QRTR/UIM 通路可用），有卡后再验证切换和下载。

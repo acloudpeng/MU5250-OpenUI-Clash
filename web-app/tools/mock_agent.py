@@ -877,6 +877,163 @@ STATE["core_run"] = None
 STATE["screen_settings"] = {"revision": 1, "shortcut_enabled": False, "brightness": 128, "idle_seconds": 120, "home_page": "menu", "menu_items": ["overview", "proxy", "wireguard", "clash"], "language": "zh"}
 STATE["screen"] = {"available": True, "verified": True, "running": False, "state": "idle", "settings_revision": 1, "shortcut": {"available": True, "message": "Shortcut disabled"}}
 
+# ── eSIM (agent/src/esim.rs): a removable eUICC with two profiles ───────────────
+ESIM_BUSY = "An eSIM job is already running"
+ESIM = {
+    "job": None, "run": None, "next_id": 1, "reboot_needed": False, "view": None,
+    "card": {
+        "eid": "89049032123451234512345678901235",
+        "profiles": [
+            {"iccid": "89852000" "12345678901", "aid": "a0000005591010ffffffff8900001000", "enabled": True,
+             "name": "CMHK", "provider": "China Mobile Hong Kong", "nickname": "Hong Kong", "class": "operational"},
+            {"iccid": "8944476" "500001234567", "aid": "a0000005591010ffffffff8900001100", "enabled": False,
+             "name": "Truphone", "provider": "Truphone", "nickname": "", "class": "operational"},
+        ],
+        "notifications": [
+            {"seq": 3, "operation": "enable", "iccid": "89852000" "12345678901", "address": "smdp.example.com"},
+        ],
+    },
+}
+
+
+def esim_view():
+    card = ESIM["card"]
+    enabled = next((p["iccid"] for p in card["profiles"] if p["enabled"]), "")
+    return {
+        "read_at": device_now(), "card": "euicc", "detail": None, "eid": card["eid"],
+        "info": {"default_smdp": None, "root_smds": "lpa.ds.gsma.com", "sgp22": "2.2.2", "profile_version": "2.1.0",
+                 "firmware": "4.6.0", "free_nvm": 291666, "installed_apps": 0,
+                 "ci_pkids": ["81370f5125d0b1d408d4c3b232e6d25e795bebfb"], "sas": "GI-BA-UP-0419"},
+        "profiles": [dict(p) for p in card["profiles"]], "notifications": [dict(n) for n in card["notifications"]],
+        "firmware": {"iccid": enabled, "state": "SIM_READY"},
+        "generation": hash(json.dumps(card["profiles"], sort_keys=True)) & 0xFFFFFFFF,
+    }
+
+
+def esim_advance():
+    job, run = ESIM["job"], ESIM["run"]
+    if not job or job["state"] != "running" or not run:
+        return
+    elapsed = time.time() - run["start"]
+    for step, secs in run["plan"]:
+        if elapsed < secs:
+            job["step"] = step
+            return
+        elapsed -= secs
+    error, result = run["finish"]()
+    job.update(state="failed" if error else "done", error=error, result=result, finished_at=device_now())
+    ESIM["run"] = None
+    if not error:
+        ESIM["view"] = esim_view()
+
+
+def esim_status():
+    esim_advance()
+    return {"installed": True, "job": ESIM["job"], "view": ESIM["view"], "reboot_needed": ESIM["reboot_needed"],
+            "clash_running": STATE["clash"]["running"]}
+
+
+def esim_start(kind, plan, finish):
+    esim_advance()
+    if ESIM["job"] and ESIM["job"]["state"] == "running":
+        raise Stale(ESIM_BUSY)
+    ESIM["job"] = {"id": ESIM["next_id"], "kind": kind, "state": "running", "step": plan[0][0], "error": None,
+                   "result": None, "started_at": device_now(), "finished_at": None}
+    ESIM["next_id"] += 1
+    ESIM["run"] = {"start": time.time(), "plan": plan, "finish": finish}
+    return esim_status()
+
+
+def esim_profile(iccid):
+    if not ESIM["view"]:
+        raise ValueError("Read the card first")
+    for p in ESIM["card"]["profiles"]:
+        if p["iccid"] == iccid:
+            return p
+    raise ValueError("This profile is not on the card; read the card again")
+
+
+def esim_notify(operation, iccid):
+    card = ESIM["card"]
+    seq = max([n["seq"] for n in card["notifications"]] + [3]) + 1
+    card["notifications"].append({"seq": seq, "operation": operation, "iccid": iccid, "address": "smdp.example.com"})
+
+
+def esim_action(body):
+    """POST /api/esim: starts a read, switch, rename, download or notification job and answers at once."""
+    action = body.get("action")
+    card = ESIM["card"]
+    if action == "scan":
+        return esim_start("scan", [("reading", 1.5)], lambda: (None, {"card": "euicc"}))
+    if action in ("enable", "disable"):
+        target = esim_profile(body.get("iccid"))
+        if target["enabled"] == (action == "enable"):
+            raise ValueError("This profile is already enabled" if action == "enable" else "This profile is already disabled")
+
+        def switched():
+            for p in card["profiles"]:
+                if p["enabled"]:
+                    esim_notify("disable", p["iccid"])
+                p["enabled"] = action == "enable" and p is target
+            if action == "enable":
+                esim_notify("enable", target["iccid"])
+            return None, {"iccid": target["iccid"], "enabled": action == "enable", "firmware_ready": True,
+                          "reboot_needed": False, "detail": None}
+        steps = [("es10c_enable_profile" if action == "enable" else "es10c_disable_profile", 1), ("reading", 1),
+                 ("radio_offline", 1), ("sim_power_cycle", 1.5), ("radio_online", 1), ("sim_reading", 2), ("firmware", 2)]
+        return esim_start(action, steps, switched)
+    if action == "nickname":
+        target = esim_profile(body.get("iccid"))
+        nickname = body.get("nickname", "")
+        if not isinstance(nickname, str) or len(nickname.encode()) > 64:
+            raise ValueError("A nickname is at most 64 bytes, without control characters")
+
+        def renamed():
+            target["nickname"] = nickname
+            return None, {"iccid": target["iccid"], "nickname": nickname}
+        return esim_start("nickname", [("es10c_set_nickname", 1)], renamed)
+    if action == "download":
+        code = (body.get("activation_code") or "").strip()
+        parts = code.split("$")
+        smdp = body.get("smdp") or (parts[1] if code[:6].upper() == "LPA:1$" and len(parts) > 1 else "")
+        if not smdp:
+            raise ValueError("Invalid activation code")
+
+        def downloaded():
+            if "fail" in code.lower() or "fail" in (body.get("matching_id") or "").lower():
+                return "lpac failed at es9p_authenticate_client: MatchingID (AC_Token or EventID) is refused", None
+            iccid = "8986" + str(int(time.time()))[-15:].rjust(15, "0")
+            card["profiles"].append({"iccid": iccid, "aid": "a0000005591010ffffffff8900001200", "enabled": False,
+                                     "name": "Demo Travel", "provider": "Demo Mobile", "nickname": "", "class": "operational"})
+            return None, {"iccid": iccid, "notifications": {"sent": 1}}
+        steps = [("es10b_get_euicc_challenge_and_info", 1), ("es9p_initiate_authentication", 1.5), ("es10b_authenticate_server", 1),
+                 ("es9p_authenticate_client", 1.5), ("es10b_prepare_download", 1), ("es9p_get_bound_profile_package", 2),
+                 ("es10b_load_bound_profile_package", 2.5), ("es9p_handle_notification", 1)]
+        return esim_start("download", steps, downloaded)
+    if action == "notifications":
+        seqs = body.get("seq") or []
+        if not seqs or any(s not in [n["seq"] for n in card["notifications"]] for s in seqs):
+            raise ValueError("Choose notifications on the card")
+
+        def handled():
+            card["notifications"] = [n for n in card["notifications"] if n["seq"] not in seqs]
+            return None, {"count": len(seqs)}
+        step = "es9p_handle_notification" if body.get("operation") == "process" else "es10b_remove_notification_from_list"
+        return esim_start("notifications", [(step, 1.5)], handled)
+    raise ValueError("Invalid eSIM request")
+
+
+def esim_delete(body):
+    target = esim_profile(body.get("iccid"))
+    if target["enabled"]:
+        raise ValueError("Disable this profile before deleting it")
+
+    def deleted():
+        ESIM["card"]["profiles"].remove(target)
+        return None, {"iccid": target["iccid"], "notifications": {"sent": 1}}
+    return esim_start("delete", [("es10c_delete_profile", 1), ("reading", 1), ("es9p_handle_notification", 1)], deleted)
+
+
 ROUTES_GET = {
     "/api/proxy": proxy_status,
     "/api/wireguard": wireguard_status,
@@ -889,6 +1046,7 @@ ROUTES_GET = {
     "/api/clash/logs": lambda: {"lines": ["time=\"2026-09-25T08:00:00Z\" level=info msg=\"Start initial Compatible provider default\""]},
     "/api/clash/diagnostics": clash_diagnostics,
     "/api/clash/core": core_status,
+    "/api/esim": esim_status,
     "/api/screen": lambda: STATE["screen"],
     "/api/screen/settings": lambda: STATE["screen_settings"],
     "/api/dashboard": dashboard_batch,
@@ -951,6 +1109,8 @@ ROUTES_POST = {
         if body.get("group") else {"delay": (STATE["clash_proxies"]["nodes"].get(body.get("name")) or {}).get("delay") or 0}),
     "/api/clash/diagnostics": clash_diagnose,
     "/api/clash/core": core_action,
+    "/api/esim": esim_action,
+    "/api/esim/delete": esim_delete,
     "/api/sms/list": lambda body: sms_list(),
     "/api/system/kill-bloat": lambda body: {
         "killed": [

@@ -35,6 +35,8 @@ static void refresh_page(void) {
 static void go(int p) {
   page=p;notice[0]=0;need_draw=1;
   if(p==NODES)fetch_groups();
+  /* Reading the card changes nothing: done on entry until the card has been read once. */
+  if(p==ESIM){esim_offset=0;if(!data.esim.card[0]&&esim_idle())send_job("esim scan\n",JOB_ESIM,0);}
 }
 static int parent(int p) {
   switch(p) {
@@ -105,7 +107,7 @@ static void tap(int x,int y) {
   if(!strcmp(a,"back")) { back();return; }
   static const struct { const char *id; int page; } links[]={
     {"wireguard",WG},{"overview",OVERVIEW},{"profiles",PROFILES},{"proxy",PROXY},
-    {"clash",CLASH},{"nodes",NODES},{"subs",SUBS},{"core",CORE}};
+    {"clash",CLASH},{"nodes",NODES},{"subs",SUBS},{"core",CORE},{"esim",ESIM}};
   for(size_t i=0;i<sizeof(links)/sizeof(links[0]);i++)
     if(!strcmp(a,links[i].id)) { if(reachable(links[i].page)){group_offset=0;go(links[i].page);} return; }
   if(!strcmp(a,"devices")) { if(reachable(DEVICES))enter_devices();return; }
@@ -193,6 +195,18 @@ static void tap(int x,int y) {
       ask(CF_UPDATE,0,JOB_CORE,0,req);
     } else if(!strcmp(a,"crollback")&&idle&&c->previous[0])ask(CF_ROLLBACK,0,JOB_CORE,0,"core rollback\n");
     else if(!strcmp(a,"cgeo")&&idle)ask(CF_GEO,0,JOB_CORE,0,"core geodata\n");
+  } else if(page==ESIM) {
+    const struct esim_info *e=&data.esim;
+    if(!strcmp(a,"escan")&&esim_idle())send_job("esim scan\n",JOB_ESIM,0);
+    else if(!strcmp(a,"ereboot")&&e->reboot&&!blocked())ask(CF_REBOOT,0,JOB_ESIM,0,"esim reboot\n");
+    else if(!strcmp(a,"prev")&&esim_offset>0)esim_offset-=4;
+    else if(!strcmp(a,"next")&&esim_offset+4<e->n)esim_offset+=4;
+    else if((i=digit_id(a,'e','3'))>=0&&esim_idle()&&esim_offset+i<e->n&&!e->rows[esim_offset+i].enabled) {
+      const struct esim_row *r=&e->rows[esim_offset+i];
+      char req[64];snprintf(req,sizeof(req),"esim enable %llu %d\n",e->gen,r->index);
+      snprintf(chosen_name,sizeof(chosen_name),"%s",r->name[0]?r->name:r->tail);
+      ask(CF_ESIM,r->index,JOB_ESIM,e->gen,req);
+    }
   } else if(page==DIAG) {
     if(!strcmp(a,"drun")&&!blocked()&&data.diag.has&&!data.diag.running)send_job("diag\n",JOB_DIAG,0);
     else if(!strcmp(a,"prev")&&diag_offset>0)diag_offset-=4;
