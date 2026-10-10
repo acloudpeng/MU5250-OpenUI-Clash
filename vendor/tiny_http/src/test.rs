@@ -1,3 +1,4 @@
+// Modified for OpenUI (see OPENUI-PATCH.md): new_request's connection argument.
 use crate::{request::new_request, HTTPVersion, Header, HeaderField, Method, Request};
 use ascii::AsciiString;
 use std::net::SocketAddr;
@@ -73,6 +74,7 @@ impl From<TestRequest> for Request {
             Some(mock.remote_addr),
             mock.body.as_bytes(),
             std::io::sink(),
+            None,
         )
         .unwrap()
     }

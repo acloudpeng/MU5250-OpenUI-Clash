@@ -11,13 +11,17 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use serde_norway::Mapping;
 use std::{
     collections::VecDeque,
     fs,
     io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::{Mutex, MutexGuard},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex, MutexGuard,
+    },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -58,6 +62,8 @@ static CORE: Mutex<Option<Core>> = Mutex::new(None);
 static LOGS: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
 /// Last policy check, so status polls do not fork iptables every few seconds.
 static HEALTH: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
+/// Numbers the scratch files of downloads, which run without the lock and may overlap.
+static SCRATCH: AtomicU64 = AtomicU64::new(0);
 
 struct Core {
     child: Child,
@@ -170,7 +176,8 @@ struct DeviceChoice {
     selected: bool,
 }
 
-/// A downloaded and parsed profile waiting to be stored for a subscription.
+/// A downloaded profile that parsed and passed `check_download`, waiting to be stored
+/// for a subscription. Outside tests, only `download` makes one.
 struct Fetched {
     body: String,
     name: Option<String>,
@@ -559,11 +566,12 @@ fn last_log_message() -> String {
         .or(logs.back())
         .cloned()
         .unwrap_or_default();
-    let msg = line
-        .split_once("msg=\"")
-        .map(|(_, m)| m.trim_end_matches('"'))
-        .unwrap_or(&line);
-    msg.chars().take(300).collect()
+    log_message(&line).chars().take(300).collect()
+}
+/// The message of a core log line (`time="…" level=error msg="…"`), or the whole line.
+fn log_message(line: &str) -> &str {
+    line.split_once("msg=\"")
+        .map_or(line, |(_, m)| m.trim_end_matches('"'))
 }
 fn signal_and_wait(pid: i32, alive: impl Fn() -> bool) {
     unsafe { libc::kill(pid, libc::SIGTERM) };
@@ -696,22 +704,38 @@ pub(crate) fn test_profile(binary: &Path, home: &Path, path: &Path) -> Result<()
     }
     let text =
         String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
-    let line = text
-        .lines()
-        .rev()
-        .find(|l| {
-            l.contains("level=error") || l.contains("level=fatal") || l.contains("test failed")
-        })
-        .or(text.lines().last())
+    Err(format!("Clash profile rejected: {}", rejection(&text)))
+}
+/// Why `-t` failed: the last error the core logged (`log.Errorln`: `level=error msg="…"`)
+/// or a Go panic. The "configuration file … test failed" line the core always prints
+/// after the error names only the file; it, or else the last line, serves only when
+/// there is neither.
+fn rejection(output: &str) -> String {
+    let lines = || output.lines().rev();
+    let line = lines()
+        .find(|l| l.contains("level=error") || l.contains("level=fatal") || l.starts_with("panic:"))
+        .or_else(|| lines().find(|l| l.contains("test failed")))
+        .or_else(|| lines().find(|l| !l.trim().is_empty()))
         .unwrap_or("");
-    let msg = line
-        .split_once("msg=\"")
-        .map(|(_, m)| m.trim_end_matches('"'))
-        .unwrap_or(line);
-    Err(format!(
-        "Clash profile rejected: {}",
-        msg.chars().take(300).collect::<String>()
-    ))
+    log_message(line).chars().take(300).collect()
+}
+/// Composes `map` with the settings' options into `candidate` and checks it with
+/// `<core> -t`; a rejected candidate is removed.
+fn test_composed(
+    core: &Path,
+    home: &Path,
+    candidate: &Path,
+    map: &Mapping,
+    s: &Settings,
+) -> Result<(), String> {
+    storage::atomic_write(
+        candidate,
+        clash_config::compose(map, &options(s)).as_bytes(),
+    )
+    .map_err(|_| "Cannot write Clash profile")?;
+    test_profile(core, home, candidate).inspect_err(|_| {
+        let _ = fs::remove_file(candidate);
+    })
 }
 /// Composes the running profile from the active subscription and checks it.
 fn write_profile(s: &Settings) -> Result<(), String> {
@@ -720,16 +744,23 @@ fn write_profile(s: &Settings) -> Result<(), String> {
         .map_err(|_| "Active subscription has not been downloaded; refresh it")?;
     let map = clash_config::parse(&text)?;
     let candidate = Path::new(HOME).join(".config.candidate.yaml");
-    storage::atomic_write(
-        &candidate,
-        clash_config::compose(&map, &options(s)).as_bytes(),
-    )
-    .map_err(|_| "Cannot write Clash profile")?;
-    if let Err(e) = test_profile(Path::new(MIHOMO), Path::new(HOME), &candidate) {
-        let _ = fs::remove_file(&candidate);
-        return Err(e);
-    }
+    test_composed(Path::new(MIHOMO), Path::new(HOME), &candidate, &map, s)?;
     fs::rename(&candidate, PROFILE).map_err(|_| "Cannot install Clash profile".into())
+}
+/// Checks a downloaded profile before it may replace a stored one, whether or not Clash
+/// is on and the subscription active: composed with `s`'s options like `write_profile`
+/// does, in a candidate of its own (downloads run without the lock). With no core
+/// installed there is nothing to check with; turning Clash on needs one and checks the
+/// active profile then.
+fn check_download(core: &Path, home: &Path, map: &Mapping, s: &Settings) -> Result<(), String> {
+    if !core.exists() {
+        return Ok(());
+    }
+    let n = SCRATCH.fetch_add(1, Ordering::Relaxed);
+    let candidate = home.join(format!(".download-{n}.yaml"));
+    test_composed(core, home, &candidate, map, s)?;
+    let _ = fs::remove_file(&candidate);
+    Ok(())
 }
 fn prerequisites() -> Result<(), String> {
     if !Path::new(MIHOMO).exists() {
@@ -967,16 +998,20 @@ pub fn get() -> (u16, Value) {
     }
 }
 
-fn download(url: &str, user_agent: &str, via_proxy: bool) -> Result<Fetched, String> {
+/// Downloads a profile and checks it with the core, composed with `s`'s options; stores
+/// nothing. Adding a subscription, a URL change and manual and automatic refreshes all
+/// get their profile here, before taking any lock: both steps can take a while.
+fn download(url: &str, user_agent: &str, via_proxy: bool, s: &Settings) -> Result<Fetched, String> {
     ensure_dirs()?;
     let proxy = (via_proxy && core_running()).then_some(PROXY);
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let scratch = Path::new(DIR).join(format!(
         ".headers-{}",
-        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        SCRATCH.fetch_add(1, Ordering::Relaxed)
     ));
     let d = clash_sub::fetch(url, user_agent, proxy, &scratch)?;
-    let summary = clash_config::summary(&clash_config::parse(&d.body)?);
+    let map = clash_config::parse(&d.body)?;
+    check_download(Path::new(MIHOMO), Path::new(HOME), &map, s)?;
+    let summary = clash_config::summary(&map);
     Ok(Fetched {
         body: d.body,
         name: d.name,
@@ -1014,7 +1049,16 @@ fn transact(
     if next.enabled {
         EGRESS.claim()?;
     }
-    egress_script(&EGRESS.hold())?;
+    // A hold that fails partway is lifted again (nothing else has changed yet) instead of
+    // blocking the LAN until the supervisor's next check; a guard that was already in
+    // place is not ours to lift: a failed switch kept it for the supervisor.
+    let held = EGRESS.held();
+    if let Err(e) = egress_script(&EGRESS.hold()) {
+        if !held {
+            let _ = egress_script(&EGRESS.release());
+        }
+        return Err(e);
+    }
     let mut suspended = None;
     let result = (|| {
         if takeover {
@@ -1046,8 +1090,10 @@ fn transact(
 pub fn update(body: &[u8]) -> (u16, Value) {
     reply((|| -> Result<Value, String> {
         let u: Update = serde_json::from_slice(body).map_err(|_| "Invalid Clash request")?;
-        precheck(&load()?, &u)?;
-        // Downloads can take 30 s; do them before taking any lock.
+        let current = load()?;
+        precheck(&current, &u)?;
+        // The download (up to 30 s) and the core's check of the profile, composed with the
+        // saved options, run before any lock is taken.
         let fetched = match &u.subscription {
             Some(SubscriptionAction::Add {
                 url,
@@ -1058,7 +1104,7 @@ pub fn update(body: &[u8]) -> (u16, Value) {
                 let ua = user_agent
                     .as_deref()
                     .unwrap_or(clash_sub::DEFAULT_USER_AGENT);
-                Some(download(url, ua, via_proxy.unwrap_or(false))?)
+                Some(download(url, ua, via_proxy.unwrap_or(false), &current)?)
             }
             Some(SubscriptionAction::Edit {
                 id,
@@ -1067,7 +1113,6 @@ pub fn update(body: &[u8]) -> (u16, Value) {
                 via_proxy,
                 ..
             }) => {
-                let current = load()?;
                 let p = current
                     .subscriptions
                     .iter()
@@ -1077,7 +1122,12 @@ pub fn update(body: &[u8]) -> (u16, Value) {
                     None
                 } else {
                     let ua = user_agent.as_deref().unwrap_or(&p.user_agent);
-                    Some(download(url, ua, via_proxy.unwrap_or(p.via_proxy))?)
+                    Some(download(
+                        url,
+                        ua,
+                        via_proxy.unwrap_or(p.via_proxy),
+                        &current,
+                    )?)
                 }
             }
             _ => None,
@@ -1145,7 +1195,9 @@ pub fn update(body: &[u8]) -> (u16, Value) {
     })())
 }
 
-/// Downloads a subscription again; reloads the core when it is the active profile.
+/// Downloads a subscription again; reloads the core when it is the active profile. A
+/// download that fails or that the core rejects leaves the stored profile and its details
+/// as they were and records the error.
 fn refresh_subscription(id: u64) -> Result<(), String> {
     let s = load()?;
     let p = s
@@ -1154,7 +1206,7 @@ fn refresh_subscription(id: u64) -> Result<(), String> {
         .find(|p| p.id == id)
         .ok_or("Subscription not found")?
         .clone();
-    let fetched = match download(&p.url, &p.user_agent, p.via_proxy) {
+    let fetched = match download(&p.url, &p.user_agent, p.via_proxy, &s) {
         Ok(f) => f,
         Err(e) => {
             let mut m = meta(id);
@@ -1392,7 +1444,8 @@ pub fn start() {
                     }
                 }
             }
-            // Every 5 minutes, refresh subscriptions that are due (downloads run unlocked).
+            // Every 5 minutes, refresh subscriptions that are due (downloads and their
+            // checks by the core run unlocked).
             if tick % 60 == 30 {
                 if let Ok(s) = load() {
                     for p in s.subscriptions.iter().filter(|p| p.interval_hours > 0) {
@@ -1660,6 +1713,102 @@ mod tests {
         );
         assert!(!home.join("ASN.mmdb").exists());
         assert!(!home.join(".geoip.metadb.link").exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+    const REJECTED: &str =
+        "proxy 0: ss 192.0.2.1:8388 cipher: bogus-cipher initialize error: unknown method: bogus-cipher";
+    #[test]
+    fn a_rejected_profile_names_the_core_error_not_the_failed_test() {
+        // `mihomo -t` logs the error, then always prints the line naming the file.
+        let failed =
+            "configuration file /data/local/tmp/openui-clash/home/.download-3.yaml test failed";
+        let output = format!(
+            "time=\"2026-10-10T08:15:02.481277371+08:00\" level=error msg=\"{REJECTED}\"\n{failed}\n"
+        );
+        assert_eq!(rejection(&output), REJECTED);
+        assert_eq!(rejection(&format!("{failed}\n")), failed);
+        let noisy = format!(
+            "time=\"…\" level=info msg=\"Start initial configuration in progress\"\n\
+             time=\"…\" level=error msg=\"first\"\ntime=\"…\" level=fatal msg=\"last\"\n{failed}\n"
+        );
+        assert_eq!(rejection(&noisy), "last");
+        let panic = "panic: runtime error: invalid memory address or nil pointer dereference\n\
+                     \ngoroutine 1 [running]:\nmain.main()\n";
+        assert_eq!(
+            rejection(panic),
+            "panic: runtime error: invalid memory address or nil pointer dereference"
+        );
+        assert_eq!(rejection("unexpected\nexit\n\n"), "exit");
+    }
+    #[test]
+    fn downloads_are_checked_by_the_core_before_they_are_stored() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("openui-clash-check-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let home = root.join("home");
+        fs::create_dir_all(&home).unwrap();
+        // Stands in for `mihomo -d <home> -t -f <file>`: keeps the call and the candidate
+        // beside `home`, and fails on an unknown cipher with the core's own output.
+        let core = root.join("mihomo");
+        let script = format!(
+            r#"#!/bin/sh
+[ "$1" = -d ] || exit 0
+echo "$*" >> "$2/../calls"
+cp "$5" "$2/../tested.yaml"
+if grep -q bogus-cipher "$5"; then
+  echo 'time="2026-10-10T08:15:02.481277371+08:00" level=error msg="{REJECTED}"'
+  echo "configuration file $5 test failed"
+  exit 1
+fi
+echo "configuration file $5 test is successful"
+"#
+        );
+        fs::write(&core, script).unwrap();
+        fs::set_permissions(&core, fs::Permissions::from_mode(0o755)).unwrap();
+        // A process another test forks meanwhile holds the new file open for writing
+        // until it execs; running the file before then fails with ETXTBSY.
+        for _ in 0..500 {
+            match Command::new(&core).status() {
+                Err(e) if e.raw_os_error() == Some(libc::ETXTBSY) => {
+                    std::thread::sleep(Duration::from_millis(10))
+                }
+                _ => break,
+            }
+        }
+        let mut s = with_subscription();
+        s.proxy_mode = "global".into();
+        s.stack = "gvisor".into();
+        let profile = |cipher: &str| {
+            clash_config::parse(&format!(
+                "proxies: [{{name: A, type: ss, server: 192.0.2.1, port: 8388, cipher: {cipher}, password: pw}}]"
+            ))
+            .unwrap()
+        };
+        let calls = || fs::read_to_string(root.join("calls")).unwrap_or_default();
+        let left_in_home = || fs::read_dir(&home).unwrap().count();
+
+        // The core tests the profile as it would run: composed with the saved options.
+        check_download(&core, &home, &profile("aes-128-gcm"), &s).unwrap();
+        let call = format!("-d {0} -t -f {0}/.download-", home.display());
+        assert!(calls().starts_with(&call), "{}", calls());
+        let tested = fs::read_to_string(root.join("tested.yaml")).unwrap();
+        assert_eq!(
+            tested,
+            clash_config::compose(&profile("aes-128-gcm"), &options(&s))
+        );
+        assert!(tested.contains("stack: gvisor") && tested.contains("mode: global"));
+        assert_eq!(left_in_home(), 0);
+
+        // A rejection is an error naming the core's reason; callers then store nothing.
+        assert_eq!(
+            check_download(&core, &home, &profile("bogus-cipher"), &s).unwrap_err(),
+            format!("Clash profile rejected: {REJECTED}")
+        );
+        assert_eq!(left_in_home(), 0);
+
+        // Without an installed core there is nothing to check with.
+        check_download(&root.join("missing"), &home, &profile("bogus-cipher"), &s).unwrap();
+        assert_eq!(calls().lines().count(), 2);
         fs::remove_dir_all(&root).unwrap();
     }
     #[test]

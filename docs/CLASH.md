@@ -111,10 +111,19 @@ update.
 ## Subscriptions
 
 A subscription URL must return a complete Clash/mihomo YAML profile. Up to five are
-kept; the URL is treated as a secret and only its host is shown. A download is checked
-with `mihomo -t` before it replaces the previous profile. The agent keeps proxies,
+kept; the URL is treated as a secret and only its host is shown. The agent keeps proxies,
 groups, rules, providers, hosts, sniffer and geo settings from the profile and owns
 everything that binds a port, routes traffic or picks the DNS mode.
+
+Every download (adding a subscription, changing its URL, **Update now** and the automatic
+refresh) is composed with the current settings and checked with `mihomo -t` before it
+replaces the stored profile, also while Clash is off or the subscription is not the
+active one. A rejected download keeps the previous profile and its details; the error
+carries the core's reason (for example `proxy 0: … unknown method: …`), and a failed
+refresh also shows it on the subscription. Downloads are stored unchecked only while no
+core is installed. The running profile is composed and checked again each time it is
+rebuilt: when Clash is turned on or its core restarts and, with Clash on, when another
+subscription is chosen, a setting changes or the active one is refreshed.
 
 ## Clock
 

@@ -33,7 +33,7 @@ export default {
   'Device screen, power-button shortcut and live menu settings': '设备屏幕、电源键快捷方式与实时菜单设置',
   'Device screen': '设备屏幕',
   'Loading': '加载中',
-  'Open the English touchscreen menu on your U60 Pro. Short-press the power button to sleep or wake the display. Returning to the stock UI keeps your WireGuard settings and network connection.': '在 U60 Pro 上打开英文触摸屏菜单。短按电源键可让屏幕休眠或唤醒。返回原厂界面不会影响 WireGuard 设置和网络连接。',
+  'Open the touchscreen menu on your U60 Pro. Short-press the power button to sleep or wake the display. Returning to the stock UI keeps your WireGuard settings and network connection.': '在 U60 Pro 上打开触摸屏菜单。短按电源键可让屏幕休眠或唤醒。返回原厂界面不会影响 WireGuard 设置和网络连接。',
   'The screen component must be installed and pass device recovery verification before it can open.': '屏幕组件需先安装并通过设备恢复验证，才能打开。',
   'Open DevUI screen': '打开 DevUI 屏幕',
   'Restore stock UI': '恢复原厂界面',

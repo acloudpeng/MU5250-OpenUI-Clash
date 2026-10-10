@@ -597,7 +597,15 @@ pub fn update(body: &[u8]) -> (u16, Value) {
         }
         let changing_network = old.enabled || next.enabled || EGRESS.owned();
         if changing_network {
-            EGRESS.script(&EGRESS.hold())?;
+            // A guard already in place was left by a failed switch on purpose; one this
+            // call only half-installed must not keep blocking the LAN.
+            let held = EGRESS.held();
+            if let Err(e) = EGRESS.script(&EGRESS.hold()) {
+                if !held {
+                    let _ = EGRESS.script(&EGRESS.release());
+                }
+                return Err(e);
+            }
         }
         // Clash goes down under our guard; it comes back before the guard lifts if
         // the switch fails.

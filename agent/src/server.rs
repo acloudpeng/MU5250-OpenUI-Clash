@@ -668,10 +668,13 @@ fn respond(request: Request, status: u16, body: Value, origin: Option<&str>) {
 #[cfg(test)]
 mod tests {
     use super::is_at_command_allowed;
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{mpsc, Arc};
+    use std::time::{Duration, Instant};
 
     /// One request to a real tiny_http server on loopback; returns the raw reply.
     fn exchange(raw: &[u8], respond: fn(tiny_http::Request)) -> String {
-        use std::io::{Read, Write};
         let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
         let addr = server.server_addr().to_ip().unwrap();
         let handler = std::thread::spawn(move || {
@@ -714,6 +717,242 @@ mod tests {
             let _ = request.respond(tiny_http::Response::empty(204));
         });
         assert!(ok.starts_with("HTTP/1.1 204"), "{ok}");
+    }
+
+    /// Answers `count` requests without reading their bodies, the first with a 401 as the
+    /// agent answers an unauthenticated one, and reports how long each `respond` took: it
+    /// writes the reply, then drops the request, which drains the unread body.
+    fn answer_unread(server: tiny_http::Server, count: usize) -> mpsc::Receiver<Duration> {
+        let (took, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            for i in 0..count {
+                let Ok(Some(request)) = server.recv_timeout(Duration::from_secs(5)) else {
+                    return;
+                };
+                let reply = match i {
+                    0 => tiny_http::Response::from_string("unauthorized").with_status_code(401),
+                    _ => tiny_http::Response::from_string("second"),
+                };
+                let started = Instant::now();
+                let _ = request.respond(reply);
+                let _ = took.send(started.elapsed());
+            }
+        });
+        receiver
+    }
+
+    /// The next time reported by `answer_unread`; fails instead of waiting on a handler
+    /// still stuck in a drain.
+    fn handler_time(took: &mpsc::Receiver<Duration>) -> Duration {
+        took.recv_timeout(Duration::from_secs(5))
+            .expect("the handler is still busy")
+    }
+
+    const UNSENT_BODY: &[u8] =
+        b"POST /api/clash HTTP/1.1\r\nHost: a\r\nContent-Length: 100000\r\n\r\n";
+
+    /// Reads one response, delimited by its Content-Length, leaving the connection open.
+    fn read_response(stream: &mut impl Read) -> String {
+        let mut raw = Vec::new();
+        let mut byte = [0];
+        while !raw.ends_with(b"\r\n\r\n") {
+            stream.read_exact(&mut byte).unwrap();
+            raw.push(byte[0]);
+        }
+        let head = String::from_utf8_lossy(&raw).to_ascii_lowercase();
+        let length = head
+            .lines()
+            .find_map(|line| line.strip_prefix("content-length:"))
+            .map_or(0, |value| value.trim().parse().unwrap());
+        let mut body = vec![0; length];
+        stream.read_exact(&mut body).unwrap();
+        raw.extend(body);
+        String::from_utf8(raw).unwrap()
+    }
+
+    #[test]
+    fn an_unsent_body_does_not_hold_the_handler() {
+        // The drain of an unread body waited for it with the 60 s connection timeout on the
+        // handler's thread, so four such requests stalled the agent's four workers.
+        fn unsent_body(server: tiny_http::Server, mut client: impl Read + Write) -> Duration {
+            let took = answer_unread(server, 1);
+            client.write_all(UNSENT_BODY).unwrap();
+            // To the end: the connection is closed after the reply, without the body.
+            let mut reply = String::new();
+            client.read_to_string(&mut reply).unwrap();
+            assert!(reply.starts_with("HTTP/1.1 401"), "{reply}");
+            handler_time(&took)
+        }
+
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let client = std::net::TcpStream::connect(server.server_addr().to_ip().unwrap()).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let took = unsent_body(server, client);
+        assert!(took < Duration::from_secs(2), "{took:?}");
+
+        let path = std::env::temp_dir().join(format!("openui-unsent-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let server = tiny_http::Server::http_unix(&path).unwrap();
+        let client = std::os::unix::net::UnixStream::connect(&path).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let took = unsent_body(server, client);
+        assert!(took < Duration::from_secs(2), "unix: {took:?}");
+    }
+
+    #[test]
+    fn a_trickled_body_does_not_hold_the_handler() {
+        // Each byte renewed the 60 s timeout of the drain's next read. First a byte every
+        // 300 ms, slower than a drain read now waits, then one every 50 ms, which only the
+        // drain's deadline stops.
+        for every in [Duration::from_millis(300), Duration::from_millis(50)] {
+            let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+            let mut client =
+                std::net::TcpStream::connect(server.server_addr().to_ip().unwrap()).unwrap();
+            client
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let took = answer_unread(server, 1);
+            client.write_all(UNSENT_BODY).unwrap();
+            let stop = Arc::new(AtomicBool::new(false));
+            let trickle = {
+                let mut client = client.try_clone().unwrap();
+                let stop = Arc::clone(&stop);
+                std::thread::spawn(move || {
+                    while !stop.load(Ordering::Relaxed) && client.write_all(b"x").is_ok() {
+                        std::thread::sleep(every);
+                    }
+                })
+            };
+            // Ends when the server closes, possibly with a reset for the unread bytes.
+            let mut reply = Vec::new();
+            let _ = client.read_to_end(&mut reply);
+            stop.store(true, Ordering::Relaxed);
+            trickle.join().unwrap();
+            let took = handler_time(&took);
+            let reply = String::from_utf8_lossy(&reply);
+            assert!(reply.starts_with("HTTP/1.1 401"), "{every:?}: {reply}");
+            assert!(took < Duration::from_secs(2), "{every:?}: {took:?}");
+        }
+    }
+
+    #[test]
+    fn a_kept_alive_connection_survives_an_unread_body() {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let mut client =
+            std::net::TcpStream::connect(server.server_addr().to_ip().unwrap()).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let took = answer_unread(server, 2);
+        // Over 1 KiB, which tiny_http leaves to the handler instead of reading it up front.
+        let body = "x".repeat(4000);
+        let head = format!(
+            "POST /api/clash HTTP/1.1\r\nHost: a\r\nContent-Length: {}\r\n\r\n",
+            body.len()
+        );
+        client.write_all((head + &body).as_bytes()).unwrap();
+        let first = read_response(&mut client);
+        let first_took = handler_time(&took);
+        // Longer than a drain read waits: the connection's timeout must be back.
+        std::thread::sleep(Duration::from_millis(500));
+        client
+            .write_all(b"GET /api/proxy HTTP/1.1\r\nHost: a\r\n\r\n")
+            .unwrap();
+        let second = read_response(&mut client);
+        assert!(first.starts_with("HTTP/1.1 401"), "{first}");
+        assert!(first.ends_with("\r\n\r\nunauthorized"), "{first}");
+        assert!(second.starts_with("HTTP/1.1 200"), "{second}");
+        assert!(second.ends_with("\r\n\r\nsecond"), "{second}");
+        assert!(first_took < Duration::from_secs(1), "{first_took:?}");
+    }
+
+    #[test]
+    fn a_body_that_ends_early_still_gets_its_response() {
+        // The client half-closes after 3 of the declared bytes. tiny_http drops the body
+        // reader at that EOF while the handler is still reading, so the connection is
+        // abandoned before the response is written; the response must still arrive.
+        let raw = b"PUT /x HTTP/1.1\r\nHost: a\r\nContent-Length: 999999999999999\r\n\r\nabc";
+        let reply = exchange(raw, |mut request| {
+            let mut body = Vec::new();
+            let _ = request.as_reader().read_to_end(&mut body);
+            assert_eq!(body, b"abc");
+            let _ = request.respond(tiny_http::Response::empty(400));
+        });
+        assert!(reply.starts_with("HTTP/1.1 400"), "{reply}");
+    }
+    #[test]
+    fn a_response_after_an_early_end_keeps_its_write_timeout() {
+        // The abandoned connection lingers on its own thread while the handler still
+        // answers, and the lingering must not shorten that answer's write timeout: the
+        // client reads it only after a pause, and it is larger than the socket buffers.
+        const SIZE: u64 = 32 << 20;
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let addr = server.server_addr().to_ip().unwrap();
+        let handler = std::thread::spawn(move || {
+            let wait = std::time::Duration::from_secs(2);
+            let mut request = server.recv_timeout(wait).unwrap().unwrap();
+            let _ = request.as_reader().read_to_end(&mut Vec::new());
+            // The connection thread lingers before the response starts.
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            let data = vec![b'x'; SIZE as usize];
+            let _ = request.respond(tiny_http::Response::from_data(data));
+        });
+        let mut client = std::net::TcpStream::connect(addr).unwrap();
+        client
+            .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+            .unwrap();
+        // Over 1 KiB: tiny_http reads a smaller body before the request is handled.
+        let raw = b"PUT /x HTTP/1.1\r\nHost: a\r\nContent-Length: 2000\r\n\r\nabc";
+        client.write_all(raw).unwrap();
+        client.shutdown(std::net::Shutdown::Write).unwrap();
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        let mut head = [0u8; 12];
+        client.read_exact(&mut head).unwrap();
+        let rest = std::io::copy(&mut client, &mut std::io::sink()).unwrap_or(0);
+        handler.join().unwrap();
+        assert_eq!(&head, b"HTTP/1.1 200");
+        assert!(rest > SIZE, "{rest} bytes after the status line");
+    }
+    #[test]
+    fn http2_request_lines_get_505_without_hanging() {
+        // Unpatched tiny_http wrote the 505 through a writer that waited for the request's
+        // own, so the connection thread hung and the client never got an answer.
+        let reply = exchange(b"GET /x HTTP/2.0\r\nHost: a\r\n\r\n", |_| panic!("served"));
+        assert!(reply.starts_with("HTTP/1.1 505"), "{reply}");
+    }
+    #[test]
+    fn the_rest_of_an_abandoned_body_is_not_parsed() {
+        // A body ending in a request line, just past the 1 MiB where tiny_http stops
+        // draining: the connection must close rather than serve it.
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let mut client =
+            std::net::TcpStream::connect(server.server_addr().to_ip().unwrap()).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let took = answer_unread(server, 2);
+        let drained = 1024 * 1024;
+        let next = b"GET /api/proxy HTTP/1.1\r\nHost: a\r\n\r\n";
+        let head = format!(
+            "POST /api/clash HTTP/1.1\r\nHost: a\r\nContent-Length: {}\r\n\r\n",
+            drained + next.len()
+        );
+        let mut raw = head.into_bytes();
+        raw.resize(raw.len() + drained, b'x');
+        raw.extend_from_slice(next);
+        client.write_all(&raw).unwrap();
+        // Ends when the server closes, possibly with a reset for the unread bytes.
+        let mut reply = Vec::new();
+        let _ = client.read_to_end(&mut reply);
+        let reply = String::from_utf8_lossy(&reply);
+        assert!(reply.starts_with("HTTP/1.1 401"), "{reply}");
+        assert!(!reply.contains("second"), "{reply}");
+        let took = handler_time(&took);
+        assert!(took < Duration::from_secs(2), "{took:?}");
     }
 
     #[test]

@@ -86,7 +86,7 @@ export default function DevUIPage() {
     {message && <p role="status" className="rounded-lg bg-accent/5 p-3 text-sm text-ink">{message}</p>}
     <Card title={t('Device screen')} action={<Chip tone={status?.state === 'error' ? 'warn' : status?.running ? 'accent' : 'default'}>{status ? t(labels[status.state] ?? status.state) : t('Loading')}</Chip>}>
       <div className="space-y-3">
-        <p className="text-[13px] text-ink2">{t('Open the English touchscreen menu on your U60 Pro. Short-press the power button to sleep or wake the display. Returning to the stock UI keeps your WireGuard settings and network connection.')}</p>
+        <p className="text-[13px] text-ink2">{t('Open the touchscreen menu on your U60 Pro. Short-press the power button to sleep or wake the display. Returning to the stock UI keeps your WireGuard settings and network connection.')}</p>
         {status && (!status.available || !status.verified) && <p className="text-xs text-ink2">{t('The screen component must be installed and pass device recovery verification before it can open.')}</p>}
         <div className="flex flex-wrap gap-2">
           <Button variant="primary" disabled={busy || !status?.available || !status.verified || status.running} onClick={() => void change(true)}>{t('Open DevUI screen')}</Button>

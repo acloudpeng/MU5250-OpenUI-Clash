@@ -1,4 +1,5 @@
-// Modified for OpenUI (see OPENUI-PATCH.md): accepted connections get CONNECTION_TIMEOUT.
+// Modified for OpenUI (see OPENUI-PATCH.md): accepted connections get CONNECTION_TIMEOUT and
+// a socket handle for their requests' body readers.
 //! # Simple usage
 //!
 //! ## Creating the server
@@ -97,7 +98,6 @@
 const CONNECTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 #[cfg(any(feature = "ssl-openssl", feature = "ssl-rustls"))]
-
 use zeroize::Zeroizing;
 
 use std::error::Error;
@@ -304,6 +304,11 @@ impl Server {
                         if sock.set_timeouts(Some(CONNECTION_TIMEOUT)).is_err() {
                             continue;
                         }
+                        // For the requests' body readers; see `ConnectionControl`.
+                        let socket = match sock.try_clone() {
+                            Ok(socket) => socket,
+                            Err(_) => continue,
+                        };
                         use util::RefinedTcpStream;
                         let (read_closable, write_closable) = match ssl {
                             None => RefinedTcpStream::new(sock),
@@ -322,7 +327,7 @@ impl Server {
                             Some(ref _ssl) => unreachable!(),
                         };
 
-                        Ok(ClientConnection::new(write_closable, read_closable))
+                        Ok(ClientConnection::new(write_closable, read_closable, socket))
                     }
                     Err(e) => Err(e),
                 };

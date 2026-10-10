@@ -86,8 +86,9 @@ struct Parts {
     core: String,
     /// `X` and `x`
     diagnostics: String,
-    /// The pass that read `B`, `K`/`U`, `M` and `X`/`x`.
+    /// The pass that read `B`, `K`/`U` and `X`/`x`, and the one that read `M`.
     proxy_pass: u64,
+    core_pass: u64,
 }
 impl Parts {
     const fn new() -> Self {
@@ -103,6 +104,7 @@ impl Parts {
             core: String::new(),
             diagnostics: String::new(),
             proxy_pass: 0,
+            core_pass: 0,
         }
     }
 }
@@ -340,7 +342,8 @@ fn refresh_system(state: &AppState) {
     );
 }
 /// `B`, `K`/`U`, `M` and `X`/`x`: quick reads that never take the WireGuard lock. The
-/// periodic refresher and the job thread both run this.
+/// periodic refresher and the job thread both run this. `M` is stored after the others:
+/// the first read of a core file hashes it, which can take seconds.
 fn refresh_proxy_parts() {
     let pass = begin_pass();
     let backend = ipc::backend_record(&proxy::get().1["data"]);
@@ -350,20 +353,25 @@ fn refresh_proxy_parts() {
     } else {
         String::new()
     };
-    let (code, v) = core_status();
-    let core = ipc::core_record(code, &v);
     let diagnostics = ipc::diag_records(&clash_diag::get().1["data"]);
-    store_proxy_parts(pass, [backend, clash, core, diagnostics]);
+    store_proxy_parts(pass, [backend, clash, diagnostics]);
+    let (code, v) = core_status();
+    store_core(pass, ipc::core_record(code, &v));
 }
-fn store_proxy_parts(pass: u64, [backend, clash, core, diagnostics]: [String; 4]) {
+fn store_proxy_parts(pass: u64, [backend, clash, diagnostics]: [String; 3]) {
     let mut p = PARTS.lock().unwrap();
     if !newest(&mut p.proxy_pass, pass) {
         return;
     }
     p.backend = backend;
     p.clash = clash;
-    p.core = core;
     p.diagnostics = diagnostics;
+}
+fn store_core(pass: u64, core: String) {
+    let mut p = PARTS.lock().unwrap();
+    if newest(&mut p.core_pass, pass) {
+        p.core = core;
+    }
 }
 fn proxies_wanted() -> bool {
     now().saturating_sub(PROXY_INTEREST.load(Ordering::Relaxed)) < 10
@@ -654,23 +662,19 @@ mod tests {
         // and stores after the job thread's pass, which began after the job: the job's
         // outcome must stay, since FRESH already says the records show it.
         let (periodic, job) = (begin_pass(), begin_pass());
-        let parts = |b: &str| {
-            [
-                format!("B\t{b}\n"),
-                String::new(),
-                String::new(),
-                String::new(),
-            ]
-        };
+        let parts = |b: &str| [format!("B\t{b}\n"), String::new(), String::new()];
         store_proxy_parts(job, parts("after"));
         store_proxy_parts(periodic, parts("before"));
+        store_core(job, "M\tafter\n".into());
+        store_core(periodic, "M\tbefore\n".into());
         store_wireguard(&json!({"revision": 9}), job);
         store_wireguard(&json!({"revision": 8}), periodic);
         store_proxies(job, Cache::Unavailable);
         store_proxies(periodic, Cache::Loading);
         let s = status();
         assert!(s.starts_with("S 9 ") && s.contains("B\tafter\n"), "{s}");
-        assert!(!s.contains("B\tbefore"), "{s}");
+        assert!(s.contains("M\tafter\n") && !s.contains("B\tbefore"), "{s}");
+        assert!(!s.contains("M\tbefore"), "{s}");
         assert_eq!(PROXIES.lock().unwrap().cache, Cache::Unavailable);
         // A pass that began later stores again.
         store_proxy_parts(begin_pass(), parts("later"));

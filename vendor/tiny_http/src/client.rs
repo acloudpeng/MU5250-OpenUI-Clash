@@ -1,4 +1,6 @@
-// Modified for OpenUI (see OPENUI-PATCH.md): request line, header line and header count limits.
+// Modified for OpenUI (see OPENUI-PATCH.md): request line, header line and header count limits;
+// requests get the connection's ConnectionControl, and nothing after an abandoned body is read;
+// HTTP/2 and later get their 505 without deadlocking the connection thread.
 use ascii::AsciiString;
 
 use std::io::Error as IoError;
@@ -7,8 +9,10 @@ use std::io::{BufReader, BufWriter, ErrorKind, Read};
 
 use std::net::SocketAddr;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use crate::common::{HTTPVersion, Method};
+use crate::connection::{Connection, ConnectionControl};
 use crate::util::RefinedTcpStream;
 use crate::util::{SequentialReader, SequentialReaderBuilder, SequentialWriterBuilder};
 use crate::Request;
@@ -26,20 +30,42 @@ pub struct ClientConnection {
 
     // sequence of Readers to the stream, so that the data is not read in
     //  the wrong order
-    source: SequentialReaderBuilder<BufReader<RefinedTcpStream>>,
+    source: SequentialReaderBuilder<ClientStream>,
 
     // sequence of Writers to the stream, to avoid writing response #2 before
     //  response #1
     sink: SequentialWriterBuilder<BufWriter<RefinedTcpStream>>,
 
     // Reader to read the next header from
-    next_header_source: SequentialReader<BufReader<RefinedTcpStream>>,
+    next_header_source: SequentialReader<ClientStream>,
 
     // set to true if we know that the previous request is the last one
     no_more_requests: bool,
 
     // true if the connection goes through SSL
     secure: bool,
+
+    // given to each request, for its body reader
+    control: Arc<ConnectionControl>,
+}
+
+/// The client's byte stream, which requests and their bodies are read from. Once a body
+/// reader has abandoned the connection (`ConnectionControl::abandon`), the next bytes are
+/// the rest of that body, so reads fail and the connection closes instead of parsing them.
+/// The check sits above the buffer, which may hold such bytes already.
+struct ClientStream {
+    inner: BufReader<RefinedTcpStream>,
+    control: Arc<ConnectionControl>,
+}
+
+impl Read for ClientStream {
+    fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
+        if self.control.is_abandoned() {
+            let msg = "Request body left unread";
+            return Err(IoError::new(ErrorKind::ConnectionAborted, msg));
+        }
+        self.inner.read(buf)
+    }
 }
 
 /// Error that can happen when reading a request.
@@ -54,14 +80,21 @@ enum ReadError {
 
 impl ClientConnection {
     /// Creates a new `ClientConnection` that takes ownership of the `TcpStream`.
+    ///
+    /// `socket` is another handle on the client's socket (below TLS, if any).
     pub fn new(
         write_socket: RefinedTcpStream,
         mut read_socket: RefinedTcpStream,
+        socket: Connection,
     ) -> ClientConnection {
         let remote_addr = read_socket.peer_addr();
         let secure = read_socket.secure();
 
-        let mut source = SequentialReaderBuilder::new(BufReader::with_capacity(1024, read_socket));
+        let control = Arc::new(ConnectionControl::new(socket));
+        let mut source = SequentialReaderBuilder::new(ClientStream {
+            inner: BufReader::with_capacity(1024, read_socket),
+            control: control.clone(),
+        });
         let first_header = source.next().unwrap();
 
         ClientConnection {
@@ -71,6 +104,7 @@ impl ClientConnection {
             next_header_source: first_header,
             no_more_requests: false,
             secure,
+            control,
         }
     }
 
@@ -166,6 +200,7 @@ impl ClientConnection {
             *self.remote_addr.as_ref().unwrap(),
             data_source,
             writer,
+            Some(self.control.clone()),
         )
         .map_err(|e| {
             use crate::request;
@@ -233,20 +268,26 @@ impl Iterator for ClientConnection {
                     return None; // TODO: should be recoverable, but needs handling in case of body
                 }
 
-                Err(ReadError::ReadIoError(_)) => return None,
+                Err(ReadError::ReadIoError(_)) => {
+                    if self.control.is_abandoned() {
+                        self.control.linger();
+                    }
+                    return None;
+                }
 
                 Ok(rq) => rq,
             };
 
             // checking HTTP version
             if *rq.http_version() > (1, 1) {
-                let writer = self.sink.next().unwrap();
+                // Answered through the request: the sink's next writer waits for the one
+                // the request holds, so the original deadlocked this thread for good.
                 let response = Response::from_string(
                     "This server only supports HTTP versions 1.0 and 1.1".to_owned(),
                 )
                 .with_status_code(StatusCode(505));
                 response
-                    .raw_print(writer, HTTPVersion(1, 1), &[], false, None)
+                    .raw_print(rq.into_writer(), HTTPVersion(1, 1), &[], false, None)
                     .ok();
                 continue;
             }

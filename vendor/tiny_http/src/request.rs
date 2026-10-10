@@ -1,3 +1,4 @@
+// Modified for OpenUI (see OPENUI-PATCH.md): a body reader gets its connection.
 use std::io::Error as IoError;
 use std::io::{self, Cursor, ErrorKind, Read, Write};
 
@@ -6,7 +7,9 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 
 use std::sync::mpsc::Sender;
+use std::sync::Arc;
 
+use crate::connection::ConnectionControl;
 use crate::util::{EqualReader, FusedReader};
 use crate::{HTTPVersion, Header, Method, Response, StatusCode};
 use chunked_transfer::Decoder;
@@ -125,6 +128,9 @@ impl From<IoError> for RequestCreationError {
 /// It is the responsibility of the `Request` to read only the data of the request and not further.
 ///
 /// The `Write` object will be used by the `Request` to write the response.
+///
+/// `connection` is the client connection `source_data` reads from, if any: a body left
+/// unread is drained through it with bounded waits, or the connection is abandoned.
 #[allow(clippy::too_many_arguments)]
 pub fn new_request<R, W>(
     secure: bool,
@@ -135,6 +141,7 @@ pub fn new_request<R, W>(
     remote_addr: Option<SocketAddr>,
     mut source_data: R,
     writer: W,
+    connection: Option<Arc<ConnectionControl>>,
 ) -> Result<Request, RequestCreationError>
 where
     R: Read + Send + 'static,
@@ -212,7 +219,7 @@ where
 
             Box::new(Cursor::new(buffer)) as Box<dyn Read + Send + 'static>
         } else {
-            let (data_reader, _) = EqualReader::new(source_data, content_length); // TODO:
+            let (data_reader, _) = EqualReader::new(source_data, content_length, connection); // TODO:
             Box::new(FusedReader::new(data_reader)) as Box<dyn Read + Send + 'static>
         }
     } else if transfer_encoding.is_some() {

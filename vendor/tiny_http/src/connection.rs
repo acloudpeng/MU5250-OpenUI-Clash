@@ -1,12 +1,15 @@
-// Modified for OpenUI (see OPENUI-PATCH.md): Connection::set_timeouts.
+// Modified for OpenUI (see OPENUI-PATCH.md): Connection::set_timeouts, set_read_timeout,
+// set_nonblocking and read_shared; ConnectionControl with lingering close.
 //! Abstractions of Tcp and Unix socket types
 
 #[cfg(unix)]
 use std::os::unix::net as unix_net;
 use std::{
+    io::{ErrorKind, Read},
     net::{Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs},
     path::PathBuf,
-    time::Duration,
+    sync::atomic::{AtomicBool, Ordering},
+    time::{Duration, Instant},
 };
 
 /// Unified listener. Either a [`TcpListener`] or [`std::os::unix::net::UnixListener`]
@@ -105,6 +108,32 @@ impl Connection {
         }
     }
 
+    /// Changes only the read timeout; the socket option is shared by every handle on it.
+    pub(crate) fn set_read_timeout(&self, timeout: Option<Duration>) -> std::io::Result<()> {
+        match self {
+            Self::Tcp(s) => s.set_read_timeout(timeout),
+            #[cfg(unix)]
+            Self::Unix(s) => s.set_read_timeout(timeout),
+        }
+    }
+
+    /// Reads through a shared reference (the socket types implement `Read` for `&Self`).
+    pub(crate) fn read_shared(&self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Tcp(s) => (&*s).read(buf),
+            #[cfg(unix)]
+            Self::Unix(s) => (&*s).read(buf),
+        }
+    }
+
+    pub(crate) fn set_nonblocking(&self, nonblocking: bool) -> std::io::Result<()> {
+        match self {
+            Self::Tcp(s) => s.set_nonblocking(nonblocking),
+            #[cfg(unix)]
+            Self::Unix(s) => s.set_nonblocking(nonblocking),
+        }
+    }
+
     pub(crate) fn shutdown(&self, how: Shutdown) -> std::io::Result<()> {
         match self {
             Self::Tcp(s) => s.shutdown(how),
@@ -119,6 +148,71 @@ impl Connection {
             #[cfg(unix)]
             Self::Unix(s) => s.try_clone().map(Self::from),
         }
+    }
+}
+
+/// A client connection as its requests' body readers need it, shared by those requests:
+/// a handle on the socket (under TLS too), so that a body left unread can be drained
+/// without waiting for the client, and a way to give up on the connection when it cannot
+/// be.
+pub(crate) struct ConnectionControl {
+    socket: Connection,
+    abandoned: AtomicBool,
+}
+
+impl ConnectionControl {
+    pub(crate) fn new(socket: Connection) -> Self {
+        ConnectionControl {
+            socket,
+            abandoned: AtomicBool::new(false),
+        }
+    }
+
+    /// Switches the socket (every handle on it) between blocking and non-blocking reads.
+    pub(crate) fn set_nonblocking(&self, nonblocking: bool) -> std::io::Result<()> {
+        self.socket.set_nonblocking(nonblocking)
+    }
+
+    /// Gives up on the connection after a request body on it was left part-way. What
+    /// follows is the rest of that body, so the connection must never parse it: the
+    /// flag makes its reads fail (a read shutdown would not do, Linux still returns
+    /// bytes, queued or new, after one), and the connection's thread then lingers and
+    /// lets go of the socket, which closes once the responses on it are written.
+    pub(crate) fn abandon(&self) {
+        self.abandoned.store(true, Ordering::Release);
+    }
+
+    /// Ends an abandoned connection, on its own thread: reads and throws away what the
+    /// client is still sending for a short while before this thread lets go of the socket.
+    /// Closing with unread data resets the connection, which can make the client lose the
+    /// response it has not read yet (as with an upload refused early). It does not shut
+    /// down writing: a body that ended early is dropped (by `FusedReader`) while the
+    /// application is still reading it, before its response is written, and the socket
+    /// only closes, FIN after the response, once the request's writer lets go too. For
+    /// the same reason only the read timeout is shortened: that response may still be
+    /// written, and keeps the connection's write timeout.
+    pub(crate) fn linger(&self) {
+        const QUIET: Duration = Duration::from_millis(200);
+        const LINGER: Duration = Duration::from_secs(2);
+        const LIMIT: usize = 16 * 1024 * 1024;
+        if self.socket.set_read_timeout(Some(QUIET)).is_err() {
+            return;
+        }
+        let deadline = Instant::now() + LINGER;
+        let mut buf = [0u8; 8 * 1024];
+        let mut discarded = 0;
+        while discarded < LIMIT && Instant::now() < deadline {
+            match self.socket.read_shared(&mut buf) {
+                Ok(0) => return,
+                Ok(n) => discarded += n,
+                Err(e) if e.kind() == ErrorKind::Interrupted => {}
+                Err(_) => return,
+            }
+        }
+    }
+
+    pub(crate) fn is_abandoned(&self) -> bool {
+        self.abandoned.load(Ordering::Acquire)
     }
 }
 impl From<TcpStream> for Connection {
