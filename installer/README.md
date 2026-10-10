@@ -157,7 +157,7 @@ Do not put certificates or passwords in source or issue comments.
 
 ## Wireframes
 
-[View the v2.4 installer wireframes](../docs/INSTALLER-WIREFRAMES.md). They render
+[View the v2.5 installer wireframes](../docs/INSTALLER-WIREFRAMES.md). They render
 the actual React interface through a separate sample-only bridge, which is not
 included in the desktop bundle.
 

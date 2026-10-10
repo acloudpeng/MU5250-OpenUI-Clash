@@ -306,3 +306,12 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
   - 小屏 `status` 里的代理记录（B/K/U/X）要等内核记录 M 一起存，而首次读取内核要算一遍文件哈希（可能几秒），刚启动时代理页空着。
     现在先存 B/K/U/X，M 算完后单独存。
 - 模拟不了的：IPA 硬件加速、固件 fw3/QCMAP 规则与重载、真实运营商 DNS 与墙、B31 时钟快 8 小时、arm64 内核替换后的启动与回滚、屏幕程序本身。
+
+### 2026-10-10 — 发布 v2.5
+- 版本号统一为 2.5.0（agent、网页、安装器及各自的锁文件；`scripts/check-release.py` 要求它们与标签一致）。
+- 发布工作流要求 `docs/images/installer-<标签>/` 下有 5 张安装器线框图：`installer/wireframes/capture.mjs` 改为按安装器版本命名输出目录和图上标签，
+  重新生成了 v2.5 的图，删掉 v2.4 的（v2.4 标签里仍有）。
+- 发布包里除了工作流产出的 `zte-agent`、`dashboard-dist.tar.gz` 和桌面安装器，另附 CI（mihomo core 工作流）编译的固定内核 `mihomo`，
+  以及本机用 Zig 0.14.1 从该标签编译的 `openui-screen`（两次编译 sha256 相同：`77640772…ed82`）。GEO 数据不附带，用 `prepare-geodata.py` 准备。
+- 桌面安装器从上游 `dklasens/MU5250-OpenUI` 下载包，不能用来更新本分支（发布说明已注明）。
+  后续可做：发布工作流直接编译屏幕程序并附带内核；安装器改为指向本仓库，或不再随本分支发布。
