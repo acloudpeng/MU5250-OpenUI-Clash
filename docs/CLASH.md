@@ -115,6 +115,15 @@ kept; the URL is treated as a secret and only its host is shown. The agent keeps
 groups, rules, providers, hosts, sniffer and geo settings from the profile and owns
 everything that binds a port, routes traffic or picks the DNS mode.
 
+The DNS listener is the agent's (`127.0.0.1:1053`). A profile written for a standalone
+client may point DNS servers at its own listener, typically
+`proxy-server-nameserver: [udp://127.0.0.1:7874]` next to `listen: 127.0.0.1:7874`.
+Such entries (loopback or unspecified host, the profile's listen port or 1053, in any
+server list or policy) are dropped, and what they resolved falls back to the main
+resolver. Pointing them at 1053 instead would give node names fake IPs. When the core
+requires a `proxy-server-nameserver` (with `respect-rules` or a
+`proxy-server-nameserver-policy`), it gets the `default-nameserver` servers.
+
 Every download (adding a subscription, changing its URL, **Update now** and the automatic
 refresh) is composed with the current settings and checked with `mihomo -t` before it
 replaces the stored profile, also while Clash is off or the subscription is not the
@@ -127,8 +136,8 @@ subscription is chosen, a setting changes or the active one is refreshed.
 
 ## Clock
 
-B31 has been seen keeping Beijing time in the system clock as if it were UTC, 8 hours
-ahead, and its own NITZ/NTP writes it back. VMess, Shadowsocks 2022 and some REALITY
+B31 keeps Beijing time in the system clock as if it were UTC, 8 hours ahead, and its
+own NITZ/NTP writes it back (measured on a B31 device: +28 796 s). VMess, Shadowsocks 2022 and some REALITY
 servers reject handshakes that far off; when every node uses one of them, a group delay
 test reports `get delay: all proxies timeout`. The generated profile therefore turns on
 the core's NTP client with `write-to-system: false`. It uses `203.107.6.88`
@@ -137,7 +146,10 @@ Only the core's own protocol and TLS clock is corrected; the system clock is lef
 Until the first sync succeeds, for example at boot before the WAN is up, time-checked
 nodes can fail for up to 5 minutes. A failed sync logs `Sync time failed`. At log level
 info, the core logs the measured offset; in this core version the line's "ahead" and
-"behind" are swapped, so read only the amount.
+"behind" are swapped, so read only the amount. Diagnostics therefore report a system
+clock 8 hours (±120 s) ahead as passing when the profile has the NTP block, and say it
+is Beijing time; if nodes fail, the hint still points at the clock in case the core's
+sync has not succeeded.
 
 ## Traffic and recovery
 

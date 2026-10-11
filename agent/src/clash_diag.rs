@@ -21,6 +21,9 @@ const DOMESTIC: &str = "https://www.baidu.com";
 const FOREIGN: &str = "https://www.google.com/generate_204";
 /// Clock skew that time-checked protocols still accept (VMess allows 120 s).
 const SKEW_LIMIT: i64 = 120;
+/// B31 keeps Beijing time in the system clock as if it were UTC; with the profile's NTP
+/// block the core corrects its own clock, so that offset is expected (see clash_config).
+const BEIJING_OFFSET: i64 = 8 * 3600;
 /// Firewall hooks of the Clash egress policy: table, stock chain, owned chain suffix.
 const HOOKS: [(&str, &str, &str); 4] = [
     ("mangle", "PREROUTING", "MARK"),
@@ -93,15 +96,16 @@ fn clock() -> Value {
         .map(|server| now() as i64 - server);
     let ntp =
         fs::read_to_string(clash::PROFILE).is_ok_and(|p| p.lines().any(|l| l.starts_with("ntp:")));
+    let beijing = ntp && skew.is_some_and(|s| (s - BEIJING_OFFSET).abs() <= SKEW_LIMIT);
     let status = match skew {
         None => "skip",
-        Some(s) if s.abs() <= SKEW_LIMIT => "pass",
+        Some(s) if s.abs() <= SKEW_LIMIT || beijing => "pass",
         Some(_) => "warn",
     };
     check(
         "clock",
         status,
-        json!({"skew_s": skew, "ntp": ntp}),
+        json!({"skew_s": skew, "ntp": ntp, "beijing": beijing}),
         String::new(),
     )
 }

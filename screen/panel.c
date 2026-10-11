@@ -1436,6 +1436,13 @@ static void proxy_tests(struct drm_buf *b,const char *dir) {
   press_id(b,"proxy");press_id(b,"diag");assert(page==DIAG&&diag_from==PROXY);capture_both(b,dir,"diag");
   press_id(b,"next");assert(diag_offset==4);capture_both(b,dir,"diag-page2");
   press_id(b,"prev");assert(!diag_offset);
+  /* B31's Beijing-time system clock with the core's NTP passes and says why. */
+  struct check_info saved_clock=data.diag.checks[0];
+  assert(!strcmp(data.diag.checks[0].id,"clock"));
+  data.diag.checks[0].v[0]=28796;data.diag.checks[0].v[2]=1;
+  capture(b,dir,"diag-beijing");assert(strstr(html,"北京时间，快 8 小时，内核已校正"));
+  settings_zh=0;capture(b,dir,"en-diag-beijing");assert(strstr(html,"Beijing time +8 h; core uses NTP"));settings_zh=1;
+  data.diag.checks[0]=saved_clock;
   press_id(b,"drun");expect_request("diag\n");assert(pending_kind==JOB_DIAG);
   reset_job();data.diag.running=1;capture(b,dir,"diag-running");press_id(b,"drun");assert(!test_request[0]);
   data.diag.running=0;press_id(b,"back");assert(page==PROXY);press_id(b,"back");assert(page==MENU);

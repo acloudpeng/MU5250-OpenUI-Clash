@@ -54,6 +54,15 @@ const DNS_OWNED: &[&str] = &[
     "fake-ip-range",
     "fake-ip-range6",
 ];
+/// DNS keys holding server lists, and policies whose values are server lists.
+const DNS_SERVER_LISTS: &[&str] = &[
+    "nameserver",
+    "fallback",
+    "default-nameserver",
+    "proxy-server-nameserver",
+    "direct-nameserver",
+];
+const DNS_SERVER_POLICIES: &[&str] = &["nameserver-policy", "proxy-server-nameserver-policy"];
 const DEFAULT_NAMESERVERS: &[&str] = &["223.5.5.5", "119.29.29.29"];
 const DEFAULT_FAKE_IP_FILTER: &[&str] = &[
     "*.lan",
@@ -146,18 +155,96 @@ pub fn summary(map: &Mapping) -> Summary {
     }
 }
 
+/// The port after the last colon of a listen address: "127.0.0.1:7874", ":7874", "[::]:53".
+fn listen_port(listen: &str) -> Option<u16> {
+    listen.rsplit_once(':')?.1.parse().ok()
+}
+/// The port of a DNS server entry on this device's own loopback (or unspecified)
+/// address: "udp://127.0.0.1:7874", "127.0.0.1:7874", "tcp://[::1]:7874". Other hosts,
+/// and schemes without a port (system, dhcp, rcode), are left alone.
+fn loopback_port(server: &str) -> Option<u16> {
+    let server = server.split('#').next()?.trim();
+    let (scheme, rest) = server.split_once("://").unwrap_or(("udp", server));
+    let default = match scheme {
+        "udp" | "tcp" => 53,
+        "tls" | "quic" => 853,
+        "https" | "h3" => 443,
+        _ => return None,
+    };
+    let authority = rest.split('/').next()?;
+    let (host, port) = match authority.strip_prefix('[') {
+        Some(v6) => {
+            let (host, tail) = v6.split_once(']')?;
+            (host, tail.strip_prefix(':'))
+        }
+        None => match authority.split_once(':') {
+            Some((host, port)) => (host, Some(port)),
+            None => (authority, None),
+        },
+    };
+    let port = port.map_or(Some(default), |p| p.parse().ok())?;
+    let local = host == "localhost"
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback() || ip.is_unspecified());
+    local.then_some(port)
+}
+/// Drops the entries of a server list (or a single server) that point at `ports` on
+/// loopback; false when nothing is left.
+fn drop_servers(value: &mut Value, ports: &[u16]) -> bool {
+    let stale = |v: &Value| {
+        v.as_str()
+            .and_then(loopback_port)
+            .is_some_and(|p| ports.contains(&p))
+    };
+    match value {
+        Value::Sequence(list) => {
+            list.retain(|v| !stale(v));
+            !list.is_empty()
+        }
+        v => !stale(v),
+    }
+}
 fn dns(source: Option<&Value>, o: &Options) -> Value {
     let mut dns = match source {
         Some(Value::Mapping(m)) => m.clone(),
         _ => Mapping::new(),
     };
+    // A profile written for a standalone client may point its servers, typically
+    // proxy-server-nameserver, at its own DNS listener. That listener is replaced by
+    // DNS_LISTEN, and pointing them there instead would hand node names fake IPs: such
+    // entries go, and what they resolved falls back to the main resolver.
+    let ports: Vec<u16> = [dns.get("listen").and_then(Value::as_str), Some(DNS_LISTEN)]
+        .into_iter()
+        .flatten()
+        .filter_map(listen_port)
+        .collect();
     dns.retain(|k, _| k.as_str().is_some_and(|k| !DNS_OWNED.contains(&k)));
+    for k in DNS_SERVER_LISTS {
+        if dns.get_mut(*k).is_some_and(|v| !drop_servers(v, &ports)) {
+            dns.remove(*k);
+        }
+    }
+    for k in DNS_SERVER_POLICIES {
+        if let Some(Value::Mapping(policy)) = dns.get_mut(*k) {
+            policy.retain(|_, v| drop_servers(v, &ports));
+        }
+    }
     let empty = |m: &Mapping, k: &str| m.get(k).is_none_or(|v| len_value(v) == 0);
     if empty(&dns, "nameserver") {
         dns.insert(key("nameserver"), strings(DEFAULT_NAMESERVERS));
     }
     if empty(&dns, "default-nameserver") {
         dns.insert(key("default-nameserver"), strings(DEFAULT_NAMESERVERS));
+    }
+    // The core refuses respect-rules, or a proxy-server-nameserver-policy, without a
+    // proxy-server-nameserver: the direct bootstrap servers take that role.
+    if empty(&dns, "proxy-server-nameserver")
+        && (dns.get("respect-rules").and_then(Value::as_bool) == Some(true)
+            || !empty(&dns, "proxy-server-nameserver-policy"))
+    {
+        let bootstrap = dns["default-nameserver"].clone();
+        dns.insert(key("proxy-server-nameserver"), bootstrap);
     }
     if o.dns_mode == "fake-ip" && empty(&dns, "fake-ip-filter") {
         dns.insert(key("fake-ip-filter"), strings(DEFAULT_FAKE_IP_FILTER));
@@ -331,6 +418,63 @@ rules:
         assert_eq!(dns["nameserver"], strings(&["https://doh.pub/dns-query"]));
         assert_eq!(dns["fake-ip-filter"], strings(&["+.example.cn"]));
         assert_eq!(dns["default-nameserver"], strings(DEFAULT_NAMESERVERS));
+    }
+    /// Issue #1: a profile for a standalone client resolves node names through its own
+    /// DNS listener, which the agent replaces.
+    #[test]
+    fn servers_pointing_at_the_profiles_own_listener_go() {
+        let compose_dns = |dns: &str| -> Mapping {
+            let map = parse(&format!(
+                "dns:\n{dns}\nproxies:\n  - {{name: A, type: socks5, server: a.example, port: 1080}}\n"
+            ))
+            .unwrap();
+            let c: Mapping = serde_norway::from_str(&compose(&map, &options())).unwrap();
+            c["dns"].as_mapping().unwrap().clone()
+        };
+        let dns = compose_dns(
+            "  listen: 127.0.0.1:7874\n  nameserver: [tls://119.29.29.29, tls://223.5.5.5]\n  proxy-server-nameserver: [udp://127.0.0.1:7874]",
+        );
+        assert!(dns.get("proxy-server-nameserver").is_none(), "{dns:?}");
+        assert_eq!(
+            dns["nameserver"],
+            strings(&["tls://119.29.29.29", "tls://223.5.5.5"])
+        );
+        assert_eq!(dns["listen"], key(DNS_LISTEN));
+        // Only the stale entries go; the agent's own port counts too (the issue's workaround).
+        let dns = compose_dns(
+            "  listen: 0.0.0.0:7874\n  proxy-server-nameserver: ['127.0.0.1:7874', 'tcp://[::1]:7874#DIRECT', 'udp://127.0.0.1:1053', 'tls://1.12.12.12', '127.0.0.1', 'udp://127.0.0.1:5353', 'udp://192.168.0.1:7874']\n  nameserver: [udp://localhost:7874]\n  fallback: ['127.0.0.1:7874']\n  nameserver-policy: {'+.a.example': '127.0.0.1:7874', '+.b.example': ['127.0.0.1:7874', '223.5.5.5']}",
+        );
+        assert_eq!(
+            dns["proxy-server-nameserver"],
+            strings(&[
+                "tls://1.12.12.12",
+                "127.0.0.1",
+                "udp://127.0.0.1:5353",
+                "udp://192.168.0.1:7874"
+            ])
+        );
+        assert_eq!(dns["nameserver"], strings(DEFAULT_NAMESERVERS));
+        assert!(dns.get("fallback").is_none());
+        let policy = dns["nameserver-policy"].as_mapping().unwrap();
+        assert!(policy.get("+.a.example").is_none());
+        assert_eq!(policy["+.b.example"], strings(&["223.5.5.5"]));
+        // The core needs a proxy-server-nameserver with respect-rules or a policy for it.
+        for extra in [
+            "  respect-rules: true",
+            "  proxy-server-nameserver-policy: {'+.n.example': 223.5.5.5}",
+        ] {
+            let dns = compose_dns(&format!(
+                "  listen: 127.0.0.1:7874\n  proxy-server-nameserver: [udp://127.0.0.1:7874]\n  default-nameserver: [119.29.29.29]\n{extra}"
+            ));
+            assert_eq!(
+                dns["proxy-server-nameserver"],
+                strings(&["119.29.29.29"]),
+                "{extra}"
+            );
+        }
+        // Without a listen of its own, a loopback server on port 53 stays.
+        let dns = compose_dns("  proxy-server-nameserver: [127.0.0.1]");
+        assert_eq!(dns["proxy-server-nameserver"], strings(&["127.0.0.1"]));
     }
     #[test]
     fn anchors_and_merge_keys_expand_in_order() {

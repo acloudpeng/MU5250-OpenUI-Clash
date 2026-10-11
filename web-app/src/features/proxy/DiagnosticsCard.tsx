@@ -71,8 +71,9 @@ function summary(c: ClashCheck, ctx: Context): string {
   if (c.status === 'skip' && c.id !== 'clock') return notChecked(c.id, ctx)
   switch (c.id) {
     case 'clock': {
-      const { skew_s: skew, ntp } = c.data
+      const { skew_s: skew, ntp, beijing } = c.data
       const clock = skew == null ? t('Network time unavailable')
+        : beijing ? t('Device clock keeps Beijing time, {d} ahead, as this firmware does; the core corrects its own clock', { d: formatDuration(skew) })
         : Math.abs(skew) < 1 ? t('Device clock matches network time')
         : skew > 0 ? t('Device clock is {d} ahead of network time', { d: formatDuration(skew) })
         : t('Device clock is {d} behind network time', { d: formatDuration(-skew) })
@@ -140,7 +141,8 @@ function hints(verdict: ClashVerdict, checks: ClashCheck[]): string[] {
   const fetch = find(checks, 'fetch')?.data, devices = find(checks, 'devices')?.data, fw = find(checks, 'firewall')?.data
   const out: string[] = []
   const skew = clock?.data.skew_s
-  if (verdict === 'nodes' && clock?.status === 'warn' && skew != null) {
+  // Also for B31's expected offset: failing nodes may mean the core's NTP sync has not succeeded.
+  if (verdict === 'nodes' && (clock?.status === 'warn' || clock?.data.beijing) && skew != null) {
     const d = formatDuration(Math.abs(skew))
     out.push(clock.data.ntp
       ? t('The device clock is off by {d}; VMess and Shadowsocks 2022 nodes reject it until the core’s NTP sync succeeds. If Logs show “Sync time failed”, the core cannot reach its NTP server.', { d })

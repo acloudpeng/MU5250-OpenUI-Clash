@@ -450,7 +450,7 @@ pub fn diag_records(v: &Value) -> String {
     for c in v["checks"].as_array().into_iter().flatten().take(8) {
         let d = &c["data"];
         let keys: [&str; 4] = match c["id"].as_str().unwrap_or("") {
-            "clock" => ["skew_s", "ntp", "", ""],
+            "clock" => ["skew_s", "ntp", "beijing", ""],
             "core" => ["running", "supervised", "", ""],
             "dns" | "fetch" => ["domestic", "foreign", "", ""],
             "nodes" => ["https_ms", "http_ms", "answered", "total"],
@@ -874,14 +874,14 @@ mod tests {
         let same = json!({"data":{"installed":{"version":"1.19.14"},"latest":{"tag":"v1.19.14"}}});
         assert!(core_record(200, &same).starts_with("M\t1\t1.19.14\t-\t-\tv1.19.14\t-\t0\t"));
         let d = json!({"running":false,"finished_at":77,"verdict":"nodes","checks":[
-            {"id":"clock","status":"pass","data":{"skew_s":-3,"ntp":true},"detail":""},
+            {"id":"clock","status":"pass","data":{"skew_s":28796,"ntp":true,"beijing":true},"detail":""},
             {"id":"nodes","status":"fail","data":{"https_ms":null,"http_ms":250,"answered":2,"total":9},"detail":""},
             {"id":"firewall","status":"warn","data":{"missing":[],"displaced":["OUCL_FWD"],"held":false,"rejected":12},"detail":""},
             {"id":"route","status":"pass","data":{"client":"192.0.2.2","tun":true,"dns_tun":true},"detail":"ip route\nsecret"}]});
         assert_eq!(
             diag_records(&d),
             "X\t0\t77\tnodes\n\
-             x\tclock\tpass\t-3\t1\t-\t-\n\
+             x\tclock\tpass\t28796\t1\t1\t-\n\
              x\tnodes\tfail\t-\t250\t2\t9\n\
              x\tfirewall\twarn\t0\t1\t0\t12\n\
              x\troute\tpass\t1\t1\t-\t-\n"

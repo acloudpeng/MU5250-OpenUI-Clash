@@ -250,6 +250,7 @@ export default {
   'No connected device to test from': '没有可用于测试的已连接设备',
   'Network time unavailable': '无法获取网络时间',
   'Device clock matches network time': '设备时钟与网络时间一致',
+  'Device clock keeps Beijing time, {d} ahead, as this firmware does; the core corrects its own clock': '设备时钟用的是北京时间，快 {d}，这款固件就是这样；内核会校正自己的时钟',
   'Device clock is {d} ahead of network time': '设备时钟比网络时间快 {d}',
   'Device clock is {d} behind network time': '设备时钟比网络时间慢 {d}',
   'Core NTP: on': '内核 NTP：开启',

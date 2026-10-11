@@ -593,7 +593,8 @@ export interface ClashDiagClient {
 /** Each check's data, by check id. */
 export interface ClashCheckData {
   /** Device clock minus a domestic site's HTTP Date (positive = ahead); ntp: the profile has the core's NTP block. */
-  clock: { skew_s: number | null; ntp: boolean }
+  /** beijing: B31's system clock keeps Beijing time while the core keeps NTP time. */
+  clock: { skew_s: number | null; ntp: boolean; beijing?: boolean }
   core: { running: boolean; supervised: boolean; version: string | null }
   dns: { domestic: boolean; foreign: boolean }
   /** Main selector group, the node it resolves to, its delays, and members answering a group test. */

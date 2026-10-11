@@ -430,6 +430,8 @@ static void check_detail(char *buf, size_t n, const struct check_info *c) {
   if(!strcmp(c->status,"skip")){snprintf(buf,n,"%s",L("Not run","未运行"));return;}
   if(!strcmp(id,"clock")) {
     if(v[0]==NO_FIGURE)snprintf(buf,n,"%s",L("No time source reached","无法获取网络时间"));
+    /* B31 keeps Beijing time in the system clock; the core corrects its own. */
+    else if(v[2]==1)snprintf(buf,n,"%s",L("Beijing time +8 h; core uses NTP","北京时间，快 8 小时，内核已校正"));
     else snprintf(buf,n,L("Off by %lld s","偏差 %lld 秒"),v[0]<0?-v[0]:v[0]);
   } else if(!strcmp(id,"core"))snprintf(buf,n,"%s",v[0]==1?L("Controller answers","控制接口正常"):L("Core does not answer","内核无响应"));
   else if(!strcmp(id,"dns")||!strcmp(id,"fetch")) {
