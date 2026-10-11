@@ -8,7 +8,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: bridge.invoke }))
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn(async () => '/sample/bundle') }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async (name, callback) => { bridge.handlers.set(name, callback); return () => bridge.handlers.delete(name) }) }))
 const detected = (mode = 'ssh', operation = 'update') => ({ detectionId: 'sample-plan', gateway: '192.168.0.1', adbPath: null, adbDevices: [], selectedAdbSerial: null, selectionRequired: false, mode, operation, services: { web: true, agent: operation === 'update', ssh: mode === 'ssh', adb: mode === 'adb' }, connectionSummary: 'Sample MU5250', planSummary: 'Check before installing', ready: true, problems: [] })
-const preview = { result: 'dryRun', title: 'Checks passed', message: 'Ready', operation: 'update', deviceModel: 'Sample MU5250', firmware: 'Sample firmware', release: 'v1.0', dashboardUrl: null, apiUrl: null, sshAddress: null, diagnosticPath: null }
+const preview = { result: 'dryRun', title: 'Checks passed', message: 'Ready', operation: 'update', deviceModel: 'Sample MU5250', firmware: 'Sample firmware', release: 'v1.1', dashboardUrl: null, apiUrl: null, sshAddress: null, diagnosticPath: null }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((r) => { resolve = r }); return { promise, resolve } }
 async function ready() { await screen.findByText('Sample MU5250'); await waitFor(() => expect(bridge.handlers.has('installer-close-blocked')).toBe(true)) }
 async function check() { fireEvent.click(screen.getByRole('button', { name: 'Check device' })); await screen.findByRole('button', { name: '3. Update' }) }

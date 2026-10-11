@@ -72,7 +72,7 @@
 
 ### Windows：一步更新
 
-在 Windows 10 或 11 上，双击仓库里的 `deploy-windows.cmd`。它把设备更新到与仓库版本对应的发布版本，例如版本 1.0.0 对应发布 v1.0。它会：
+在 Windows 10 或 11 上，双击仓库里的 `deploy-windows.cmd`。它把设备更新到与仓库版本对应的发布版本，例如版本 1.1.0 对应发布 v1.1。它会：
 
 1. 查找 Python 3.10 以上版本和 OpenSSH 客户端；缺 Python 时提示用 winget 安装。
 2. 从 GitHub 下载发布文件，并按 `sha256sums.txt` 校验。也可以用 `-AssetsDir` 指定你自己下载好文件的文件夹。

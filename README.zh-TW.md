@@ -74,7 +74,7 @@
 
 ### Windows：一步更新
 
-在 Windows 10 或 11 上，按兩下儲存庫裡的 `deploy-windows.cmd`。它會把裝置更新到與儲存庫版本對應的發行版本，例如版本 1.0.0 對應發行版 v1.0。
+在 Windows 10 或 11 上，按兩下儲存庫裡的 `deploy-windows.cmd`。它會把裝置更新到與儲存庫版本對應的發行版本，例如版本 1.1.0 對應發行版 v1.1。
 它會：
 
 1. 尋找 Python 3.10 以上版本和 OpenSSH 用戶端；缺少 Python 時提示用 winget 安裝。

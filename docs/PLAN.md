@@ -431,3 +431,8 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
 - 检查脚本：`verify-screen.py` 按保存的闲置设置测试（熄屏时确认 DevUI 还在、背光为 0，再关闭）；
   `verify-devui-settings.py` 依次测两种闲置操作。
 - 需要在真机上确认：双指按住与原厂界面并存；开机打开；DevUI 熄屏停留较长时间（例如 30 分钟以上）设备不会自己重启。
+
+### 2026-10-11 — 1.1
+- 版本号改为 1.1.0（agent、网页、安装器和各自的锁文件），发布 v1.1，内容是上面「打开 DevUI 的方式」这批改动。
+- 重新生成 v1.1 的安装器线框图，删除 v1.0 的。发布说明 `docs/releases/v1.1.md` 用三种语言。
+- 安装器测试和线框图里的样例发布改为 v1.1；README 和 `deploy.ps1` 帮助里的版本示例改为 1.1.0 → v1.1。

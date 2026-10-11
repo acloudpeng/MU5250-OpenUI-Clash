@@ -90,7 +90,7 @@ unlock a device and install OpenUI for the first time, read
 
 On Windows 10 or 11, double-click `deploy-windows.cmd` in a checkout of this
 repository. It updates the modem to the release that matches the checkout; for
-example, version 1.0.0 deploys v1.0. It does the following:
+example, version 1.1.0 deploys v1.1. It does the following:
 
 1. Finds Python 3.10 or newer and the OpenSSH client. If Python is missing, it offers
    to install it with winget.
