@@ -460,3 +460,9 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
 - 端到端新增 S15（`tests/s15_dnsref.py`）：
   - 订阅 `setup/sub-dnsref.yaml` 的节点用域名 `hk01.node.example`；
   - 假服务器加了 `date_behind_8h` 开关，模拟 B31 的时钟。
+
+### 2026-10-11 — 1.1.1
+- 用户定的版本号：1.1.1（补丁版本），内容是工单 #1 的修复和时钟检查。
+- 版本号改为 1.1.1（agent、网页、安装器和各自的锁文件）。发布说明 `docs/releases/v1.1.1.md` 用三种语言。
+- 发布工作流原来按完整标签名找线框图目录（`installer-v1.1.1`），而线框图按主.次版本命名（`installer-v1.1`）。
+  现在按主.次版本查找：补丁版本沿用所属次版本的线框图，安装器界面不变就不用重新截图。

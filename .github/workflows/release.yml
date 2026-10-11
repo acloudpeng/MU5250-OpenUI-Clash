@@ -101,7 +101,9 @@ jobs:
           import os
           import zipfile
           from pathlib import Path
-          images = sorted((Path('docs/images') / ('installer-' + os.environ['GITHUB_REF_NAME'])).glob('*.png'))
+          # Named after the major.minor release (installer/wireframes/capture.mjs); a patch release reuses them.
+          release = 'v' + '.'.join(os.environ['GITHUB_REF_NAME'].removeprefix('v').split('.')[:2])
+          images = sorted((Path('docs/images') / ('installer-' + release)).glob('*.png'))
           assert len(images) == 5, 'Installer wireframes are incomplete'
           with zipfile.ZipFile('assets/installer-wireframes.zip', 'w', zipfile.ZIP_DEFLATED) as archive:
               for image in images: archive.write(image, image.name)
