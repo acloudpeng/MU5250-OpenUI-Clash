@@ -17,7 +17,7 @@ light/dark theme (auto + manual), each group lazy-loaded:
 | **Network** | clients by Wi-Fi/USB-C/Ethernet with link details, per-band Wi-Fi configuration, LAN/DHCP and DNS |
 | **Proxy** | **Active proxy** selector (Off / WireGuard / Clash, `/api/proxy`), then **Configure** either backend: WireGuard status, saved configurations and device routing; Clash overview with diagnostics, subscriptions, nodes, devices, connections, logs and advanced settings |
 | **Modem** | APN profiles (with carrier presets), eSIM on a removable eUICC ([ESIM.md](ESIM.md)), data usage + reset day, TTL clamping, SMS (inbox/sent, compose, delete) |
-| **DevUI** | the device touchscreen menu: open it, shortcut, brightness, idle return, startup page and menu items |
+| **DevUI** | the device touchscreen menu: open it, ways to open it on the device, brightness, idle time and action, startup page and menu items |
 | **System** | thermals, battery health, charge control, signal/connection loggers, AT console, on-demand process list, device/SIM info, USB mode + powerbank, power actions |
 
 The agent exposes exactly what these screens use and nothing else — the

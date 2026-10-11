@@ -417,6 +417,12 @@ export default {
   'Shortcut blocked: check screen recovery status': '快捷键被阻止：请检查屏幕恢复状态',
   'Shortcut disabled': '快捷键已停用',
   'Ready: four short presses within 2.5 seconds': '就绪：2.5 秒内短按四次',
+  'Waiting for the touchscreen': '正在等待触摸屏',
+  'Touchscreen disconnected': '触摸屏已断开',
+  'Two-finger hold requested DevUI': '双指按住已请求打开 DevUI',
+  'Hold blocked: check screen recovery status': '按住未生效：请检查屏幕恢复状态',
+  'Two-finger hold disabled': '双指按住已停用',
+  'Ready: hold two fingers still for 2 seconds': '就绪：双指按住不动 2 秒',
 
   // Most general pattern last: it would otherwise match "… is required" sentences above.
   '{field} is required': '{field} 为必填项',

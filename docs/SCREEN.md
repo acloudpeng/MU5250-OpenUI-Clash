@@ -2,20 +2,53 @@
 
 Open **DevUI** in the OpenUI sidebar. This page manages the device's 320×480
 touchscreen, which follows the web panel's language (Chinese or English). It provides
-**Open DevUI screen**, **Restore stock UI**, a four-press power-button shortcut, and
-saved preferences. Closing the browser does not close the device screen. Leaving DevUI
+**Open DevUI screen**, **Restore stock UI**, the ways to open DevUI from the device
+(a two-finger hold, at startup, a four-press power-button shortcut), and saved
+preferences. Closing the browser does not close the device screen. Leaving DevUI
 never turns a proxy off or changes saved device routing.
 
 ## Quick start
 
 1. Deploy the screen with `--screen` (together with the agent of the same version) and
-   run `scripts/verify-screen.py` once; until it passes, the webpage button and the
-   shortcut stay disabled.
-2. Open it with **DevUI → Open DevUI screen**, or enable **Press four times to open
-   DevUI**, save, and press the power button four times from the stock UI.
+   run `scripts/verify-screen.py` once; until it passes, DevUI does not open from the
+   webpage or the device.
+2. Open it with **DevUI → Open DevUI screen**, or on the lit stock UI hold two fingers
+   still on the screen for two seconds. **Open DevUI at startup** and the four-press
+   power-button shortcut are optional.
 3. Tap a menu row to open it; **‹ Back** is at the top right and **Stock UI** on the
-   main menu leaves DevUI. A short power press turns the display off or on. DevUI
-   returns to the stock UI after the idle time (two minutes by default).
+   main menu leaves DevUI. A short power press turns the display off or on. After the
+   idle time (two minutes by default) the screen turns off and DevUI stays, or, if
+   chosen, the stock UI returns.
+
+## Opening DevUI from the device
+
+**Two-finger hold** (on by default). On the lit stock UI, hold two fingers still on the
+screen for **two seconds**; DevUI opens through its normal startup path. Put the
+fingers where the stock UI has no button: the stock UI also receives the touches.
+- The agent reads the `sitronix` touchscreen without EVIOCGRAB, beside the stock touch
+  bridge (`mtdev2tuio`).
+- Exactly two fingers count. One finger (a stock long press), a third finger, a finger
+  lifted early, or moving more than a twelfth of the screen does not open DevUI.
+- Touches already down when the agent starts, or across dropped events, count only
+  after every finger has lifted. The screen must stay lit for the whole hold: a hold
+  that starts in the dark does not count, even when touch wake-up lights the screen.
+- After a launch, a five-second cooldown applies, and the fingers must lift before
+  another hold counts.
+- Like the shortcut, it needs a verified screen component, and the supervisor still
+  checks the factory boot handshake before it takes over.
+
+**The stock lock screen does not protect DevUI.** The stock UI's lock is a hold on the
+screen followed by its PIN, and the agent cannot see whether it is locked, so the hold
+opens DevUI from the lock screen too. The four-press shortcut behaves the same.
+
+**Open DevUI at startup** (off by default). Once per boot, after the firmware's boot
+barrier (`/tmp/zte_boot_done`), with `zte_topsw_devui` running and the stock daemons
+reporting sync, the agent waits five seconds and opens DevUI.
+- The stock UI therefore shows briefly first.
+- It never opens in power-off charging (`mode_main_state` `mode_power_off…` in
+  `/etc/config/zwrt_zte_mc_tmp`), nor again after an agent restart (`/tmp/openui-devui-boot`).
+- If the firmware has not finished booting within five minutes, or the open fails,
+  the stock UI stays for that boot.
 
 ## Power button and stock UI shortcut
 
@@ -45,9 +78,12 @@ modify factory menus, binaries, boot scripts, power-off or hardware-reset behavi
 
 | Setting | Behavior |
 | --- | --- |
-| Four-press shortcut | Enable or disable entry from stock UI; saved on the device |
+| Two-finger hold | Open DevUI from the lit stock UI; on by default |
+| Open at startup | Open DevUI once per boot after the stock UI has started; off by default |
+| Four-press shortcut | Enable or disable entry from stock UI with the power button; off by default |
 | Brightness | 20–255, shown as a percentage; updates while awake without waking a sleeping panel |
-| Idle return | 30–600 seconds; default 120 seconds, measured from touch or a short power press |
+| Idle time | 30–600 seconds; default 120 seconds, measured from touch or a short power press |
+| When idle | Turn the screen off and stay in DevUI (default), or return to the stock UI |
 | Startup page | Main menu or any visible feature; applies on the next opening |
 | Menu features | Up to four of Overview, Proxy, WireGuard, Clash, eSIM, Saved profiles and Device routing; default Overview, Proxy, WireGuard, Clash |
 
@@ -56,13 +92,16 @@ of exactly the four old defaults moves to the new default once. Saved profiles a
 Device routing stay reachable from the WireGuard page even when hidden from the menu.
 **Stock UI** and **Back** are always available. Hiding a feature only changes the screen menu; it does not disable its
 network service. A hidden page with unsaved work remains open until the draft or
-operation is resolved. The configured idle timeout discards unsaved device
-routing choices and returns to stock UI, even when the display is asleep.
+operation is resolved. Turning the screen off when idle keeps the open page and its
+unsaved choices. Returning to the stock UI when idle discards unsaved device routing
+choices, even when the display is asleep.
 Recovery restores the brightness recorded before takeover; it may therefore
 light the stock display again if it was previously awake.
 
 Click **Save DevUI settings** to persist edits. The screen picks up brightness,
-idle timeout and menu visibility within its two-second polling interval. Revision
+idle time and action, and menu visibility within its two-second polling interval.
+The two-finger hold and four-press switches apply at once, opening at startup from
+the next boot. Revision
 checks reject stale saves from another browser session; **Reload settings**
 reloads the device's saved version. Settings contain no passwords, VPN keys, HTML,
 scripts or shell commands.
@@ -129,14 +168,16 @@ sh screen/build.sh --preview
 
 Deployment snapshots the previous components and verification marker for rollback.
 Restore stock UI before replacing a running screen executable. A new screen binary
-invalidates the marker until the device recovery checks pass. The webpage and
-power-button shortcut both respect this gate.
+invalidates the marker until the device recovery checks pass. The webpage, the
+two-finger hold, opening at startup and the power-button shortcut all respect this gate.
 
 The following command temporarily takes over the screen and tests backlight
 sleep/wake, startup without touch, crash and stall recovery, web open/close,
-duplicate open and the default 120-second idle return. It does not change
-WireGuard configuration or network rules. Run it with the default 120-second
-DevUI idle setting; disable the shortcut while carrying out unattended tests.
+duplicate open and the saved idle time and action. With the defaults the screen
+turns off after 120 seconds and DevUI stays until the script closes it; with the
+stock UI chosen, DevUI returns to it. It does not change WireGuard configuration
+or network rules. Do not touch the screen during the test, and disable the
+shortcut while carrying out unattended tests.
 Existing login credentials are read in memory and are not printed.
 
 ```sh
@@ -146,9 +187,11 @@ python3 scripts/verify-screen.py --gateway 192.168.0.1 --port 2222 \
 
 After recovery verification, the following optional test checks authenticated
 settings, stale-save rejection, live brightness without restarting the panel, and
-a configured 30-second idle return. It restores the prior display preferences;
-`--enable-shortcut` deliberately leaves the four-press shortcut enabled on success.
-Do not interact with the device during the idle test.
+both idle actions: after a configured 30 seconds the screen turns off and DevUI
+stays; once the stock UI is chosen, the next 30 seconds return to it. It restores
+the prior display preferences; `--enable-shortcut` deliberately leaves the
+four-press shortcut enabled on success. Do not interact with the device during the
+idle tests (about a minute).
 
 ```sh
 python3 scripts/verify-devui-settings.py --gateway 192.168.0.1 --port 2222 \
@@ -158,7 +201,7 @@ python3 scripts/verify-devui-settings.py --gateway 192.168.0.1 --port 2222 \
 ## Interfaces and process ownership
 
 - Authenticated `GET /api/screen`: availability, verification, lifecycle state,
-  settings revision and shortcut-listener status.
+  settings revision and the status of the shortcut and two-finger-hold listeners.
 - Authenticated `POST /api/screen` / `DELETE /api/screen`: asynchronous open and
   restore. A single startup reservation and supervisor lock prevent duplicate owners.
 - Authenticated `GET /api/screen/settings` / `PUT /api/screen/settings`: typed,
@@ -176,7 +219,9 @@ python3 scripts/verify-devui-settings.py --gateway 192.168.0.1 --port 2222 \
   older screen knows (with WireGuard, Proxy or Clash chosen it keeps the WireGuard, Saved
   profiles and Device routing pages for them); `V` carries the choice for screens built
   before eSIM (pages 5 Proxy and 6 Clash; the menu instead of an eSIM startup page); `W`
-  carries the full choice (page 7 eSIM). Each screen uses the newest record it accepts.
+  carries the full choice (page 7 eSIM) and then the idle action (`1` turns the screen
+  off and stays, `0` returns to the stock UI). Screens built before the idle action read
+  six fields and return to the stock UI. Each screen uses the newest record it accepts.
   Tab-separated proxy records follow: `B` (active backend, conflict, per-backend
   revision, readiness and reason code), `K` (Clash summary), `U` (subscriptions, no
   URLs), `M` (core versions and job), `X`/`x` (diagnostics verdict and checks) and `E`
@@ -225,17 +270,21 @@ Native tests render the real HTML links and font, checking navigation, saved
 profiles, concurrent revision capture, pagination, drafts, HTML escaping,
 confirmation, stale controls, hidden features, battery states and rotation.
 Agent tests cover settings validation and conflicts plus four-press recognition,
-slow sequences, long presses, repeats, bounce and dropped events. Optimized screen
-builds retain self-test assertions.
+slow sequences, long presses, repeats, bounce and dropped events. They also cover
+the two-finger hold: one or three fingers, a lifted finger, drift, fingers already
+down or across dropped events, and the hold-off while DevUI runs; and the
+power-off-charging check for opening at startup. Optimized screen builds retain
+self-test assertions.
 
 On-device `--self-test` uses synthetic events within the process; `--probe` reads
 actual touch axes and checks the dedicated power input. `--power-check` performs a
 supervised five-second off/on/off cycle with sysfs readback and stock recovery.
 It does not inject power events into the factory input device. Recovery checks
 also verify stock synchronization, HTTP access, default route and unchanged
-WireGuard configuration hashes. Physical four-press interaction and first-open
-screen appearance require confirmation on the device; a successful ioctl alone
-cannot prove the LCD's visual appearance. VPN exit verification is separate.
+WireGuard configuration hashes. Physical four-press interaction, the two-finger
+hold beside the stock UI, opening at startup and first-open screen appearance
+require confirmation on the device; a successful ioctl alone cannot prove the LCD's
+visual appearance. VPN exit verification is separate.
 
 ## B31 verification record — 2026-09-14
 

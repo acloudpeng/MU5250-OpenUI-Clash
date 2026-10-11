@@ -203,7 +203,8 @@ static void render(struct drm_buf *b) {
     for(int i=0;i<7&&row<4;i++) if(visible_page(pages[i]))
       nav_row(12,140+68*row++,296,60,ids[i],titles[i],details[i],"",1);
     box(16,418,292,20,"muted",L("Power key: tap to sleep / wake.","电源键短按：息屏 / 唤醒"));
-    snprintf(tmp,sizeof(tmp),L("Stock UI returns after %d s idle.","空闲 %d 秒后返回原厂界面"),settings_idle);
+    if(settings_sleep) snprintf(tmp,sizeof(tmp),L("Screen turns off after %d s idle.","空闲 %d 秒后熄屏"),settings_idle);
+    else snprintf(tmp,sizeof(tmp),L("Stock UI returns after %d s idle.","空闲 %d 秒后返回原厂界面"),settings_idle);
     box(16,440,292,20,"muted",tmp);
   } else if(page==WG) {
     header("WireGuard");

@@ -686,6 +686,12 @@ export type DevUIPageId = 'overview' | 'proxy' | 'wireguard' | 'clash' | 'esim' 
 export interface DevUISettings {
   revision: number
   shortcut_enabled: boolean
+  /** Two fingers held still on the lit stock UI open DevUI. Absent from older agents. */
+  touch_enabled?: boolean
+  /** DevUI opens once the stock UI has started after a boot. */
+  open_at_boot?: boolean
+  /** When idle: true turns the screen off and stays in DevUI, false returns to the stock UI. */
+  idle_sleep?: boolean
   brightness: number
   idle_seconds: number
   home_page: 'menu' | DevUIPageId
@@ -696,6 +702,8 @@ export interface DevUISettings {
 export interface ScreenStatus {
   settings_revision: number
   shortcut: { available: boolean; message: string }
+  /** The two-finger hold listener; absent from older agents. */
+  touch?: { available: boolean; message: string }
 
   available: boolean
   verified: boolean

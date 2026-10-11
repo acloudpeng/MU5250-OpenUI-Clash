@@ -64,7 +64,7 @@ struct snapshot {
   int has, enabled, connected, error, all, busy, result, n, has_fresh;
   int np, battery, temperature;
   unsigned long long settings_rev;
-  int idle_seconds, brightness, home_page, menu_mask, zh;
+  int idle_seconds, brightness, home_page, menu_mask, zh, idle_sleep;
   unsigned long long uptime;
   double memory, cpu;
   struct profile profiles[5];
@@ -97,6 +97,9 @@ static unsigned long long settings_revision;
 static int settings_idle = 120, settings_brightness = 128, settings_home = MENU, settings_menu = 113;
 /* Screen language follows the web panel (C record); Chinese until the first record. */
 static int settings_zh = 1;
+/* Idle action from the W record: 1 turns the screen off and stays in DevUI, 0 returns to
+ * the stock UI (also with older agents, whose W records end at the language). */
+static int settings_sleep = 0;
 #define L(en, zh) (settings_zh ? (zh) : (en))
 static int visible_page(int p) { return p == MENU || (p <= ESIM && (settings_menu & (1 << p))); }
 /* Saved profiles and device routing belong to WireGuard; node, subscription and core
@@ -115,6 +118,7 @@ static int update_settings(const struct snapshot *s) {
   settings_revision = s->settings_rev;
   settings_idle = s->idle_seconds; settings_brightness = s->brightness;
   settings_home = s->home_page; settings_menu = s->menu_mask; settings_zh = s->zh;
+  settings_sleep = s->idle_sleep;
   return result;
 }
 static unsigned long long pending, pending_revision, chosen_profile, chosen_revision;
@@ -190,7 +194,7 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
   struct snapshot s = {.battery = -1, .temperature = -999, .memory = -1};
   char *save, *line = strtok_r(buf, "\n", &save);
   int valid = 0, v_ok = 0, v_idle = 0, v_level = 0, v_home = 0, v_mask = 0;
-  int w_ok = 0, w_idle = 0, w_level = 0, w_home = 0, w_mask = 0;
+  int w_ok = 0, w_idle = 0, w_level = 0, w_home = 0, w_mask = 0, w_sleep = 0;
   unsigned long long v_rev = 0, w_rev = 0;
   char v_lang[4] = "zh", w_lang[4] = "zh";
   while (line) {
@@ -223,10 +227,12 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
         snprintf(v_lang, sizeof(v_lang), "%s", lang);
       }
     }
-    /* W: the same with eSIM; preferred over V when valid. */
+    /* W: the same with eSIM and, from newer agents, the idle action; preferred over V. */
     else if (line[0] == 'W') {
       char lang[4] = "";
-      if (sscanf(line, "W %llu %d %d %d %d %3s", &w_rev, &w_idle, &w_level, &w_home, &w_mask, lang) == 6 &&
+      int fields = sscanf(line, "W %llu %d %d %d %d %3s %d", &w_rev, &w_idle, &w_level, &w_home, &w_mask, lang, &w_sleep);
+      if (fields == 6) w_sleep = 0;
+      if ((fields == 6 || (fields == 7 && (w_sleep == 0 || w_sleep == 1))) &&
           (!strcmp(lang, "zh") || !strcmp(lang, "en")) &&
           w_idle >= 30 && w_idle <= 600 && w_level >= 20 && w_level <= 255 &&
           w_home >= 0 && w_home <= ESIM && w_mask > 0 && !(w_mask & ~ESIM_MENU_PAGES) &&
@@ -289,7 +295,7 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
     line = strtok_r(NULL, "\n", &save);
   }
   if (w_ok) {
-    s.settings_rev = w_rev; s.idle_seconds = w_idle; s.brightness = w_level;
+    s.settings_rev = w_rev; s.idle_seconds = w_idle; s.brightness = w_level; s.idle_sleep = w_sleep;
     s.home_page = w_home; s.menu_mask = w_mask; s.zh = strcmp(w_lang, "en") != 0;
   } else if (v_ok) {
     s.settings_rev = v_rev; s.idle_seconds = v_idle; s.brightness = v_level;
@@ -880,9 +886,17 @@ static int panel(int heartbeat, int idle_seconds) {
   int first = 1, settling = 0;
   long long settle_at = 0;
   char reply[49152];
-  while (!g_stop && !quitting &&
-         monotonic_ms() - last < (long long)(idle_seconds ? idle_seconds : settings_idle) * 1000) {
+  while (!g_stop && !quitting) {
     long long now = monotonic_ms();
+    /* Idle: back to the stock UI, or with the owner's choice the screen goes dark and DevUI
+     * stays. An explicit --supervise time, as the recovery check uses, always ends. */
+    if (now - last >= (long long)(idle_seconds ? idle_seconds : settings_idle) * 1000) {
+      if (idle_seconds || !settings_sleep)
+        break;
+      if (screen_awake && screen_toggle(&on_level))
+        goto end;
+      last = now;
+    }
     if (now >= next) {
       next = now + 2000;
       struct snapshot incoming;
@@ -1529,6 +1543,13 @@ static void esim_tests(struct drm_buf *b,const char *dir) {
   assert(parse_snapshot(bad_w,&prefs)&&update_settings(&prefs)&&settings_menu==80);
   char home_w[]="V 43 90 200 2 80 en\nW 43 90 200 7 208 en\n.\n";
   assert(parse_snapshot(home_w,&prefs)&&update_settings(&prefs)&&settings_home==ESIM&&!settings_zh);
+  /* The seventh W field is the idle action; a W record without it returns to the stock UI. */
+  assert(!settings_sleep);
+  char sleep_w[]="V 44 90 200 2 80 zh\nW 44 90 200 2 208 zh 1\n.\n",bad_sleep[]="V 45 90 200 2 80 zh\nW 45 90 200 2 208 zh 2\n.\n";
+  assert(parse_snapshot(sleep_w,&prefs)&&update_settings(&prefs)&&settings_sleep&&settings_zh&&settings_menu==208);
+  page=MENU;capture(b,dir,"menu-sleep");assert(strstr(html,"空闲 90 秒后熄屏"));
+  settings_zh=0;capture(b,dir,"en-menu-sleep");assert(strstr(html,"Screen turns off after 90 s idle."));settings_zh=1;
+  assert(parse_snapshot(bad_sleep,&prefs)&&update_settings(&prefs)&&!settings_sleep&&settings_menu==80);
   settings_zh=1;settings_menu=208;
   page=MENU;capture_both(b,dir,"menu-esim");assert(strstr(html,"act:esim")&&strstr(html,"Hong Kong"));
   test_request[0]=0;press_id(b,"esim");assert(page==ESIM&&!test_request[0]);capture_both(b,dir,"esim");

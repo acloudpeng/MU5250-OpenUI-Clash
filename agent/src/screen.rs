@@ -22,6 +22,8 @@ use std::{
 const DIR: &str = "/tmp/openui-screen";
 const BIN: &str = "/data/bin/openui-screen";
 const VERIFIED: &str = "/data/local/tmp/openui-screen-verified";
+/// In tmpfs: the boot-time open happens once per boot, not again after an agent restart.
+const BOOT_MARK: &str = "/tmp/openui-devui-boot";
 static SUPERVISOR: AtomicI32 = AtomicI32::new(0);
 static STARTING: AtomicBool = AtomicBool::new(false);
 static LIFECYCLE: Mutex<()> = Mutex::new(());
@@ -132,12 +134,62 @@ fn owner() -> Option<i32> {
 pub fn running() -> bool {
     STARTING.load(Ordering::Acquire) || owner().is_some()
 }
+/// The firmware's power-off charging mode, in which the device is meant to stay off.
+fn charging_boot(config: &str) -> bool {
+    config
+        .lines()
+        .any(|l| l.contains("mode_main_state") && l.contains("mode_power_off"))
+}
+fn stock_ui_running() -> bool {
+    fs::read_dir("/proc")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|e| {
+            fs::read_to_string(e.path().join("comm")).is_ok_and(|c| c.trim() == "zte_topsw_devui")
+        })
+}
+/// The supervisor's own precondition: the stock daemons report sync and registration.
+fn stock_synced() -> bool {
+    crate::ubus::call("zwrt_topsw_daemon.sync", "get_sync_info", Some("{}")).is_ok_and(|v| {
+        let text = v.to_string();
+        text.contains("sync success") && text.contains("register success")
+    })
+}
+/// Opens DevUI once per boot when the owner chose it, over the stock UI the firmware has
+/// brought up: after its boot barrier, with the stock UI running and the daemons in sync,
+/// never in power-off charging. If the open fails, the stock UI stays for this boot.
+fn open_after_boot() {
+    if Path::new(BOOT_MARK).exists() || fs::write(BOOT_MARK, b"1\n").is_err() {
+        return;
+    }
+    let charging =
+        fs::read_to_string("/etc/config/zwrt_zte_mc_tmp").is_ok_and(|c| charging_boot(&c));
+    if !crate::screen_settings::current().open_at_boot || charging {
+        return;
+    }
+    std::thread::spawn(|| {
+        // Up to five minutes for the firmware to finish booting.
+        for _ in 0..150 {
+            let booted = fs::read_to_string("/tmp/zte_boot_done").is_ok_and(|v| v.trim() == "1");
+            if booted && stock_ui_running() && stock_synced() {
+                // Let the stock UI finish its first screens before the takeover.
+                std::thread::sleep(Duration::from_secs(5));
+                if crate::screen_settings::current().open_at_boot && !running() {
+                    let _ = open();
+                }
+                return;
+            }
+            std::thread::sleep(Duration::from_secs(2));
+        }
+    });
+}
 pub fn get() -> (u16, Value) {
     let running = running();
     let state = fs::read_to_string(format!("{DIR}/state")).unwrap_or_else(|_| "idle".into());
     (
         200,
-        json!({"ok":true,"data":{"available":Path::new(BIN).is_file(),"verified":Path::new(VERIFIED).is_file(),"running":running,"shortcut":crate::screen_shortcut::status(),"settings_revision":crate::screen_settings::current().revision,"state":if STARTING.load(Ordering::Acquire) && owner().is_none() { "starting" } else if running || state.trim()=="error" {state.trim()} else {"idle"}}}),
+        json!({"ok":true,"data":{"available":Path::new(BIN).is_file(),"verified":Path::new(VERIFIED).is_file(),"running":running,"shortcut":crate::screen_shortcut::status(),"touch":crate::screen_touch::status(),"settings_revision":crate::screen_settings::current().revision,"state":if STARTING.load(Ordering::Acquire) && owner().is_none() { "starting" } else if running || state.trim()=="error" {state.trim()} else {"idle"}}}),
     )
 }
 pub fn open() -> (u16, Value) {
@@ -599,6 +651,8 @@ pub fn start(state: Arc<AppState>) {
         return;
     }
     crate::screen_shortcut::start();
+    crate::screen_touch::start();
+    open_after_boot();
     let polled = || now().saturating_sub(INTEREST.load(Ordering::Relaxed)) < 10;
     let clients_state = state.clone();
     // WireGuard and devices: `wireguard::get` waits while a switch holds its lock.
@@ -652,6 +706,19 @@ pub fn start(state: Arc<AppState>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn boot_open_skips_power_off_charging() {
+        assert!(charging_boot(
+            "config zwrt_zte_mc_tmp 'state'\n\toption mode_main_state 'mode_power_off_charger'\n"
+        ));
+        assert!(!charging_boot(
+            "config zwrt_zte_mc_tmp 'state'\n\toption mode_main_state 'mode_power_on'\n"
+        ));
+        assert!(!charging_boot(
+            "\toption mode_main_state 'mode_power_on_charger'\n\toption last 'mode_power_off'\n"
+        ));
+        assert!(!charging_boot(""));
+    }
     fn joined(v: &Value) -> String {
         let (head, devices) = projection(v, &[]);
         head + &devices.concat()

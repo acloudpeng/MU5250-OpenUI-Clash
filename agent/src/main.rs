@@ -28,6 +28,7 @@ mod router;
 mod screen;
 mod screen_settings;
 mod screen_shortcut;
+mod screen_touch;
 mod server;
 mod signal_logger;
 mod sim;

@@ -45,9 +45,21 @@ pub struct Settings {
     /// Screen language; follows the web panel's language switch.
     #[serde(default = "default_language")]
     pub language: String,
+    /// Two fingers held still on the lit stock UI open DevUI (`screen_touch`).
+    #[serde(default = "enabled")]
+    pub touch_enabled: bool,
+    /// Open DevUI once the stock UI has come up after a boot.
+    #[serde(default)]
+    pub open_at_boot: bool,
+    /// When idle, turn the screen off and stay in DevUI instead of returning to the stock UI.
+    #[serde(default = "enabled")]
+    pub idle_sleep: bool,
 }
 fn default_language() -> String {
     "zh".into()
+}
+fn enabled() -> bool {
+    true
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -59,6 +71,9 @@ impl Default for Settings {
             home_page: "menu".into(),
             menu_items: DEFAULT_MENU.map(String::from).to_vec(),
             language: default_language(),
+            touch_enabled: true,
+            open_at_boot: false,
+            idle_sleep: true,
         }
     }
 }
@@ -98,6 +113,8 @@ impl Settings {
     /// new screen reaches those through WireGuard). `V` is the same for screens built
     /// before eSIM, without it; `W` carries the full choice. Page numbers: wireguard 0,
     /// devices 1, menu 2, profiles 3, overview 4, proxy 5, clash 6, esim 7.
+    /// `W` ends with the idle action (1 sleep, 0 stock UI); screens that read six fields
+    /// return to the stock UI when idle.
     pub fn projection(&self) -> String {
         let page = |s: &str| match s {
             "wireguard" => 0,
@@ -129,11 +146,17 @@ impl Settings {
         let legacy_home = without(legacy, home, legacy).1;
         let line = |kind: char, home: u32, mask: u32| {
             format!(
-                "{kind} {} {} {} {home} {mask} {}\n",
+                "{kind} {} {} {} {home} {mask} {}",
                 self.revision, self.idle_seconds, self.brightness, self.language
             )
         };
-        line('C', legacy_home, legacy) + &line('V', proxy_home, proxy_mask) + &line('W', home, mask)
+        format!(
+            "{}\n{}\n{} {}\n",
+            line('C', legacy_home, legacy),
+            line('V', proxy_home, proxy_mask),
+            line('W', home, mask),
+            u8::from(self.idle_sleep)
+        )
     }
 }
 /// Settings saved with the old default menu showed every feature there was; they get the
@@ -210,6 +233,10 @@ struct Update {
     menu_items: Vec<String>,
     /// Optional: the language normally changes through `PUT /api/screen/language`.
     language: Option<String>,
+    /// Optional for pages from before these settings; an absent value keeps the saved one.
+    touch_enabled: Option<bool>,
+    open_at_boot: Option<bool>,
+    idle_sleep: Option<bool>,
 }
 /// A validated settings change, or the HTTP status and message to reject it with.
 type Prepared = Result<Settings, (u16, &'static str)>;
@@ -231,6 +258,9 @@ fn prepare(old: &Settings, body: &[u8]) -> Prepared {
         home_page: u.home_page,
         menu_items: u.menu_items,
         language: u.language.unwrap_or_else(|| old.language.clone()),
+        touch_enabled: u.touch_enabled.unwrap_or(old.touch_enabled),
+        open_at_boot: u.open_at_boot.unwrap_or(old.open_at_boot),
+        idle_sleep: u.idle_sleep.unwrap_or(old.idle_sleep),
     };
     s.validate().map_err(|e| (400, e))?;
     Ok(s)
@@ -302,7 +332,7 @@ mod tests {
         // An old screen opens profiles and devices only from its menu: WireGuard brings them.
         assert_eq!(
             next.projection(),
-            "C 2 90 160 4 27 zh\nV 2 90 160 4 17 zh\nW 2 90 160 4 17 zh\n"
+            "C 2 90 160 4 27 zh\nV 2 90 160 4 17 zh\nW 2 90 160 4 17 zh 1\n"
         );
         for (key, value) in [
             ("brightness", json!(0)),
@@ -341,7 +371,7 @@ mod tests {
         let english = prepare(&old, &serde_json::to_vec(&english).unwrap()).unwrap();
         assert_eq!(
             english.projection(),
-            "C 2 90 160 4 27 en\nV 2 90 160 4 17 en\nW 2 90 160 4 17 en\n"
+            "C 2 90 160 4 27 en\nV 2 90 160 4 17 en\nW 2 90 160 4 17 en 1\n"
         );
         // Saving without a language keeps the current one.
         let mut later = b.clone();
@@ -361,7 +391,11 @@ mod tests {
         assert_eq!(same.revision, old.revision);
         let en = prepare_language(&old, br#"{"language":"en"}"#).unwrap();
         assert_eq!((en.revision, en.language.as_str()), (2, "en"));
-        assert!(en.projection().ends_with(" en\n"));
+        // The language is the seventh field of every settings record.
+        assert!(en
+            .projection()
+            .lines()
+            .all(|l| l.split(' ').nth(6) == Some("en")));
         for bad in [
             &br#"{"language":"fr"}"#[..],
             br#"{"language":"en","x":1}"#,
@@ -379,7 +413,7 @@ mod tests {
         // WireGuard's), the new screen gets the choice.
         assert_eq!(
             Settings::default().projection(),
-            "C 1 120 128 2 27 zh\nV 1 120 128 2 113 zh\nW 1 120 128 2 113 zh\n"
+            "C 1 120 128 2 27 zh\nV 1 120 128 2 113 zh\nW 1 120 128 2 113 zh 1\n"
         );
         assert_eq!(old_screen_mask(&Settings::default()) & 0b1_1011, 0b1_1011);
         let choose = |items: Value, home: &str| {
@@ -391,7 +425,7 @@ mod tests {
         // No page an old screen knows: it shows all of them and starts at the menu.
         assert_eq!(
             choose(json!(["proxy", "clash"]), "clash").projection(),
-            "C 2 90 160 2 27 zh\nV 2 90 160 6 96 zh\nW 2 90 160 6 96 zh\n"
+            "C 2 90 160 2 27 zh\nV 2 90 160 6 96 zh\nW 2 90 160 6 96 zh 1\n"
         );
         assert_eq!(
             choose(
@@ -399,13 +433,13 @@ mod tests {
                 "devices"
             )
             .projection(),
-            "C 2 90 160 1 27 zh\nV 2 90 160 1 58 zh\nW 2 90 160 1 58 zh\n"
+            "C 2 90 160 1 27 zh\nV 2 90 160 1 58 zh\nW 2 90 160 1 58 zh 1\n"
         );
         // Without WireGuard, profiles and devices still reach an old screen through Clash.
         let clash = choose(json!(["overview", "proxy", "clash"]), "overview");
         assert_eq!(
             clash.projection(),
-            "C 2 90 160 4 27 zh\nV 2 90 160 4 112 zh\nW 2 90 160 4 112 zh\n"
+            "C 2 90 160 4 27 zh\nV 2 90 160 4 112 zh\nW 2 90 160 4 112 zh 1\n"
         );
         assert_eq!(old_screen_mask(&clash) & 0b1011, 0b1011);
         for (items, mask) in [
@@ -463,13 +497,57 @@ mod tests {
         // Screens before eSIM read V without it, starting at the menu; W has the choice.
         assert_eq!(
             s.projection(),
-            "C 2 90 160 2 27 zh\nV 2 90 160 2 80 zh\nW 2 90 160 7 208 zh\n"
+            "C 2 90 160 2 27 zh\nV 2 90 160 2 80 zh\nW 2 90 160 7 208 zh 1\n"
         );
         b["menu_items"] = json!(["esim"]);
         let only = prepare(&Settings::default(), &serde_json::to_vec(&b).unwrap()).unwrap();
         assert_eq!(
             only.projection(),
-            "C 2 90 160 2 27 zh\nV 2 90 160 2 0 zh\nW 2 90 160 7 128 zh\n"
+            "C 2 90 160 2 27 zh\nV 2 90 160 2 0 zh\nW 2 90 160 7 128 zh 1\n"
+        );
+    }
+    #[test]
+    fn touch_boot_and_idle_choices() {
+        let fresh = Settings::default();
+        assert!(fresh.touch_enabled && !fresh.open_at_boot && fresh.idle_sleep);
+        // Settings saved before these choices existed get the defaults.
+        let saved: Settings = serde_json::from_value(json!({"revision":3,"shortcut_enabled":true,"brightness":128,"idle_seconds":120,"home_page":"menu","menu_items":["overview"],"language":"en"})).unwrap();
+        assert!(saved.touch_enabled && !saved.open_at_boot && saved.idle_sleep);
+        // A page that does not know them keeps the saved values.
+        let old = Settings {
+            touch_enabled: false,
+            open_at_boot: true,
+            idle_sleep: false,
+            ..Settings::default()
+        };
+        let kept = prepare(&old, &serde_json::to_vec(&body()).unwrap()).unwrap();
+        assert!(!kept.touch_enabled && kept.open_at_boot && !kept.idle_sleep);
+        assert!(
+            kept.projection().ends_with("W 2 90 160 4 17 zh 0\n"),
+            "{}",
+            kept.projection()
+        );
+        let mut b = body();
+        b["touch_enabled"] = json!(true);
+        b["open_at_boot"] = json!(false);
+        b["idle_sleep"] = json!(true);
+        let chosen = prepare(&old, &serde_json::to_vec(&b).unwrap()).unwrap();
+        assert!(chosen.touch_enabled && !chosen.open_at_boot && chosen.idle_sleep);
+        // Only W carries the idle action; C and V keep the six fields older screens read.
+        let projection = chosen.projection();
+        assert_eq!(
+            projection
+                .lines()
+                .map(|l| l.split(' ').count())
+                .collect::<Vec<_>>(),
+            [7, 7, 8]
+        );
+        b["idle_sleep"] = json!("yes");
+        assert_eq!(
+            prepare(&old, &serde_json::to_vec(&b).unwrap())
+                .unwrap_err()
+                .0,
+            400
         );
     }
 }

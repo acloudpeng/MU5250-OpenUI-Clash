@@ -71,11 +71,11 @@ impl Gesture {
 }
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct InputEvent {
-    time: libc::timeval,
-    kind: u16,
-    code: u16,
-    value: i32,
+pub(crate) struct InputEvent {
+    pub(crate) time: libc::timeval,
+    pub(crate) kind: u16,
+    pub(crate) code: u16,
+    pub(crate) value: i32,
 }
 fn open_key() -> Option<File> {
     (0..32).find_map(|i| {

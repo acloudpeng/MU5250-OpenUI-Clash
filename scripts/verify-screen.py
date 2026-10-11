@@ -75,10 +75,20 @@ try:
  assert api('/api/screen','POST')['ok'];wait_state('active');owner=read('cat /tmp/openui-screen/owner')
  assert api('/api/screen','POST')['ok'];assert owner==read('cat /tmp/openui-screen/owner')
  assert api('/api/screen','DELETE')['ok'];wait_state('idle');health();print('PASS authenticated web open, duplicate open and close',flush=True)
- assert api('/api/screen','POST')['ok'];wait_state('active');start_time=time.monotonic();print('START default 120-second idle timeout test',flush=True)
- while time.monotonic()-start_time<108:time.sleep(3)
- assert api('/api/screen')['data']['running'];wait_state('idle',25);health()
- print('PASS default 120-second timeout; stock screen, SSH, web and saved WG state preserved',flush=True)
+ # The saved idle time and action: sleep keeps DevUI with the screen off, otherwise the stock UI returns.
+ prefs=api('/api/screen/settings')['data'];idle=prefs['idle_seconds']
+ assert api('/api/screen','POST')['ok'];wait_state('active');start_time=time.monotonic()
+ if prefs.get('idle_sleep'):
+  print(f'START {idle}-second idle test: the screen turns off and DevUI stays',flush=True)
+  while time.monotonic()-start_time<idle+8:time.sleep(3)
+  assert api('/api/screen')['data']['running'] and read('cat /sys/class/leds/led:lcd/brightness')=='0'
+  assert api('/api/screen','DELETE')['ok'];wait_state('idle');health()
+  print(f'PASS {idle}-second idle turns the screen off and keeps DevUI; closing restores the stock screen, SSH, web and saved WG state',flush=True)
+ else:
+  print(f'START {idle}-second idle timeout test',flush=True)
+  while time.monotonic()-start_time<idle-12:time.sleep(3)
+  assert api('/api/screen')['data']['running'];wait_state('idle',25);health()
+  print(f'PASS {idle}-second timeout; stock screen, SSH, web and saved WG state preserved',flush=True)
 except BaseException:
  remote('rm -f /data/local/tmp/openui-screen-verified')
  api('/api/screen','DELETE')

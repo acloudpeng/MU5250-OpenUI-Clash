@@ -62,16 +62,23 @@ establish compatibility with other models, hardware revisions or firmware.
 ## DevUI quick start
 
 1. Open **DevUI** in the dashboard sidebar and select **Open DevUI screen**.
-2. Short-press the power button to sleep or wake the display.
-3. To enter from the stock UI, enable **Press four times to open DevUI** and save.
-   Make four short presses within 2.5 seconds, with gaps no longer than 0.7 seconds.
-4. Set brightness, idle return (30–600 seconds), startup page and visible menu
-   features on the same webpage. Saving applies display and menu changes live;
-   the startup page applies the next time DevUI opens.
+2. To enter on the device, hold two fingers still on the lit stock UI for 2 seconds,
+   where the stock UI has no button. Two more ways are switched on in the webpage and saved:
+   - **Open DevUI at startup**: opens once the stock UI has finished starting, never
+     while the device charges switched off;
+   - **Press four times to open DevUI**: four short power-button presses within
+     2.5 seconds, with gaps no longer than 0.7 seconds.
+3. Short-press the power button to sleep or wake the display. After the idle time
+   (two minutes by default) the screen turns off and DevUI stays; you can choose to
+   return to the stock UI instead.
+4. Set brightness, idle time (30–600 seconds), what happens when idle, the startup
+   page and visible menu features on the same webpage. Saving applies display and
+   menu changes live; the startup page applies the next time DevUI opens.
 
-The shortcut is off by default on new installations. Factory long-press handling
-remains available, and Stock UI and Back are always accessible. Leaving DevUI does
-not affect the network. See [DevUI details](docs/SCREEN.md).
+The two-finger hold is on by default; opening at startup and the four-press shortcut
+are off. The stock lock screen does not stop the two-finger hold or the four presses.
+Factory long-press handling remains available, and Stock UI and Back are always
+accessible. Leaving DevUI does not affect the network. See [DevUI details](docs/SCREEN.md).
 
 ## Install and update
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Device write test: DevUI settings, live brightness, idle return and shortcut opt-in.
+"""Device write test: DevUI settings, live brightness, both idle actions and shortcut opt-in.
 Temporarily changes DevUI preferences, then restores them. Never changes WireGuard.
 With --enable-shortcut, leave the four-press shortcut enabled after successful tests.
-Run verify-screen.py first. Do not touch the display during the 30-second idle test.
+Run verify-screen.py first. Do not touch the display during the idle tests (about a minute).
 """
 import argparse
 import ipaddress
@@ -68,7 +68,7 @@ try:
     invalid.pop('revision')
     assert not api('/api/screen/settings', 'PUT', invalid)['ok']
     assert settings() == original
-    trial = save(dict(original, shortcut_enabled=False, brightness=160, idle_seconds=30, home_page='overview', menu_items=['overview', 'wireguard']))
+    trial = save(dict(original, shortcut_enabled=False, brightness=160, idle_seconds=30, idle_sleep=True, home_page='overview', menu_items=['overview', 'wireguard']))
     stale = dict(invalid, brightness=200)
     assert not api('/api/screen/settings', 'PUT', stale)['ok']
     assert settings() == trial
@@ -82,9 +82,14 @@ try:
     wait(lambda: remote('cat /sys/class/leds/led:lcd/brightness') == '192')
     assert remote('cat /tmp/openui-screen/owner') == owner
     print('PASS authenticated, versioned settings; live brightness without panel restart; private storage', flush=True)
-    wait(lambda: not api('/api/screen')['data']['running'], timeout=40)
+    wait(lambda: remote('cat /sys/class/leds/led:lcd/brightness') == '0', timeout=40)
+    assert api('/api/screen')['data']['running'] and remote('cat /tmp/openui-screen/owner') == owner
+    print('PASS configured 30-second idle turns the screen off and keeps DevUI', flush=True)
+    # Choosing the stock UI applies within the panel's polling; the next idle period returns.
+    trial = save(dict(trial, idle_sleep=False))
+    wait(lambda: not api('/api/screen')['data']['running'], timeout=45)
     assert remote('pidof zte_topsw_devui')
-    print('PASS configured 30-second idle return and stock UI restoration', flush=True)
+    print('PASS with the stock UI chosen, the idle time returns to it while the screen is off', flush=True)
     assert remote('sha256sum /data/local/tmp/openui-wireguard/config.json').split()[0] == config_hash
     assert remote('ip -4 route show default') == route
     succeeded = True

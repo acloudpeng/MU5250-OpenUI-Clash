@@ -267,10 +267,17 @@ feature from its current boot path; no additional init.d/firewall hooks are used
 ## Temporary screen ownership
 
 The optional `openui-screen` supervisor may stop `zte_topsw_devui` only after
-verified boot synchronization and only for an explicitly opened, temporary
-panel session. It never disables the init service. It records brightness and
-touch-service state before stopping UI, and restores on exit, idle timeout,
-or display-child failure. The factory UI resumes its own dim/sleep policy.
+verified boot synchronization and only for a panel session the owner opened: from
+the webpage, with the two-finger hold or four presses on the device, or once per
+boot when opening at startup is chosen. It never disables the init service. It
+records brightness and touch-service state before stopping UI, and restores on
+exit, on idle when the stock UI is the chosen idle action, after fifteen seconds
+without agent contact, or on display-child failure. With the default idle action
+the session stays, backlight off, until the owner leaves DevUI. The panel is never
+left without a UI: the firmware has been seen to reboot itself (reason code 1185)
+a few minutes after its UI stopped with nothing in its place
+([faying/zte-u60-pro-mu5250-touch-ui](https://github.com/faying/zte-u60-pro-mu5250-touch-ui),
+`src/uid.c`). The factory UI resumes its own dim/sleep policy.
 No legacy SETCRTC or debugfs image_dump writes are permitted. See [SCREEN.md](SCREEN.md).
 
 ## eSIM profile switching
