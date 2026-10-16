@@ -203,9 +203,10 @@ export default function HomePage() {
             <p className="text-[11px] font-semibold uppercase tracking-wider text-ink3">{t('Network mode')}</p>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {[
-                { id: '5G_NSA_SA', label: t('5G Auto') },
-                { id: '5G_SA', label: '5G SA' },
-                { id: '4G_ONLY', label: '4G' },
+                // The firmware's net_select values (agent/src/cell.rs NETWORK_MODES).
+                { id: 'WL_AND_5G', label: t('5G Auto') },
+                { id: 'Only_5G', label: '5G SA' },
+                { id: 'Only_LTE', label: '4G' },
               ].map((m) => (
                 <button
                   key={m.id}
@@ -289,6 +290,13 @@ export default function HomePage() {
                 className="rounded-md border border-ok/30 bg-ok/10 px-2.5 py-1 text-[11px] font-semibold text-ok transition-colors hover:bg-ok/15"
               >
                 {t('Kill ZTE bloatware')}
+              </button>
+              <button
+                disabled={toolBusy}
+                onClick={() => void runQuickAction(() => api.dropCaches(), t('Kernel caches dropped'))}
+                className="rounded-md border border-line/12 bg-surface px-2.5 py-1 text-[11px] font-semibold text-ink2 transition-colors hover:border-accent/40 hover:text-ink"
+              >
+                {t('Drop caches')}
               </button>
             </div>
           </div>

@@ -321,7 +321,10 @@ pub fn system_drop_caches() -> (u16, Value) {
     let before = system::read_meminfo();
     let _ = std::process::Command::new("sync").status();
     if let Err(e) = std::fs::write("/proc/sys/vm/drop_caches", b"3\n") {
-        return (500, json!({"ok": false, "error": format!("drop_caches: {e}")}));
+        return (
+            500,
+            json!({"ok": false, "error": format!("drop_caches: {e}")}),
+        );
     }
     let after = system::read_meminfo();
     let freed_kb = match (&before, &after) {

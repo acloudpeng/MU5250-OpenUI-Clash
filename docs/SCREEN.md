@@ -85,9 +85,11 @@ modify factory menus, binaries, boot scripts, power-off or hardware-reset behavi
 | Idle time | 30–600 seconds; default 120 seconds, measured from touch or a short power press |
 | When idle | Turn the screen off and stay in DevUI (default), or return to the stock UI |
 | Startup page | Main menu or any visible feature; applies on the next opening |
-| Menu features | Up to four of Overview, Proxy, WireGuard, Clash, eSIM, Saved profiles and Device routing; default Overview, Proxy, WireGuard, Clash |
+| Menu features | Up to nine of Overview, Proxy, WireGuard, Clash, eSIM, Wi-Fi relay, Wi-Fi, 5G signal, USB & TTL, Battery & charge, Booster, Saved profiles and Device routing; default Overview, Proxy, WireGuard, Clash |
 
-At least one feature must remain visible and at most four fit the menu. A saved list
+At least one feature must remain visible and at most nine fit the menu: up to four show
+as rows, five to nine as a 3×3 grid of tiles (the toolbox). The DevUI webpage has a
+toolbox preset and a classic four-row preset. A saved list
 of exactly the four old defaults moves to the new default once. Saved profiles and
 Device routing stay reachable from the WireGuard page even when hidden from the menu.
 **Stock UI** and **Back** are always available. Hiding a feature only changes the screen menu; it does not disable its
@@ -149,6 +151,19 @@ scripts or shell commands.
   computer on the hotspot. A menu item of its own, and a row
   on **Overview** whenever the agent reports the uplink, so it is reachable without
   changing the menu; it returns to the page it was opened from.
+- **Toolbox pages** (menu options, shown as tiles with five or more features):
+  - **Wi-Fi:** the main SSID, connected clients, and on/off per band (2.4 GHz, 5 GHz)
+    through the same Wi-Fi settings as the webpage.
+  - **5G signal:** network type and band, RSRP/SINR/RSRQ, PCI, live speed, and the
+    preferred network mode (5G auto, 5G SA only, 5G NSA, 4G only).
+  - **USB & TTL:** USB mode (RNDIS, NCM, ECM; switching drops USB briefly, NCM is
+    experimental) and TTL off/64/65/128.
+  - **Battery & charge:** level, temperature, voltage, current and health; allow or pause
+    charging; charge limit 70/80/90 % (10 % hysteresis) or none.
+  - **Booster:** CPU, memory and vendor processes; stop the optional vendor processes,
+    drop the kernel caches, or return to the stock UI.
+
+  Actions apply at once (no confirmation) and are the webpage's own operations.
 - **Saved profiles:** up to five named profiles. Switching preserves the current
   enable state and device routing; confirmation remembers the profile ID and
   WireGuard revision to prevent overwriting concurrent webpage edits.
@@ -234,7 +249,10 @@ python3 scripts/verify-devui-settings.py --gateway 192.168.0.1 --port 2222 \
   instead of a relay startup page) and then the idle action (`1` turns the screen off
   and stays, `0` returns to the stock UI); `Y` carries the full choice (page 8 Wi-Fi
   relay) with the idle action. Screens built before the idle action read six fields of
-  `W` and return to the stock UI. Each screen uses the newest record it accepts.
+  `W` and return to the stock UI. `Z` has `Y`'s layout with the toolbox pages (9 Wi-Fi,
+  10 5G signal, 11 USB & TTL, 12 battery & charge, 13 booster) and is sent only when one
+  of them is chosen; `Y` then leaves them out. Each screen uses the newest record it
+  accepts.
   Tab-separated proxy records follow: `B` (active backend, conflict, per-backend
   revision, readiness and reason code), `K` (Clash summary), `U` (subscriptions, no
   URLs), `M` (core versions and job), `X`/`x` (diagnostics verdict and checks) and `E`
@@ -242,7 +260,10 @@ python3 scripts/verify-devui-settings.py --gateway 192.168.0.1 --port 2222 \
   profiles; no EID, only an ICCID's last four digits) and `R` (the Wi-Fi uplink:
   revision, on/off, a one-letter state, a reason code, network name, signal, band,
   address, traffic, online-since time and the number of saved networks; no password,
-  BSSID or gateway; older screens ignore it). `J` ends with the newest job the
+  BSSID or gateway; older screens ignore it) and `H` (the toolbox: signal, speed, CPU,
+  memory, vendor processes, Wi-Fi bands and clients, USB mode, TTL, charging and
+  battery; read every ten seconds, and right after a toolbox action, because it takes a
+  dozen firmware calls). `J` ends with the newest job the
   records already reflect. The reply stays under 40 KiB.
 - Queries `groups <offset>` and `nodes <gen> <group> <offset>` return four rows at a
   time from a proxies view the agent refreshes only while the screen asks; groups and
@@ -256,7 +277,10 @@ python3 scripts/verify-devui-settings.py --gateway 192.168.0.1 --port 2222 \
   `diag`, `esim scan`, `esim enable <generation> <index>` (a profile of the list the
   screen shows; a newer list answers `ERR Stale`) and `esim reboot` (only while a switch
   waits for a restart), `uplink login` (login mode), `uplink <rev> on|off` (the uplink's saved revision; a newer one
-  answers a conflict), plus the WireGuard `toggle`, `devices` and `profile` kept for older
+  answers a conflict), the toolbox actions `tool wifi_toggle 2g|5g 0|1`,
+  `tool net_mode <net_select>`, `tool usb_mode rndis|ecm|ncm`, `tool ttl 0|64|65|128`,
+  `tool charge_switch 0|1`, `tool charge_limit 70|80|90|100`, `tool kill_bloat`,
+  `tool drop_caches` and `tool stock_ui`, plus the WireGuard `toggle`, `devices` and `profile` kept for older
   screens. Revisioned actions return 409 conflicts as "Settings changed". One job runs
   at a time; jobs execute in the agent and continue after screen exit. A job always
   reports a result, even if its thread fails; the screen stops waiting after 180 s

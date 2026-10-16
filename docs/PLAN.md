@@ -517,3 +517,17 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
 ### 2026-10-16 — 1.1.2
 - 用户定的版本号：1.1.2（补丁版本），内容是 Wi-Fi 中继（含按 IP 的联网检查和网页认证模式）。
 - 版本号改为 1.1.2（agent、网页、安装器和各自的锁文件）。发布说明 `docs/releases/v1.1.2.md` 用三种语言。补丁版本沿用 v1.1 的线框图。
+
+### 2026-10-16 — 合并用户的界面分支 feat/ui-enhancement
+- 用户在真机上确认「可以使用 wifi 中继」，并推了自己写的界面分支（`ff84b51`）：小屏九宫格工具箱
+  （Wi-Fi、5G 信号、USB 与 TTL、电池与充电、加速清理五个新页面，`H`、`Z` 两种新记录），网页顶部状态条和首页快捷工具箱，
+  新接口 `POST /api/system/drop-caches`，小屏状态不变时不重绘。
+- 合并前发现并修复（在用户的提交之上另加提交）：
+  - agent 编译不过：调用了不存在的 `restore()`，改成 `close()`；格式化。
+  - 小屏发的是 `tool wifi_toggle 2g 1` 这类指令，agent 解析的是 `wifi 2g 1`，所有按钮都会被拒绝；agent 改为按小屏的格式解析。
+  - 字段和取值与现有接口对不上：Wi-Fi 是 `radio2_disabled`/`clients_total`；充电只认 `charging_stopped`、`charge_limit`、
+    `hysteresis`；网络模式是固件的 `WL_AND_5G`、`Only_5G`、`LTE_AND_5G`、`Only_LTE`（网页首页也改了）；USB 只有 rndis/ecm/ncm，
+    当前模式是 `active_mode`，接口没有 ADB 开关（小屏去掉了 ADB 按钮）；信号取固件原始的 `nr5g_*`/`lte_*`；电池取 `voltage_mv`、`current_ma`。
+  - 负载：`H` 记录要十几次固件和系统调用，原来跟着状态每 2 秒读一次，改成每 10 秒一次，工具箱操作后立即刷新。
+  - 网页没有调用清理缓存接口，契约检查不过：首页工具箱加了「释放内存缓存」按钮。
+- 文档：SCREEN（工具箱页面、`H`/`Z`、`tool …` 操作、菜单最多九项）、DASHBOARD、AGENT、README。端到端 S8、S11 跟着更新。

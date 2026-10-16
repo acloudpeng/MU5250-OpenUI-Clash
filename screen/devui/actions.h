@@ -226,7 +226,8 @@ static void tap(int x,int y) {
     else if(!strcmp(a,"w5on")&&!data.toolbox.wifi_5g_on)send_job("tool wifi_toggle 5g 1\n",JOB_TOOL,0);
     else if(!strcmp(a,"w5off")&&data.toolbox.wifi_5g_on)send_job("tool wifi_toggle 5g 0\n",JOB_TOOL,0);
   } else if(page==SIGNAL_PAGE&&!blocked()&&data.toolbox.has) {
-    static const char *modes[]={"5G_NSA_SA","5G_SA","5G_NSA","4G_ONLY"};
+    /* The firmware's net_select values: auto, 5G SA only, 5G NSA, 4G only. */
+    static const char *modes[]={"WL_AND_5G","Only_5G","LTE_AND_5G","Only_LTE"};
     if((i=digit_id(a,'n','3'))==-1&&!strncmp(a,"net",3)&&a[3]>='0'&&a[3]<='3'&&!a[4]) {
       char req[64];snprintf(req,sizeof(req),"tool net_mode %s\n",modes[a[3]-'0']);
       send_job(req,JOB_TOOL,0);
@@ -234,11 +235,7 @@ static void tap(int x,int y) {
   } else if(page==USB_PAGE&&!blocked()&&data.toolbox.has) {
     static const char *umodes[]={"rndis","ncm","ecm"};
     if(!strncmp(a,"usb",3)&&a[3]>='0'&&a[3]<='2'&&!a[4]) {
-      char req[64];snprintf(req,sizeof(req),"tool usb_mode %s %d\n",umodes[a[3]-'0'],data.toolbox.usb_adb?1:0);
-      send_job(req,JOB_TOOL,0);
-    } else if(!strcmp(a,"usbadb")) {
-      const char *m=data.toolbox.usb_mode[0]?data.toolbox.usb_mode:"rndis";
-      char req[64];snprintf(req,sizeof(req),"tool usb_mode %s %d\n",m,data.toolbox.usb_adb?0:1);
+      char req[64];snprintf(req,sizeof(req),"tool usb_mode %s\n",umodes[a[3]-'0']);
       send_job(req,JOB_TOOL,0);
     } else if(!strcmp(a,"ttl0"))send_job("tool ttl 0\n",JOB_TOOL,0);
     else if(!strcmp(a,"ttl64"))send_job("tool ttl 64\n",JOB_TOOL,0);

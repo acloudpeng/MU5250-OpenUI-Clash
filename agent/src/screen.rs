@@ -399,11 +399,24 @@ fn refresh_system(state: &AppState) {
         memory.as_ref().map_or(-1.0, |m| m.usage_pct),
         cpu.overall
     );
+    PARTS.lock().unwrap().system = o_line;
+    if now().saturating_sub(TOOLBOX_AT.load(Ordering::Relaxed)) >= TOOLBOX_EVERY {
+        refresh_toolbox(state);
+    }
+}
+/// How often the `H` record is read: it costs a dozen firmware and system calls, so it
+/// follows the panel's two-second status only every ten seconds (and right after an
+/// action from a toolbox page).
+const TOOLBOX_EVERY: u64 = 10;
+static TOOLBOX_AT: AtomicU64 = AtomicU64::new(0);
+/// `H`: signal, traffic, Wi-Fi, USB, TTL and charging for the toolbox pages.
+fn refresh_toolbox(state: &AppState) {
+    TOOLBOX_AT.store(now(), Ordering::Relaxed);
     let speed = state.speed.sample();
+    let memory = system::read_meminfo();
+    let cpu = state.cpu.sample();
     let radio_sample = crate::handlers::read_radio(&state.radio);
     let sig = radio_sample.value.as_ref().unwrap_or(&Value::Null);
-    let (_, cap_v) = crate::cell::modem_capabilities(state);
-    let cap_d = &cap_v["data"];
     let (_, wifi_v) = crate::wifi::wifi_status(state);
     let wifi_d = &wifi_v["data"];
     let (_, usb_v) = crate::usb::usb_status(state);
@@ -415,72 +428,63 @@ fn refresh_system(state: &AppState) {
     let (_, bat_v) = crate::device_ext::device_battery_detail(state);
     let bat_d = &bat_v["data"];
     let top = state.proc_tracker.sample();
-    let bloat_cnt = top.bloat_count as u64;
-    let temp_mc = battery
-        .as_ref()
-        .map(|b| b.temperature * 100)
-        .unwrap_or(0);
-    let wifi_2g_on = wifi_d["radio2g_disabled"].as_str() != Some("1");
-    let wifi_5g_on = wifi_d["radio5g_disabled"].as_str() != Some("1");
-    let wifi_clients = wifi_d["sta_2g_count"].as_u64().unwrap_or(0)
-        + wifi_d["sta_5g_count"].as_u64().unwrap_or(0);
-    let wifi_ssid = wifi_d["ssid_5g"]
-        .as_str()
-        .filter(|s| !s.is_empty())
-        .or_else(|| wifi_d["ssid_2g"].as_str())
-        .unwrap_or("-");
-    let i_field = |k1: &str, k2: &str| -> i64 {
-        sig.get(k1)
-            .or_else(|| sig.get(k2))
+    // The firmware reports NR fields on 5G and LTE fields on 4G; take whichever is set.
+    let text = |k: &str| {
+        sig.get(k)
             .and_then(|v| {
-                v.as_i64()
-                    .or_else(|| v.as_str().and_then(|s| s.trim().parse::<i64>().ok()))
+                v.as_str()
+                    .map(str::to_string)
+                    .or_else(|| v.as_i64().map(|n| n.to_string()))
             })
-            .unwrap_or(0)
-    };
-    let s_field = |k1: &str, k2: &str| -> &str {
-        sig.get(k1)
-            .or_else(|| sig.get(k2))
-            .and_then(Value::as_str)
             .filter(|s| !s.trim().is_empty())
-            .unwrap_or("-")
     };
+    let either = |nr: &str, lte: &str| text(nr).or_else(|| text(lte));
+    let num = |nr: &str, lte: &str| {
+        either(nr, lte)
+            .and_then(|s| s.trim().parse::<f64>().ok())
+            .map_or(0, |n| n.round() as i64)
+    };
+    let word = |s: Option<String>| s.unwrap_or_else(|| "-".into());
+    let limit = chg_d["charge_limit"].as_u64().unwrap_or(100);
+    let hysteresis = chg_d["hysteresis"].as_u64().unwrap_or(5);
     let h_line = ipc::toolbox_record(&json!({
-        "rssi": i_field("rssi", "network_signalbar"),
-        "rsrp": i_field("rsrp", "nr5g_rsrp"),
-        "rsrq": i_field("rsrq", "nr5g_rsrq"),
-        "sinr": i_field("sinr", "nr5g_sinr"),
-        "radio": s_field("network_type", "sub_network_type"),
-        "band": s_field("wan_active_band", "nr5g_action_band"),
-        "net_select": cap_d["net_select"].as_str().unwrap_or("-"),
-        "lte_bands": s_field("lte_ca_pcell_band", "wan_active_band"),
-        "nr_bands": s_field("nr5g_action_band", "nr_ca_pcell_band"),
-        "pci": s_field("nr5g_cell_id", "lte_pci"),
+        "rssi": num("nr5g_rssi", "lte_rssi"),
+        "rsrp": num("nr5g_rsrp", "lte_rsrp"),
+        "rsrq": num("nr5g_rsrq", "lte_rsrq"),
+        "sinr": num("nr5g_snr", "lte_snr"),
+        "radio": word(text("network_type")),
+        "band": word(either("nr5g_action_band", "wan_active_band")),
+        "net_select": word(text("net_select")),
+        "lte_bands": word(text("wan_active_band")),
+        "nr_bands": word(text("nr5g_action_band")),
+        "pci": word(either("nr5g_pci", "lte_pci")),
         "kbps_down": (speed.rx_speed * 8.0 / 1000.0).round() as u64,
         "kbps_up": (speed.tx_speed * 8.0 / 1000.0).round() as u64,
         "cpu_pct": cpu.overall.round() as u64,
         "mem_pct": memory.as_ref().map_or(0, |m| m.usage_pct.round() as u64),
-        "temp_mc": temp_mc,
-        "bloat_cnt": bloat_cnt,
-        "wifi_2g_on": wifi_2g_on,
-        "wifi_5g_on": wifi_5g_on,
-        "wifi_clients": wifi_clients,
-        "wifi_ssid": wifi_ssid,
-        "usb_mode": usb_d["current_mode"].as_str().unwrap_or("-"),
-        "usb_adb": usb_d["adb_enabled"].as_bool().unwrap_or(false),
+        "temp_mc": (bat_d["temperature_c"].as_f64().unwrap_or(0.0) * 1000.0).round() as i64,
+        "bloat_cnt": top.bloat_count as u64,
+        "wifi_2g_on": wifi_d["radio2_disabled"].as_str() != Some("1"),
+        "wifi_5g_on": wifi_d["radio5_disabled"].as_str() != Some("1"),
+        "wifi_clients": wifi_d["clients_total"].as_u64().unwrap_or(0),
+        "wifi_ssid": wifi_d["ssid_5g"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .or_else(|| wifi_d["ssid_2g"].as_str())
+            .unwrap_or("-"),
+        "usb_mode": usb_d["active_mode"].as_str().unwrap_or("-"),
+        "usb_adb": false,
         "ttl_val": ttl_d["ttl_value"].as_u64().unwrap_or(0),
-        "chg_enabled": chg_d["charging_enabled"].as_bool().unwrap_or(true),
+        "chg_enabled": chg_d["charging_stopped"].as_bool() != Some(true),
         "chg_limit_on": chg_d["charge_limit_enabled"].as_bool().unwrap_or(false),
-        "chg_max": chg_d["max_charge_level"].as_u64().unwrap_or(100),
-        "chg_stop": chg_d["hysteresis_stop"].as_u64().unwrap_or(80),
-        "chg_start": chg_d["hysteresis_start"].as_u64().unwrap_or(70),
-        "batt_mv": bat_d["voltage_now"].as_i64().unwrap_or(0).max(0) as u64 / 1000,
-        "batt_ma": bat_d["current_now"].as_i64().unwrap_or(0) / 1000,
+        "chg_max": limit,
+        "chg_stop": limit,
+        "chg_start": limit.saturating_sub(hysteresis),
+        "batt_mv": bat_d["voltage_mv"].as_i64().unwrap_or(0).max(0) as u64,
+        "batt_ma": bat_d["current_ma"].as_i64().unwrap_or(0),
         "batt_health": bat_d["health"].as_str().unwrap_or("-"),
     }));
-    let mut p = PARTS.lock().unwrap();
-    p.system = o_line;
-    p.toolbox = h_line;
+    PARTS.lock().unwrap().toolbox = h_line;
 }
 /// `B`, `K`/`U`, `X`/`x`, `Q`/`q` and `M`: quick reads that never take the WireGuard lock. The
 /// periodic refresher and the job thread both run this. `M` is stored after the others:
@@ -627,21 +631,23 @@ fn run_tool(t: &Tool) -> (u16, Value) {
     };
     match t {
         Tool::StockUi => {
-            let (code, v) = restore();
+            let (code, v) = close();
             (if code == 202 { 200 } else { code }, v)
         }
         Tool::WifiToggle { band, enabled } => {
             let key = if band == "2g" {
-                "radio2g_disabled"
+                "radio2_disabled"
             } else {
-                "radio5g_disabled"
+                "radio5_disabled"
             };
             let val = if *enabled { "0" } else { "1" };
             crate::wifi::wifi_set(state, &body(&json!({ key: val })))
         }
-        Tool::UsbMode { mode, adb } => {
-            crate::usb::usb_mode_set(state, &body(&json!({"mode": mode, "adb": adb})))
-        }
+        // The panel is not on USB, so the experimental NCM switch is safe to confirm here.
+        Tool::UsbMode { mode } => crate::usb::usb_mode_set(
+            state,
+            &body(&json!({"mode": mode, "confirm_experimental": mode == "ncm"})),
+        ),
         Tool::NetMode { mode } => {
             crate::cell::modem_network_mode_set(state, &body(&json!({"net_select": mode})))
         }
@@ -652,34 +658,17 @@ fn run_tool(t: &Tool) -> (u16, Value) {
                 crate::server::ttl_set(&body(&json!({"ttl": value})))
             }
         }
-        Tool::ChargeSwitch { enabled } => {
-            crate::device_ext::charge_control_set(
-                state,
-                &body(&json!({"charging_enabled": enabled})),
-            )
-        }
+        Tool::ChargeSwitch { enabled } => crate::device_ext::charge_control_set(
+            state,
+            &body(&json!({"charging_stopped": !enabled})),
+        ),
         Tool::ChargeLimit { max_level } => {
-            if *max_level >= 100 {
-                crate::device_ext::charge_control_set(
-                    state,
-                    &body(&json!({
-                        "charge_limit_enabled": false,
-                        "max_charge_level": 100
-                    })),
-                )
+            let update = if *max_level >= 100 {
+                json!({"charge_limit_enabled": false})
             } else {
-                let stop = *max_level;
-                let start = stop.saturating_sub(10).max(50);
-                crate::device_ext::charge_control_set(
-                    state,
-                    &body(&json!({
-                        "charge_limit_enabled": true,
-                        "max_charge_level": stop,
-                        "hysteresis_stop": stop,
-                        "hysteresis_start": start
-                    })),
-                )
-            }
+                json!({"charge_limit_enabled": true, "charge_limit": max_level, "hysteresis": 10})
+            };
+            crate::device_ext::charge_control_set(state, &body(&update))
         }
         Tool::KillBloat => crate::handlers::system_kill_bloat(state, b"{\"all\":true}"),
         Tool::DropCaches => crate::handlers::system_drop_caches(),
@@ -770,7 +759,7 @@ fn start_job(job: Job) -> String {
             Work::Wireguard(_) | Work::Backend(_) => refresh_wireguard(),
             Work::Tool(_) => {
                 if let Some(state) = APP_STATE.get() {
-                    refresh_system(state);
+                    refresh_toolbox(state);
                 }
             }
             _ => {}

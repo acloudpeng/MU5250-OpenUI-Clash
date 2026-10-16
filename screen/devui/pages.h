@@ -736,9 +736,9 @@ static void render_signal(void) {
   snprintf(tmp,sizeof(tmp),"LTE:%s NR:%s",h->lte_bands[0]?h->lte_bands:"-",h->nr_bands[0]?h->nr_bands:"-");
   kv_row(176,L("Active CA","载波聚合"),tmp,"muted");
   box(16,214,288,20,"head",L("Network Mode Switch","网络制式切换"));
-  int is_sa=!strcmp(h->net_select,"5G_SA")||!strcmp(h->net_select,"SA");
-  int is_nsa=!strcmp(h->net_select,"5G_NSA")||!strcmp(h->net_select,"NSA");
-  int is_4g=!strcmp(h->net_select,"4G_ONLY")||!strcmp(h->net_select,"LTE")||!strcmp(h->net_select,"Only_LTE");
+  int is_sa=!strcmp(h->net_select,"Only_5G");
+  int is_nsa=!strcmp(h->net_select,"LTE_AND_5G");
+  int is_4g=!strcmp(h->net_select,"Only_LTE");
   int is_auto=!is_sa&&!is_nsa&&!is_4g;
   linkbox(12,240,142,54,"net0",L("5G Auto","5G 自动"),!blocked()&&h->has,is_auto?CHOSEN:PRIMARY);
   linkbox(166,240,142,54,"net1",L("5G SA Only","仅 5G SA"),!blocked()&&h->has,is_sa?CHOSEN:PLAIN);
@@ -751,28 +751,27 @@ static void render_usb(void) {
   const struct toolbox_info *h=&data.toolbox;
   char tmp[128];
   header(L("USB & TTL","USB 与防检测"));
-  add("<div class=\"box card\" style=\"left:12px;top:72px;width:296px;height:86px\"></div>");
-  snprintf(tmp,sizeof(tmp),"%s%s",h->usb_mode[0]?h->usb_mode:"rndis",h->usb_adb?" + ADB":"");
+  add("<div class=\"box card\" style=\"left:12px;top:72px;width:296px;height:60px\"></div>");
+  snprintf(tmp,sizeof(tmp),"%s",h->usb_mode[0]?h->usb_mode:"rndis");
   kv_row(82,L("USB Mode","当前 USB 模式"),tmp,"accent");
   if(h->ttl_val)snprintf(tmp,sizeof(tmp),"TTL = %llu",h->ttl_val);
   else snprintf(tmp,sizeof(tmp),"%s",L("Off (Default)","关闭（系统默认）"));
-  kv_row(108,L("Anti-Detect TTL","防检测 TTL"),tmp,h->ttl_val?"good":"muted");
-  kv_row(132,L("Debug Bridge","ADB 调试"),h->usb_adb?L("Enabled","已开启"):L("Disabled","已关闭"),h->usb_adb?"warn":"muted");
-  box(16,168,288,20,"head",L("USB Tethering Protocol","USB 网络共享模式"));
+  kv_row(106,L("Anti-Detect TTL","防检测 TTL"),tmp,h->ttl_val?"good":"muted");
+  box(16,146,288,20,"head",L("USB Tethering Protocol","USB 网络共享模式"));
   int is_rndis=!strncmp(h->usb_mode,"rndis",5);
-  int is_ncm=!strncmp(h->usb_mode,"ncm",3)||!strncmp(h->usb_mode,"cdc",3);
+  int is_ncm=!strncmp(h->usb_mode,"ncm",3);
   int is_ecm=!strncmp(h->usb_mode,"ecm",3);
-  linkbox(12,194,92,50,"usb0","RNDIS",!blocked()&&h->has,is_rndis?CHOSEN:PLAIN);
-  linkbox(114,194,92,50,"usb1","NCM",!blocked()&&h->has,is_ncm?CHOSEN:PLAIN);
-  linkbox(216,194,92,50,"usb2","ECM",!blocked()&&h->has,is_ecm?CHOSEN:PLAIN);
-  linkbox(12,252,296,48,"usbadb",h->usb_adb?L("ADB Debugging: ON (Tap to turn off)","ADB 调试：已开启（点击关闭）"):
-          L("ADB Debugging: OFF (Tap to enable)","ADB 调试：已关闭（点击开启）"),!blocked()&&h->has,h->usb_adb?PRIMARY:PLAIN);
-  box(16,310,288,20,"head",L("TTL Spoofing Presets","TTL 防检测预设"));
-  linkbox(12,336,68,50,"ttl0",L("Off","关"),!blocked()&&h->has,h->ttl_val==0?CHOSEN:PLAIN);
-  linkbox(88,336,68,50,"ttl64","64",!blocked()&&h->has,h->ttl_val==64?CHOSEN:PRIMARY);
-  linkbox(164,336,68,50,"ttl65","65",!blocked()&&h->has,h->ttl_val==65?CHOSEN:PRIMARY);
-  linkbox(240,336,68,50,"ttl128","128",!blocked()&&h->has,h->ttl_val==128?CHOSEN:PRIMARY);
-  footer(404,40,pending&&pending_kind==JOB_TOOL?L("Applying USB / TTL configuration...","正在应用 USB 与 TTL 设置..."):
+  linkbox(12,172,92,56,"usb0","RNDIS",!blocked()&&h->has,is_rndis?CHOSEN:PLAIN);
+  linkbox(114,172,92,56,"usb1","NCM",!blocked()&&h->has,is_ncm?CHOSEN:PLAIN);
+  linkbox(216,172,92,56,"usb2","ECM",!blocked()&&h->has,is_ecm?CHOSEN:PLAIN);
+  box(16,240,288,20,"muted",L("USB drops briefly on a switch.","切换时 USB 会断开几秒"));
+  box(16,262,288,20,"muted",L("NCM is experimental.","NCM 为实验性模式"));
+  box(16,296,288,20,"head",L("TTL Spoofing Presets","TTL 防检测预设"));
+  linkbox(12,322,68,56,"ttl0",L("Off","关"),!blocked()&&h->has,h->ttl_val==0?CHOSEN:PLAIN);
+  linkbox(88,322,68,56,"ttl64","64",!blocked()&&h->has,h->ttl_val==64?CHOSEN:PRIMARY);
+  linkbox(164,322,68,56,"ttl65","65",!blocked()&&h->has,h->ttl_val==65?CHOSEN:PRIMARY);
+  linkbox(240,322,68,56,"ttl128","128",!blocked()&&h->has,h->ttl_val==128?CHOSEN:PRIMARY);
+  footer(396,40,pending&&pending_kind==JOB_TOOL?L("Applying USB / TTL configuration...","正在应用 USB 与 TTL 设置..."):
          L("TTL 64/65 bypasses hotspot carrier throttling.","TTL 64/65 可绕过运营商热点共享限制。"),pending?"warn":"muted");
 }
 static void render_power(void) {

@@ -1735,7 +1735,7 @@ static void toolbox_tests(struct drm_buf *b, const char *dir) {
   unsigned long long now=(unsigned long long)time(NULL);
   snprintf(text,sizeof(text),
     "S 7 1 0 0 0 0 0 0 1 %llu\nO 83 320 18372 34.5 12.4\n"
-    "H\t-65\t-88\t-10\t19\t5G SA\tN78\t5G_NSA_SA\tB1,B3\tN78,N41\t502\t256000\t42000\t12\t35\t34200\t2\t1\t1\t5\tU60Pro_5G\trndis\t0\t64\t1\t1\t80\t80\t70\t4120\t450\tGood\n"
+    "H\t-65\t-88\t-10\t19\t5G SA\tN78\tWL_AND_5G\tB1,B3\tN78,N41\t502\t256000\t42000\t12\t35\t34200\t2\t1\t1\t5\tU60Pro_5G\trndis\t0\t64\t1\t1\t80\t80\t70\t4120\t450\tGood\n"
     "Z 50 90 200 2 16096 zh 1\nJ 0 6 6 0 6\n.\n",now);
   assert(parse_snapshot(text,&s)&&s.toolbox.has&&s.toolbox.rsrp==-88&&s.toolbox.ttl_val==64&&s.toolbox.wifi_clients==5);
   data=s;assert(update_settings(&data)&&settings_menu==16096);
@@ -1745,11 +1745,13 @@ static void toolbox_tests(struct drm_buf *b, const char *dir) {
   press_id(b,"w2off");expect_request("tool wifi_toggle 2g 0\n");assert(pending_kind==JOB_TOOL);reset_job();
   press_id(b,"back");assert(page==MENU);
   press_id(b,"signal");assert(page==SIGNAL_PAGE);capture_both(b,dir,"toolbox-signal");
-  press_id(b,"net1");expect_request("tool net_mode 5G_SA\n");reset_job();
+  assert(strstr(html,"5G Auto"));
+  press_id(b,"net1");expect_request("tool net_mode Only_5G\n");reset_job();
   press_id(b,"back");assert(page==MENU);
   press_id(b,"usb");assert(page==USB_PAGE);capture_both(b,dir,"toolbox-usb");
   press_id(b,"ttl65");expect_request("tool ttl 65\n");reset_job();
-  press_id(b,"usb1");expect_request("tool usb_mode ncm 0\n");reset_job();
+  press_id(b,"usb1");expect_request("tool usb_mode ncm\n");reset_job();
+  assert(!strstr(html,"usbadb"));
   press_id(b,"back");assert(page==MENU);
   press_id(b,"power");assert(page==POWER_PAGE);capture_both(b,dir,"toolbox-power");
   press_id(b,"lim90");expect_request("tool charge_limit 90\n");reset_job();

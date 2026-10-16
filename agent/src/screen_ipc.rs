@@ -71,9 +71,9 @@ pub enum Tool {
     StockUi,
     /// Toggle 2.4GHz ("2g") or 5GHz ("5g") Wi-Fi radio.
     WifiToggle { band: String, enabled: bool },
-    /// Switch USB mode (`rndis`, `cdc_ncm`, `mtp`, `charge_only`) with optional ADB.
-    UsbMode { mode: String, adb: bool },
-    /// Switch cellular network mode (`5g_sa_nsa`, `5g_sa`, `5g_nsa`, `4g_only`, `auto`).
+    /// Switch USB mode (`rndis`, `ecm`, or the experimental `ncm`).
+    UsbMode { mode: String },
+    /// Switch the preferred network mode to one of the firmware's `net_select` values.
     NetMode { mode: String },
     /// Set IPv4/IPv6 hop limit / TTL (`0` clears TTL mangling, `64`/`65`/`128` applies it).
     Ttl { value: u16 },
@@ -216,33 +216,35 @@ pub fn parse(line: &str) -> Result<Request, &'static str> {
             revision: revision(rev)?,
             enabled: *value == "on",
         }),
-        ["stockui"] => job(Job::Tool(Tool::StockUi)),
-        ["wifi", band @ ("2g" | "5g"), value @ ("0" | "1")] => job(Job::Tool(Tool::WifiToggle {
-            band: (*band).into(),
-            enabled: *value == "1",
-        })),
-        ["usb", mode @ ("rndis" | "cdc_ncm" | "mtp" | "charge_only"), adb @ ("0" | "1")] => {
-            job(Job::Tool(Tool::UsbMode {
-                mode: (*mode).into(),
-                adb: *adb == "1",
+        ["tool", "stock_ui"] => job(Job::Tool(Tool::StockUi)),
+        ["tool", "wifi_toggle", band @ ("2g" | "5g"), value @ ("0" | "1")] => {
+            job(Job::Tool(Tool::WifiToggle {
+                band: (*band).into(),
+                enabled: *value == "1",
             }))
         }
-        ["netmode", mode @ ("5g_sa_nsa" | "5g_sa" | "5g_nsa" | "4g_only" | "auto")] => {
+        ["tool", "usb_mode", mode @ ("rndis" | "ecm" | "ncm")] => job(Job::Tool(Tool::UsbMode {
+            mode: (*mode).into(),
+        })),
+        ["tool", "net_mode", mode] => {
+            if !crate::cell::NETWORK_MODES.iter().any(|(m, _)| m == mode) {
+                return Err("Invalid network mode");
+            }
             job(Job::Tool(Tool::NetMode {
                 mode: (*mode).into(),
             }))
         }
-        ["ttl", val] => {
+        ["tool", "ttl", val] => {
             let v = number(val, "Invalid TTL")?;
             if !matches!(v, 0 | 64 | 65 | 128) {
                 return Err("Invalid TTL");
             }
             job(Job::Tool(Tool::Ttl { value: v as u16 }))
         }
-        ["charge", "switch", value @ ("0" | "1")] => job(Job::Tool(Tool::ChargeSwitch {
+        ["tool", "charge_switch", value @ ("0" | "1")] => job(Job::Tool(Tool::ChargeSwitch {
             enabled: *value == "1",
         })),
-        ["charge", "limit", level] => {
+        ["tool", "charge_limit", level] => {
             let lvl = number(level, "Invalid charge limit")?;
             if !matches!(lvl, 70 | 80 | 90 | 100) {
                 return Err("Invalid charge limit");
@@ -251,8 +253,8 @@ pub fn parse(line: &str) -> Result<Request, &'static str> {
                 max_level: lvl as u8,
             }))
         }
-        ["bloat", "kill"] => job(Job::Tool(Tool::KillBloat)),
-        ["cache", "drop"] => job(Job::Tool(Tool::DropCaches)),
+        ["tool", "kill_bloat"] => job(Job::Tool(Tool::KillBloat)),
+        ["tool", "drop_caches"] => job(Job::Tool(Tool::DropCaches)),
         [_, _, _, _] | [_, _, _] | [_, _] | [_] => Err("Unsupported action"),
         _ => Err("Invalid action"),
     }
@@ -1341,51 +1343,45 @@ mod tests {
     }
     #[test]
     fn toolbox_requests_and_record() {
-        assert_eq!(parse("stockui"), Ok(Request::Job(Job::Tool(Tool::StockUi))));
+        let tool = |line: &str| match parse(line) {
+            Ok(Request::Job(Job::Tool(t))) => Ok(t),
+            Ok(_) => Err("not a tool"),
+            Err(e) => Err(e),
+        };
+        assert_eq!(tool("tool stock_ui"), Ok(Tool::StockUi));
         assert_eq!(
-            parse("wifi 5g 1"),
-            Ok(Request::Job(Job::Tool(Tool::WifiToggle {
+            tool("tool wifi_toggle 5g 1"),
+            Ok(Tool::WifiToggle {
                 band: "5g".into(),
                 enabled: true
-            })))
+            })
         );
         assert_eq!(
-            parse("usb rndis 1"),
-            Ok(Request::Job(Job::Tool(Tool::UsbMode {
-                mode: "rndis".into(),
-                adb: true
-            })))
+            tool("tool usb_mode ncm"),
+            Ok(Tool::UsbMode { mode: "ncm".into() })
+        );
+        assert!(tool("tool usb_mode mtp").is_err());
+        assert_eq!(
+            tool("tool net_mode Only_5G"),
+            Ok(Tool::NetMode {
+                mode: "Only_5G".into()
+            })
+        );
+        assert!(tool("tool net_mode 5G_SA").is_err());
+        assert_eq!(tool("tool ttl 64"), Ok(Tool::Ttl { value: 64 }));
+        assert!(tool("tool ttl 99").is_err());
+        assert_eq!(
+            tool("tool charge_switch 0"),
+            Ok(Tool::ChargeSwitch { enabled: false })
         );
         assert_eq!(
-            parse("netmode 5g_sa"),
-            Ok(Request::Job(Job::Tool(Tool::NetMode {
-                mode: "5g_sa".into()
-            })))
+            tool("tool charge_limit 80"),
+            Ok(Tool::ChargeLimit { max_level: 80 })
         );
-        assert_eq!(
-            parse("ttl 64"),
-            Ok(Request::Job(Job::Tool(Tool::Ttl { value: 64 })))
-        );
-        assert!(parse("ttl 99").is_err());
-        assert_eq!(
-            parse("charge switch 0"),
-            Ok(Request::Job(Job::Tool(Tool::ChargeSwitch {
-                enabled: false
-            })))
-        );
-        assert_eq!(
-            parse("charge limit 80"),
-            Ok(Request::Job(Job::Tool(Tool::ChargeLimit { max_level: 80 })))
-        );
-        assert!(parse("charge limit 50").is_err());
-        assert_eq!(
-            parse("bloat kill"),
-            Ok(Request::Job(Job::Tool(Tool::KillBloat)))
-        );
-        assert_eq!(
-            parse("cache drop"),
-            Ok(Request::Job(Job::Tool(Tool::DropCaches)))
-        );
+        assert!(tool("tool charge_limit 50").is_err());
+        assert_eq!(tool("tool kill_bloat"), Ok(Tool::KillBloat));
+        assert_eq!(tool("tool drop_caches"), Ok(Tool::DropCaches));
+        assert!(tool("tool").is_err() && tool("wifi 5g 1").is_err());
         let h = toolbox_record(&json!({
             "rssi": -65,
             "rsrp": -92,

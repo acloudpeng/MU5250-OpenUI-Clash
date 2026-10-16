@@ -56,8 +56,8 @@ establish compatibility with other models, hardware revisions or firmware.
   order; turn it on and off on the webpage or the touchscreen.
   See the [Wi-Fi relay documentation](docs/WIFI-UPLINK.md).
 - **Touchscreen panel (DevUI).** A menu on the device's 320×480 screen, in the
-  dashboard's language. It shows up to four pages, such as the battery and system
-  overview and eSIM. See the [screen documentation](docs/SCREEN.md).
+  dashboard's language. It shows up to nine pages (five or more as a 3×3 toolbox grid),
+  such as the battery and system overview, eSIM, Wi-Fi, signal and charging. See the [screen documentation](docs/SCREEN.md).
 - **Checked updates.** Each deployment does the following:
   - verifies the device and every file's checksum;
   - keeps a snapshot of the previous installation;

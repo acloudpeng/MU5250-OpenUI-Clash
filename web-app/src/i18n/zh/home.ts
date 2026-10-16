@@ -46,4 +46,6 @@ export default {
   'System booster': '系统负载优化',
   'Killed ZTE bloatware & freed memory': '已清理中兴冗余进程并释放内存',
   'Kill ZTE bloatware': '一键清理冗余进程',
+  'Drop caches': '释放内存缓存',
+  'Kernel caches dropped': '已释放系统内存缓存',
 } satisfies Dict

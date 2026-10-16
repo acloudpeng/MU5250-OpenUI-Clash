@@ -750,6 +750,7 @@ export const api = {
 
   // TTL
   ttlStatus: () => get('/api/ttl/status').then((d) => d as unknown as TtlStatus),
+  dropCaches: () => req('POST', '/api/system/drop-caches'),
   ttlSet: (ttl: number) => put('/api/ttl/set', { ttl }),
   ttlClear: () => req('DELETE', '/api/ttl/clear'),
 
