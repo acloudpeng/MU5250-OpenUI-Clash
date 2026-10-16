@@ -1,6 +1,6 @@
 [package]
 name = "mu5250-installer"
-version = "1.1.1"
+version = "1.1.2"
 description = "Desktop installer for Open U60 Pro"
 authors = ["MU5250-OpenUI contributors"]
 license = "MIT"
