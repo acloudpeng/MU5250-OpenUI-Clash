@@ -12,6 +12,7 @@ const pages: { id: DevUIPageId; title: string; description: string }[] = [
   { id: 'wireguard', title: N_('WireGuard'), description: N_('Tunnel status, traffic and on / off control') },
   { id: 'clash', title: N_('Clash'), description: N_('Status, proxy mode, nodes and delay tests, subscriptions, core and geo data') },
   { id: 'esim', title: N_('eSIM'), description: N_('Profiles on a removable eUICC: switch, or restart after a switch') },
+  { id: 'uplink', title: N_('Wi-Fi relay'), description: N_('Upstream Wi-Fi status, signal and traffic, with on / off control') },
   { id: 'profiles', title: N_('Saved profiles'), description: N_('Switch between your saved VPN profiles') },
   { id: 'devices', title: N_('Device routing'), description: N_('Choose which devices use WireGuard') },
 ]

@@ -14,7 +14,7 @@ light/dark theme (auto + manual), each group lazy-loaded:
 |---|---|
 | **Home** | signal, modem mode, throughput, battery, connection, device, data usage — backed by the single batched `/api/dashboard` poll |
 | **Signal** | per-carrier LTE/NR detail (PCI, ARFCN, RSRP/RSRQ/SINR) + network mode, band lock, one-tap cell lock from live cells |
-| **Network** | clients by Wi-Fi/USB-C/Ethernet with link details, per-band Wi-Fi configuration, LAN/DHCP and DNS |
+| **Network** | clients by Wi-Fi/USB-C/Ethernet with link details, per-band Wi-Fi configuration, Wi-Fi relay (see below), LAN/DHCP and DNS |
 | **Proxy** | **Active proxy** selector (Off / WireGuard / Clash, `/api/proxy`), then **Configure** either backend: WireGuard status, saved configurations and device routing; Clash overview with diagnostics, subscriptions, nodes, devices, connections, logs and advanced settings |
 | **Modem** | APN profiles (with carrier presets), eSIM on a removable eUICC ([ESIM.md](ESIM.md)), data usage + reset day, TTL clamping, SMS (inbox/sent, compose, delete) |
 | **DevUI** | the device touchscreen menu: open it, ways to open it on the device, brightness, idle time and action, startup page and menu items |
@@ -42,11 +42,40 @@ web-app/src/
   features/
     home/            Overview — single batched /api/dashboard poll
     signal/          Overview + Mode & Locking
-    network/         Clients + Wi-Fi + Router
+    network/         Clients + Wi-Fi + Wi-Fi relay + Router
     proxy/           Active proxy selector + Clash tabs; wireguard/ holds WireGuard's settings
     modem/           APN + eSIM + Data + TTL + SMS
     system/          Metrics + Tools + Settings
 ```
+
+## Wi-Fi relay
+
+**Network → Wi-Fi relay** (`UplinkTab.tsx`, agent `wifi_uplink.rs`, `/api/wifi/uplink`)
+makes the router join an upstream Wi-Fi network and send all traffic through it while
+that network reaches the internet, falling back to the cellular connection otherwise.
+
+- **Status card:** the state (off, unavailable, connecting, getting an IP address,
+  checking internet access, online with traffic on Wi-Fi, no internet with traffic on
+  cellular, needs a web login, login mode), the agent's reason, and while joined the network, band and channel, signal,
+  address, gateway, DNS and traffic. The switch saves `{expected_revision, enabled}`; a
+  409 reloads. Turning it on the first time in a browser explains what changes: the
+  hotspot may move to the upstream channel, IPv6 for LAN devices is held while on Wi-Fi,
+  and the upstream subnet must differ from the LAN.
+- **Web login:** a network with a captive portal shows **Start web login (10 min)**
+  (`POST /api/wifi/uplink/login`); during login mode the card links to the portal's login
+  page, counts down and offers **End login mode**. The same button is offered when the
+  network has no internet (portals that only hijack DNS).
+- **Saved networks** (up to `max_networks`): the first one in range is joined, so the
+  order is the preference (up/down). Edit changes security, password or the hidden flag;
+  an empty password keeps the saved one. A save sends the whole list, without passwords
+  that did not change.
+- **Nearby networks:** **Scan** (`POST /api/wifi/uplink/scan`, a few seconds) lists
+  networks strongest first; WEP and enterprise networks are shown but cannot be chosen.
+  Picking one opens **Save** / **Save and connect** (the latter puts it first and turns
+  the relay on). **Hidden network** adds one by name.
+- Names and passwords are checked as the agent checks them (1–32-byte name;
+  8–63 printable ASCII characters or a 64-digit key, which WPA3 does not accept).
+- The tab polls every 3 s while open.
 
 ## Conventions that keep the device happy
 

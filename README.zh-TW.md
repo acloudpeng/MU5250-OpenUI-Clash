@@ -43,6 +43,9 @@
   - 觸控螢幕上：切換設定檔。
 
   基於 lpac。請見 [eSIM 文件](docs/ESIM.md)。
+- **Wi-Fi 中繼**：連上既有的 Wi-Fi（家裡、飯店、辦公室）作為上網通道，自己的熱點照常運作，省下行動數據。
+  上游網路無法上網或斷線時，自動回到行動網路，恢復後再切回。可以儲存多個網路，依序連線；網頁和觸控螢幕上都能開關。
+  請見 [Wi-Fi 中繼文件](docs/WIFI-UPLINK.md)。
 - **觸控螢幕面板（DevUI）**：裝置 320×480 螢幕上的選單，語言跟隨網頁控制台。最多顯示四個頁面，例如電池與系統概覽、eSIM。
   請見[螢幕文件](docs/SCREEN.md)。
 - **有校驗的更新**：每次部署都會：
@@ -179,7 +182,7 @@ sh screen/build.sh --preview
 
 - [部署](docs/DEPLOYMENT.md)：解鎖、安裝、更新和復原
 - [安全](docs/SAFETY.md)：確保裝置能夠復原的規則
-- [控制台](docs/DASHBOARD.md)、[觸控螢幕面板](docs/SCREEN.md)和 [eSIM](docs/ESIM.md)
+- [控制台](docs/DASHBOARD.md)、[觸控螢幕面板](docs/SCREEN.md)、[eSIM](docs/ESIM.md) 和 [Wi-Fi 中繼](docs/WIFI-UPLINK.md)
 - [Agent API](docs/AGENT.md)
 - [操作手冊](docs/OPERATIONS.md)：解鎖、部署、驗證和韌體更新的逐步操作
 

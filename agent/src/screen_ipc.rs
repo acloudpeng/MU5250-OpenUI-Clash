@@ -56,6 +56,10 @@ pub enum Job {
     Diagnose,
     /// `esim scan`, `esim enable <generation> <index>`, `esim reboot`.
     Esim(Esim),
+    /// `uplink <revision> on|off`: the Wi-Fi uplink switch.
+    Uplink { revision: u64, enabled: bool },
+    /// `uplink login`: ten minutes of login mode for a network that wants a web login.
+    UplinkLogin,
 }
 
 /// eSIM work from the panel. Profiles come back as indices into the card view of
@@ -182,6 +186,11 @@ pub fn parse(line: &str) -> Result<Request, &'static str> {
             generation: generation(g)?,
             index: index(i)?,
         })),
+        ["uplink", "login"] => job(Job::UplinkLogin),
+        ["uplink", rev, value @ ("on" | "off")] => job(Job::Uplink {
+            revision: revision(rev)?,
+            enabled: *value == "on",
+        }),
         [_, _, _, _] | [_, _, _] | [_, _] | [_] => Err("Unsupported action"),
         _ => Err("Invalid action"),
     }
@@ -413,6 +422,53 @@ pub fn esim_records(v: &Value) -> String {
         ));
     }
     out
+}
+
+/// Why the Wi-Fi uplink is not carrying traffic, as a code the panel translates.
+pub fn uplink_reason(reason: Option<&str>) -> &'static str {
+    let Some(r) = reason.map(str::to_ascii_lowercase) else {
+        return "-";
+    };
+    [
+        // Before "client interface", which the pause message also names.
+        ("relay is paused", "paused"),
+        ("needs a web login", "portal"),
+        ("login mode needs", "nologin"),
+        ("finish starting", "booting"),
+        ("radio is off", "radio"),
+        ("radio to settle", "settle"),
+        ("wpa_supplicant", "supplicant"),
+        ("udhcpc", "dhcp"),
+        ("client interface", "iface"),
+        ("wrong wi-fi password", "password"),
+        ("rejected the connection", "rejected"),
+        ("no saved network", "range"),
+        ("overlaps the lan", "overlap"),
+        ("reach the internet", "internet"),
+    ]
+    .iter()
+    .find(|(needle, _)| r.contains(needle))
+    .map_or("other", |(_, code)| code)
+}
+/// `R revision enabled state reason ssid signal band ip rx tx online_since saved`: the
+/// Wi-Fi uplink. `state` is one letter (see `wifi_uplink::State::code`); no password,
+/// BSSID or gateway is sent.
+pub fn uplink_record(u: &crate::wifi_uplink::Summary) -> String {
+    format!(
+        "R\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+        u.revision,
+        u8::from(u.enabled),
+        u.state.code(),
+        uplink_reason(u.reason.as_deref()),
+        text_bytes(&u.ssid, 64),
+        u.signal.map_or("-".into(), |s| s.to_string()),
+        word(u.band, 3),
+        word(u.ip.as_deref().unwrap_or(""), 15),
+        u.rx_bytes,
+        u.tx_bytes,
+        u.online_since.unwrap_or(0),
+        u.saved
+    )
 }
 
 /// The body of an eSIM enable for profile `index` of the view the panel showed.
@@ -749,6 +805,21 @@ mod tests {
         assert_eq!(job("core geodata"), Job::Core(json!({"action":"geodata"})));
         assert_eq!(job("diag"), Job::Diagnose);
         assert_eq!(job("esim scan"), Job::Esim(Esim::Scan));
+        assert_eq!(
+            job("uplink 4 on"),
+            Job::Uplink {
+                revision: 4,
+                enabled: true
+            }
+        );
+        assert_eq!(
+            job("uplink 5 off"),
+            Job::Uplink {
+                revision: 5,
+                enabled: false
+            }
+        );
+        assert_eq!(job("uplink login"), Job::UplinkLogin);
         assert_eq!(job("esim reboot"), Job::Esim(Esim::Reboot));
         assert_eq!(
             job("esim enable 77 3"),
@@ -806,6 +877,11 @@ mod tests {
             "esim enable 77 -1",
             "esim enable 77 1 extra",
             "esim delete 77 1",
+            "uplink",
+            "uplink 3",
+            "uplink x on",
+            "uplink 3 yes",
+            "uplink 3 on now",
             "status extra",
             "",
         ] {
@@ -1093,5 +1169,68 @@ mod tests {
         assert_eq!(esim_enable_body(&view, 42, 2), Err("Stale"));
         assert_eq!(esim_enable_body(&view, 42, 0), Err("Already enabled"));
         assert_eq!(esim_enable_body(&Value::Null, 0, 0), Err("Stale"));
+    }
+    #[test]
+    fn uplink_record_sanitises_and_codes_reasons() {
+        use crate::wifi_uplink::{State, Summary};
+        let mut u = Summary {
+            revision: 6,
+            enabled: true,
+            state: State::Online,
+            reason: None,
+            ssid: "Café\t\n家".into(),
+            signal: Some(-52),
+            band: "5",
+            ip: Some("192.168.50.23".into()),
+            rx_bytes: 1024,
+            tx_bytes: 2048,
+            online_since: Some(1_700_000_000),
+            saved: 2,
+        };
+        assert_eq!(
+            uplink_record(&u),
+            "R\t6\t1\tn\t-\tCafé家\t-52\t5\t192.168.50.23\t1024\t2048\t1700000000\t2\n"
+        );
+        u.state = State::Off;
+        u.enabled = false;
+        u.ssid.clear();
+        u.signal = None;
+        u.band = "";
+        u.ip = None;
+        u.online_since = None;
+        assert_eq!(
+            uplink_record(&u),
+            "R\t6\t0\to\t-\t-\t-\t-\t-\t1024\t2048\t0\t2\n"
+        );
+        u.ssid = "长".repeat(30);
+        let r = uplink_record(&u);
+        assert_eq!(r.split('\t').nth(5).unwrap().len(), 63);
+        for (reason, code) in [
+            ("The Wi-Fi radio is off; turn the hotspot on first", "radio"),
+            ("Waiting for the Wi-Fi radio to settle", "settle"),
+            (
+                "wpa_supplicant is not installed on this device",
+                "supplicant",
+            ),
+            ("udhcpc is not installed on this device", "dhcp"),
+            ("The Wi-Fi radio refused a client interface", "iface"),
+            ("Wrong Wi-Fi password", "password"),
+            ("The upstream network rejected the connection", "rejected"),
+            ("No saved network is in range", "range"),
+            (
+                "The upstream network 192.168.0.0/24 overlaps the LAN; change the LAN address",
+                "overlap",
+            ),
+            (
+                "Connected, but the upstream network does not reach the internet",
+                "internet",
+            ),
+            ("Cannot write the DHCP hook", "other"),
+            ("The firmware kept removing the Wi-Fi client interface; the relay is paused. Turn it off and on to try again", "paused"),
+            ("Waiting for the device to finish starting", "booting"),
+        ] {
+            assert_eq!(uplink_reason(Some(reason)), code, "{reason}");
+        }
+        assert_eq!(uplink_reason(None), "-");
     }
 }

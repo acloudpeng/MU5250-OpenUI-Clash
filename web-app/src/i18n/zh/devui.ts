@@ -11,6 +11,8 @@ export default {
   'eSIM': 'eSIM',
   'Status, proxy mode, nodes and delay tests, subscriptions, core and geo data': '状态、代理模式、节点与测速、订阅、内核与 Geo 数据',
   'Profiles on a removable eUICC: switch, or restart after a switch': '可插拔 eUICC 上的配置文件：切换，或切换后重启',
+  'Wi-Fi relay': 'Wi-Fi 中继',
+  'Upstream Wi-Fi status, signal and traffic, with on / off control': '上游 Wi-Fi 的状态、信号与流量，以及开关控制',
   'Up to four items fit the device menu. Saved profiles and Device routing stay reachable from the WireGuard page.': '设备菜单最多显示四项。已保存的配置和设备分流始终可以从 WireGuard 页面进入。',
   'Saved profiles': '已保存的配置',
   'Switch between your saved VPN profiles': '在已保存的 VPN 配置之间切换',

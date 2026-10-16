@@ -41,6 +41,7 @@ mod usb;
 mod util;
 mod validate;
 mod wifi;
+mod wifi_uplink;
 mod wireguard;
 
 use std::sync::Arc;
@@ -94,6 +95,7 @@ fn main() {
     // Before the supervisor: an interrupted core update may have left its files or lock.
     clash_core::cleanup_on_start();
     clash::start();
+    wifi_uplink::start();
     screen::start(state.clone());
 
     usb::enforce_usb_mode_on_boot();

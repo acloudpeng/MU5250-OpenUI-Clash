@@ -33,6 +33,8 @@ MOCK_PAYLOAD_POSTS = {
     "/api/sms/list",
     "/api/at/send",
     "/api/system/kill-bloat",
+    "/api/wifi/uplink/scan",
+    "/api/wifi/uplink/login",
 }
 
 ROUTE_RE = re.compile(r'\(&Method::(\w+),\s*"(/api/[^"]+)"\)')

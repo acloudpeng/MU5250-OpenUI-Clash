@@ -85,3 +85,12 @@ test('the checker tells interface text from code', () => {
 test('all interface text is translated and the dictionary is consistent', () => {
   assert.deepEqual(check(), [])
 })
+
+test('Wi-Fi relay messages translate, including composed ones', () => {
+  const { tm } = i18n()
+  assert.equal(tm('The upstream network 192.168.0.0/24 overlaps the LAN; change the LAN address'), '上游网络 192.168.0.0/24 与本机局域网网段冲突，请修改局域网地址')
+  assert.equal(tm('Wi-Fi uplink network operation failed: iptables: Resource temporarily unavailable'), 'Wi-Fi 中继 网络操作失败：iptables: Resource temporarily unavailable')
+  assert.equal(tm('At most 8 networks can be saved'), '最多只能保存 8 个网络')
+  assert.equal(tm('Cannot start /usr/sbin/wpa_supplicant'), '无法启动 /usr/sbin/wpa_supplicant')
+  assert.equal(tm('Cannot start lpac: busy'), '无法启动 lpac：busy')
+})

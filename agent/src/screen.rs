@@ -467,6 +467,10 @@ fn status() -> String {
         result,
         FRESH.load(Ordering::Acquire)
     ));
+    // Read fresh: a saved file and the supervisor's snapshot, no lock held for long.
+    let uplink = crate::wifi_uplink::summary()
+        .map(|u| ipc::uplink_record(&u))
+        .unwrap_or_default();
     let p = PARTS.lock().unwrap();
     ipc::status(
         &[
@@ -477,6 +481,7 @@ fn status() -> String {
             &p.core,
             &p.diagnostics,
             &p.esim,
+            &uplink,
         ],
         &p.devices,
         &tail,
@@ -494,6 +499,8 @@ enum Work {
     Diagnose,
     Esim(Value),
     Reboot,
+    Uplink { revision: u64, enabled: bool },
+    UplinkLogin,
 }
 fn work(job: Job) -> Result<Work, &'static str> {
     let proxies = || PROXIES.lock().unwrap();
@@ -520,6 +527,8 @@ fn work(job: Job) -> Result<Work, &'static str> {
         // A restart only to finish a switch the firmware has not taken up.
         Job::Esim(Esim::Reboot) if crate::esim::status()["reboot_needed"] == true => Work::Reboot,
         Job::Esim(Esim::Reboot) => return Err("No restart is needed"),
+        Job::Uplink { revision, enabled } => Work::Uplink { revision, enabled },
+        Job::UplinkLogin => Work::UplinkLogin,
     })
 }
 fn run(work: &Work) -> (u16, Value) {
@@ -537,6 +546,20 @@ fn run(work: &Work) -> (u16, Value) {
         Work::Diagnose => clash_diag::run(),
         Work::Esim(v) => crate::esim::post(&body(v)),
         Work::Reboot => crate::device_ext::reboot(),
+        // Saves at once; the uplink's own supervisor joins or leaves the network.
+        Work::Uplink { revision, enabled } => {
+            match crate::wifi_uplink::set_enabled(*revision, *enabled) {
+                Ok(()) => (200, json!({"ok":true})),
+                Err(e) if e.starts_with("Configuration changed;") => {
+                    (409, json!({"ok":false,"error":e}))
+                }
+                Err(e) => (400, json!({"ok":false,"error":e})),
+            }
+        }
+        Work::UplinkLogin => match crate::wifi_uplink::set_login(true) {
+            Ok(()) => (200, json!({"ok":true})),
+            Err(e) => (400, json!({"ok":false,"error":e})),
+        },
     }
 }
 /// Ends a job on every path, a panic included: publishes its result (failed unless the

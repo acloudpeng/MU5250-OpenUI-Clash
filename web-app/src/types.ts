@@ -683,7 +683,7 @@ export type ClashCoreAction =
   | { action: 'rollback' }
   | { action: 'geodata'; route?: ClashCoreRoute; mirror?: string }
 
-export type DevUIPageId = 'overview' | 'proxy' | 'wireguard' | 'clash' | 'esim' | 'profiles' | 'devices'
+export type DevUIPageId = 'overview' | 'proxy' | 'wireguard' | 'clash' | 'esim' | 'uplink' | 'profiles' | 'devices'
 export interface DevUISettings {
   revision: number
   shortcut_enabled: boolean
@@ -793,3 +793,79 @@ export type EsimAction =
       insecure?: boolean
     }
   | { action: 'notifications'; operation: 'process' | 'remove'; seq: number[]; route?: EsimRoute }
+
+// ── Wi-Fi uplink / relay (agent/src/wifi_uplink.rs) ───────────────────────────
+
+export type UplinkSecurity = 'open' | 'wpa2' | 'wpa3' | 'wpa2_wpa3'
+export type UplinkState =
+  | 'off' | 'unavailable' | 'connecting' | 'obtaining_ip' | 'checking' | 'online' | 'no_internet'
+  | 'needs_login' | 'logging_in'
+
+export interface UplinkNetwork {
+  id: number
+  ssid: string
+  security: UplinkSecurity
+  hidden: boolean
+  has_password: boolean
+}
+
+export interface UplinkStatus {
+  revision: number
+  enabled: boolean
+  state: UplinkState
+  /** English agent message; shown through tm(). */
+  reason: string | null
+  ssid: string | null
+  bssid: string | null
+  frequency: number | null
+  band: string | null
+  channel: number | null
+  /** The saved network the radio is joined to. */
+  network_id: number | null
+  signal: number | null
+  ip: string | null
+  prefix: number | null
+  gateway: string | null
+  dns: string[]
+  online: boolean
+  /** Device clock (B31 runs hours off): only usable together with a device "now". */
+  online_since: number | null
+  /** Seconds online, when the agent reports it. */
+  online_for?: number | null
+  /** The login page a captive portal pointed at. */
+  portal_url?: string | null
+  /** Seconds left in login mode. */
+  login_remaining?: number | null
+  rx_bytes: number
+  tx_bytes: number
+  networks: UplinkNetwork[]
+  max_networks: number
+  tools: { wpa_supplicant: boolean; udhcpc: boolean }
+}
+
+export interface UplinkSeen {
+  ssid: string
+  bssid: string
+  frequency: number
+  band: string
+  channel: number | null
+  signal: number
+  /** null for WEP, enterprise and other networks the relay cannot join. */
+  security: UplinkSecurity | null
+  supported: boolean
+}
+
+/** A saved network in a save; an omitted password keeps the saved one. */
+export interface UplinkNetworkEdit {
+  id?: number
+  ssid: string
+  security: UplinkSecurity
+  password?: string
+  hidden: boolean
+}
+
+export interface UplinkUpdate {
+  expected_revision: number
+  enabled?: boolean
+  networks?: UplinkNetworkEdit[]
+}

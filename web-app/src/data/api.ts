@@ -50,6 +50,9 @@ import type {
   UsagePeriod,
   UsbMode,
   UsbStatus,
+  UplinkSeen,
+  UplinkStatus,
+  UplinkUpdate,
   Wan6Info,
   WanInfo,
   WifiAll,
@@ -689,6 +692,13 @@ export const api = {
   // WiFi
   wifiStatus: () => get('/api/wifi/status').then(mapWifi),
   wifiSet: (body: Record<string, unknown>) => put('/api/wifi/settings', body),
+  // Wi-Fi relay: saves answer at once and the agent applies them in the background; a scan
+  // with the client running waits for its results (~5 s), else sweeps from the hotspot.
+  uplink: () => get('/api/wifi/uplink').then(d => d as unknown as UplinkStatus),
+  uplinkSave: (body: UplinkUpdate) => put('/api/wifi/uplink', body).then(d => d as unknown as UplinkStatus),
+  uplinkLogin: (enabled: boolean) => req('POST', '/api/wifi/uplink/login', { enabled }).then(d => d as unknown as UplinkStatus),
+  uplinkScan: () =>
+    req('POST', '/api/wifi/uplink/scan', undefined, undefined, 60_000).then(d => (d as unknown as { networks: UplinkSeen[] }).networks ?? []),
 
   // Router
   dnsGet: () => get('/api/router/dns').then(mapDns),

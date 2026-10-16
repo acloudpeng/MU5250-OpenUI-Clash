@@ -19,7 +19,7 @@ const DIR: &str = "/data/local/tmp/openui-wireguard";
 const CONFIG: &str = "/data/local/tmp/openui-wireguard/config.json";
 const WG: &str = "/data/bin/wg";
 const IFACE: &str = "ou-wg0";
-const EGRESS: Egress = Egress {
+pub(crate) const EGRESS: Egress = Egress {
     label: "WireGuard",
     prefix: "OUWG",
     mark: "0x40000000",

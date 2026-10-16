@@ -15,6 +15,7 @@ static const char *page_title(void) {
   case CORE: return L("Core & data","内核与数据");
   case DIAG: return L("Diagnostics","诊断");
   case ESIM: return "eSIM";
+  case UPLINK: return L("Wi-Fi relay","Wi-Fi 中继");
   default: return "OpenUI";
   }
 }
@@ -579,6 +580,117 @@ static void render_esim(void) {
   linkbox(12,422,142,50,"escan",running&&!strcmp(e->kind,"scan")?L("Reading","读取中"):L("Read again","重新读取"),esim_idle(),PLAIN);
   linkbox(166,422,142,50,"ereboot",L("Restart device","重启设备"),e->reboot&&!blocked(),DANGER);
 }
+/* The Wi-Fi uplink switch needs fresh status, no job, and a saved network to turn on. */
+static int uplink_switch_ok(void) {
+  const struct uplink_info *u=&data.uplink;
+  return u->has&&!blocked()&&(u->enabled||u->saved>0);
+}
+/* Login mode: for a joined network with an address that wants a login (or has no internet). */
+static int uplink_login_ok(void) {
+  const struct uplink_info *u=&data.uplink;
+  return u->has&&u->enabled&&!blocked()&&u->ip[0]&&(u->state=='p'||u->state=='i');
+}
+static const char *uplink_reason_text(const char *code) {
+  static const struct { const char *code, *en, *zh; } reasons[] = {
+    {"paused","Paused; turn off and on to retry","已暂停，关闭再打开可重试"},
+    {"booting","Waiting for the device to start","正在等待设备启动完成"},
+    {"radio","Wi-Fi is off; turn the hotspot on","Wi-Fi 已关闭，请先打开热点"},
+    {"settle","Waiting for the Wi-Fi radio","正在等待 Wi-Fi 射频就绪"},
+    {"supplicant","wpa_supplicant is missing","设备缺少 wpa_supplicant"},
+    {"dhcp","udhcpc is missing","设备缺少 udhcpc"},
+    {"iface","The radio refused a client link","射频拒绝建立客户端连接"},
+    {"password","Wrong Wi-Fi password","Wi-Fi 密码错误"},
+    {"rejected","The network refused the connection","上游网络拒绝连接"},
+    {"range","No saved network in range","附近没有已保存的网络"},
+    {"overlap","Its addresses clash with the LAN","上游网段与局域网冲突"},
+    {"internet","The network has no internet","上游网络无法上网"},
+    {"portal","It needs a web login first","需要先在网页上登录"},
+    {"nologin","Join a network before login","需要先连上网络才能认证"},
+  };
+  for(size_t i=0;i<sizeof(reasons)/sizeof(reasons[0]);i++)
+    if(!strcmp(code,reasons[i].code))return L(reasons[i].en,reasons[i].zh);
+  return code[0]?L("See OpenUI for details","详情请查看 OpenUI"):"";
+}
+static const char *uplink_state_text(char state) {
+  switch(state) {
+  case 'o': return L("Off","已关闭");
+  case 'u': return L("Unavailable","不可用");
+  case 'c': return L("Connecting","正在连接");
+  case 'd': return L("Getting an address","正在获取地址");
+  case 'k': return L("Checking internet","正在检查网络");
+  case 'n': return L("On Wi-Fi","正在使用 Wi-Fi");
+  case 'i': return L("No internet","无法上网");
+  case 'p': return L("Needs web login","需要网页认证");
+  case 'g': return L("Login mode","认证模式中");
+  default: return L("Unavailable","不可用");
+  }
+}
+static int uplink_applying(void) { return pending&&pending_kind==JOB_UPLINK; }
+static const char *uplink_class(void) {
+  const struct uplink_info *u=&data.uplink;
+  return !data.stamp||uplink_applying()?"warn":stale()?"bad":!u->has||u->state=='o'?"muted":
+    u->state=='n'?"good":u->state=='u'||u->state=='i'?"bad":"warn";
+}
+/* Menu and Overview detail: the state, with the network's name when on it. */
+static const char *uplink_summary(void) {
+  static char text[128];
+  const struct uplink_info *u=&data.uplink;
+  if(!data.stamp)return L("Loading status","正在加载状态");
+  if(stale())return L("Status is stale","状态已过期");
+  if(uplink_applying())return L("Applying changes","正在应用更改");
+  if(!u->has)return L("Join a Wi-Fi for internet","连接上游 Wi-Fi 上网");
+  if(u->state=='n'){snprintf(text,sizeof(text),"%s · %s",uplink_state_text('n'),u->ssid);return text;}
+  if(u->state=='o')return u->saved?L("Off · mobile data","已关闭 · 走移动网络"):L("Add networks in OpenUI","请在 OpenUI 中添加网络");
+  return uplink_state_text(u->state);
+}
+static void render_uplink(void) {
+  const struct uplink_info *u=&data.uplink;
+  char tmp[256],rx[32],tx[32];
+  header(L("Wi-Fi relay","Wi-Fi 中继"));
+  add("<div class=\"box card\" style=\"left:12px;top:72px;width:296px;height:86px\"></div>");
+  const char *cls=uplink_class();
+  dot(28,87,tone_color(cls));
+  snprintf(tmp,sizeof(tmp),"head %s",strcmp(cls,"muted")?cls:"");
+  sbox(46,82,250,20,tmp,!data.stamp||stale()||uplink_applying()?uplink_summary():uplink_state_text(u->has?u->state:'u'));
+  /* Why, or what it means for traffic. */
+  const char *line=uplink_reason_text(u->reason),*line_cls="muted";
+  if(!u->has)line=L("This agent has no Wi-Fi relay.","此 Agent 不支持 Wi-Fi 中继。");
+  else if(u->state=='o')line=u->saved?L("Devices use mobile data.","设备使用移动网络。"):L("Add networks in OpenUI first.","请先在 OpenUI 中添加网络。");
+  else if(u->state=='n')line=L("All traffic uses this Wi-Fi.","全部流量走此 Wi-Fi。");
+  else if(u->state=='g')line=L("Sign in; traffic on Wi-Fi.","请登录；流量暂走 Wi-Fi。");
+  else if(line[0])line_cls=u->state=='u'||u->state=='i'||!strcmp(u->reason,"password")?"bad":"warn";
+  else line=L("Looking for saved networks.","正在寻找已保存的网络。");
+  sbox(28,108,268,20,line_cls,line);
+  int on_wifi=u->state=='n'||u->state=='g';
+  sbox(28,130,268,20,"muted",on_wifi?L("Traffic: Wi-Fi","当前流量：Wi-Fi"):L("Traffic: mobile data","当前流量：移动网络"));
+  add("<div class=\"box card\" style=\"left:12px;top:166px;width:296px;height:100px\"></div>");
+  kv_row(174,L("Network","网络"),u->ssid[0]?u->ssid:"--","");
+  if(u->has_signal&&u->band[0])snprintf(tmp,sizeof(tmp),"%d dBm · %s GHz",u->signal,u->band);
+  else if(u->has_signal)snprintf(tmp,sizeof(tmp),"%d dBm",u->signal);
+  else snprintf(tmp,sizeof(tmp),"--");
+  kv_row(196,L("Signal","信号"),tmp,!u->has_signal?"":u->signal>=-65?"good":u->signal>=-75?"warn":"bad");
+  kv_row(218,L("Address","地址"),u->ip[0]?u->ip:"--","");
+  unsigned long long now=(unsigned long long)time(NULL),s=u->since&&now>u->since?now-u->since:0;
+  if(!u->since||u->state!='n')snprintf(tmp,sizeof(tmp),"--");
+  else if(s>=86400)snprintf(tmp,sizeof(tmp),L("%llud %lluh","%llu 天 %llu 时"),s/86400,s/3600%24);
+  else if(s>=3600)snprintf(tmp,sizeof(tmp),L("%lluh %llum","%llu 时 %llu 分"),s/3600,s/60%60);
+  else snprintf(tmp,sizeof(tmp),L("%llu min","%llu 分钟"),s/60);
+  kv_row(240,L("Online for","已连接"),tmp,"");
+  amount(rx,sizeof(rx),u->rx);amount(tx,sizeof(tx),u->tx);
+  add("<div class=\"box card\" style=\"left:12px;top:274px;width:142px;height:62px\"></div><div class=\"box card\" style=\"left:166px;top:274px;width:142px;height:62px\"></div>");
+  box(26,280,120,20,"muted",L("↓ Downloaded","↓ 下载"));box(180,280,120,20,"muted",L("↑ Uploaded","↑ 上传"));
+  box(26,300,124,32,"title",rx);box(180,300,124,32,"title",tx);
+  /* A network that wants a web login: login mode next to the switch. */
+  if(uplink_login_ok()||u->state=='g') {
+    linkbox(12,348,142,56,"ulogin",u->state=='g'?L("Logging in","认证中"):L("Start login","开始认证"),uplink_login_ok(),PRIMARY);
+    linkbox(166,348,142,56,"utoggle",uplink_applying()?L("Applying","正在应用"):L("Turn off","关闭中继"),uplink_switch_ok(),DANGER);
+    footer(416,40,L("Then open the login page on a phone or computer on this hotspot.","然后用连着本热点的手机或电脑打开登录页。"),"muted");
+    return;
+  }
+  linkbox(12,348,296,56,"utoggle",uplink_applying()?L("Applying","正在应用"):u->enabled?L("Turn off Wi-Fi relay","关闭 Wi-Fi 中继"):L("Turn on Wi-Fi relay","开启 Wi-Fi 中继"),
+          uplink_switch_ok(),u->enabled?DANGER:PRIMARY);
+  footer(416,40,L("Manage networks in OpenUI. The hotspot may change channel.","网络与密码请在 OpenUI 中管理；连接后热点可能切换信道。"),"muted");
+}
 static void render_confirm(void) {
   const struct backend_info *b=&data.backend;
   const char *title,*text,*button=L("Switch","切换");
@@ -610,6 +722,15 @@ static void render_confirm(void) {
     title=L("Switch profile?","切换配置文件？");
     text=L("Mobile data stops for 10-30 s while the modem reads the card again.","基带重新读卡期间，移动数据中断约 10-30 秒。");
     snprintf(detail,sizeof(detail),"%s",chosen_name);
+  } else if(confirm_what==CF_UPLINK&&confirm_target) {
+    title=L("Turn on Wi-Fi relay?","开启 Wi-Fi 中继？");
+    text=L("Joins a saved Wi-Fi and sends all traffic through it. The hotspot may change channel.","将连接已保存的 Wi-Fi，全部流量改走该网络；热点可能会切换信道。");
+    button=L("Turn on","开启");
+  } else if(confirm_what==CF_UPLINK) {
+    title=L("Turn off Wi-Fi relay?","关闭 Wi-Fi 中继？");
+    text=L("Traffic returns to mobile data.","流量将恢复走移动网络。");
+    if(data.uplink.ssid[0])snprintf(detail,sizeof(detail),"%s",data.uplink.ssid);
+    button=L("Turn off","关闭");tone=DANGER;
   } else if(confirm_what==CF_REBOOT) {
     title=L("Restart the device?","重启设备？");
     text=L("The firmware still uses the previous profile. The device restarts now.","固件仍在使用原来的配置文件，设备将立即重启。");

@@ -264,6 +264,16 @@ reserved resources, IPv4-only forwarding/IPv6 blocking, the transition guard,
 boot/firewall-reload limitations and recovery. The existing agent starts the
 feature from its current boot path; no additional init.d/firewall hooks are used.
 
+## Wi-Fi relay
+
+The relay adds a client interface (`ou-sta0`) on the hotspot's radio, a wpa_supplicant
+and a udhcpc run by the agent, firewall chains `OUUP_*`, routing table `10431` and
+rules `10429`–`10431`. All of it is runtime state: no UCI, init.d, stock chain or main
+route changes, and nothing survives a reboot without the agent. Inbound traffic from the
+upstream network is dropped except replies and DHCP offers. Turning the relay off
+removes everything; at start the agent drops a previous agent's online rules before its
+own checks pass. See [WIFI-UPLINK.md](WIFI-UPLINK.md).
+
 ## Temporary screen ownership
 
 The optional `openui-screen` supervisor may stop `zte_topsw_devui` only after

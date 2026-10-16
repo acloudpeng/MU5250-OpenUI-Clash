@@ -44,6 +44,7 @@ static int parent(int p) {
   case NODES: case SUBS: case CORE: return CLASH;
   case GROUP: return NODES;
   case DIAG: return (diag_from==PROXY||diag_from==CLASH)&&reachable(diag_from)?diag_from:MENU;
+  case UPLINK: return uplink_from==OVERVIEW&&reachable(OVERVIEW)?OVERVIEW:MENU;
   default: return MENU;
   }
 }
@@ -112,6 +113,7 @@ static void tap(int x,int y) {
     if(!strcmp(a,links[i].id)) { if(reachable(links[i].page)){group_offset=0;go(links[i].page);} return; }
   if(!strcmp(a,"devices")) { if(reachable(DEVICES))enter_devices();return; }
   if(!strcmp(a,"diag")) { if(reachable(DIAG)){diag_from=page;diag_offset=0;go(DIAG);} return; }
+  if(!strcmp(a,"uplink")) { if(reachable(UPLINK)){uplink_from=page;go(UPLINK);} return; }
   if(!strcmp(a,"active")&&page==PROXY) {
     int to=data.backend.active==BK_WG?WG:data.backend.active==BK_CLASH?CLASH:-1;
     if(to>=0&&reachable(to))go(to);
@@ -207,6 +209,12 @@ static void tap(int x,int y) {
       snprintf(chosen_name,sizeof(chosen_name),"%s",r->name[0]?r->name:r->tail);
       ask(CF_ESIM,r->index,JOB_ESIM,e->gen,req);
     }
+  } else if(page==UPLINK) {
+    const struct uplink_info *u=&data.uplink;
+    if(!strcmp(a,"utoggle")&&uplink_switch_ok()) {
+      char req[64];snprintf(req,sizeof(req),"uplink %llu %s\n",u->rev,u->enabled?"off":"on");
+      ask(CF_UPLINK,!u->enabled,JOB_UPLINK,u->rev,req);
+    } else if(!strcmp(a,"ulogin")&&uplink_login_ok()) send_job("uplink login\n",JOB_UPLINK,0);
   } else if(page==DIAG) {
     if(!strcmp(a,"drun")&&!blocked()&&data.diag.has&&!data.diag.running)send_job("diag\n",JOB_DIAG,0);
     else if(!strcmp(a,"prev")&&diag_offset>0)diag_offset-=4;

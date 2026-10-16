@@ -49,6 +49,12 @@ establish compatibility with other models, hardware revisions or firmware.
   - On the touchscreen: switch profiles.
 
   It uses lpac. See the [eSIM documentation](docs/ESIM.md).
+- **Wi-Fi relay.** Join an existing Wi-Fi network (home, hotel, office) and use it as the
+  internet connection while the device's own hotspot keeps running, saving mobile data.
+  When the upstream network drops or has no internet, traffic returns to the cellular link
+  and switches back once it recovers. Several networks can be saved and are tried in
+  order; turn it on and off on the webpage or the touchscreen.
+  See the [Wi-Fi relay documentation](docs/WIFI-UPLINK.md).
 - **Touchscreen panel (DevUI).** A menu on the device's 320×480 screen, in the
   dashboard's language. It shows up to four pages, such as the battery and system
   overview and eSIM. See the [screen documentation](docs/SCREEN.md).
@@ -209,7 +215,7 @@ sh screen/build.sh --preview
 
 - [Deployment](docs/DEPLOYMENT.md): unlock, install, update and recovery
 - [Safety](docs/SAFETY.md): rules that keep the device recoverable
-- [Dashboard](docs/DASHBOARD.md), [touchscreen panel](docs/SCREEN.md) and [eSIM](docs/ESIM.md)
+- [Dashboard](docs/DASHBOARD.md), [touchscreen panel](docs/SCREEN.md), [eSIM](docs/ESIM.md) and [Wi-Fi relay](docs/WIFI-UPLINK.md)
 - [Agent API](docs/AGENT.md)
 - [Operations](docs/OPERATIONS.md): step-by-step unlock, deployment, verification and
   firmware updates

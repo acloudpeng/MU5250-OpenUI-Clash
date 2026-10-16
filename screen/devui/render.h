@@ -191,16 +191,16 @@ static void render(struct drm_buf *b) {
     dot(122,83,tone_color(cls));
     box(138,78,160,20,"muted",!bk->has||bk->active==BK_WG?"WireGuard":bk->active==BK_CLASH?"Clash":L("Proxy","代理"));
     add("<div class=\"box head %s\" style=\"left:122px;top:100px;width:178px;height:20px\">",cls);shortened(bk->has?proxy_summary():summary(),176,16);add("</div>");
-    const int pages[] = {OVERVIEW,PROXY,WG,CLASH,ESIM,PROFILES,DEVICES};
-    const char *ids[] = {"overview","proxy","wireguard","clash","esim","profiles","devices"};
-    const char *titles[] = {L("Overview","概览"),L("Proxy","代理"),"WireGuard","Clash","eSIM",L("Saved profiles","已保存配置"),L("Device routing","设备分流")};
+    const int pages[] = {OVERVIEW,PROXY,WG,CLASH,ESIM,UPLINK,PROFILES,DEVICES};
+    const char *ids[] = {"overview","proxy","wireguard","clash","esim","uplink","profiles","devices"};
+    const char *titles[] = {L("Overview","概览"),L("Proxy","代理"),"WireGuard","Clash","eSIM",L("Wi-Fi relay","Wi-Fi 中继"),L("Saved profiles","已保存配置"),L("Device routing","设备分流")};
     const char *details[] = {L("Battery, uptime and load","电池、运行时间与系统负载"),
                              !bk->has||bk->active==BK_OFF?L("Off / WireGuard / Clash","关闭 / WireGuard / Clash"):bk->active==BK_WG?L("Active: WireGuard","当前：WireGuard"):L("Active: Clash","当前：Clash"),
                              L("Tunnel status and on / off","隧道状态与开关"),L("Nodes, subscriptions and core","节点、订阅与内核"),
-                             esim_summary(),
+                             esim_summary(),uplink_summary(),
                              L("Switch between up to 5 configs","在最多 5 个配置之间切换"),L("Choose WireGuard or direct","选择走 WireGuard 或直连")};
     int row=0;
-    for(int i=0;i<7&&row<4;i++) if(visible_page(pages[i]))
+    for(int i=0;i<8&&row<4;i++) if(visible_page(pages[i]))
       nav_row(12,140+68*row++,296,60,ids[i],titles[i],details[i],"",1);
     box(16,418,292,20,"muted",L("Power key: tap to sleep / wake.","电源键短按：息屏 / 唤醒"));
     if(settings_sleep) snprintf(tmp,sizeof(tmp),L("Screen turns off after %d s idle.","空闲 %d 秒后熄屏"),settings_idle);
@@ -286,9 +286,12 @@ static void render(struct drm_buf *b) {
     snprintf(tmp,sizeof(tmp),"%.1f%%",data.cpu);stat_row(230,"CPU",tmp,data.cpu);
     if(data.memory>=0)snprintf(tmp,sizeof(tmp),"%.1f%%",data.memory);else strcpy(tmp,"--");
     stat_row(274,L("Memory","内存"),tmp,data.memory);
-    if(data.backend.has&&visible_page(PROXY))nav_row(12,334,296,60,"proxy",L("Proxy","代理"),proxy_summary(),proxy_class(),1);
-    else nav_row(12,334,296,60,"wireguard","WireGuard",summary(),summary_class(),visible_page(WG));
-    box(16,412,292,40,stale()?"wrap bad":"wrap muted",stale()?L("Status unavailable / stale","状态不可用或已过期"):L("Live status from the OpenUI agent","实时状态来自 OpenUI Agent"));
+    /* With a Wi-Fi uplink reported, its row joins and the note shrinks to one line. */
+    int relay=data.uplink.has,rh=relay?56:60;
+    if(data.backend.has&&visible_page(PROXY))nav_row(12,334,296,rh,"proxy",L("Proxy","代理"),proxy_summary(),proxy_class(),1);
+    else nav_row(12,334,296,rh,"wireguard","WireGuard",summary(),summary_class(),visible_page(WG));
+    if(relay)nav_row(12,398,296,56,"uplink",L("Wi-Fi relay","Wi-Fi 中继"),uplink_summary(),uplink_class(),1);
+    box(16,relay?458:412,292,relay?20:40,stale()?"wrap bad":"wrap muted",stale()?L("Status unavailable / stale","状态不可用或已过期"):L("Live status from the OpenUI agent","实时状态来自 OpenUI Agent"));
   }
   else if(page==PROXY) render_proxy();
   else if(page==CLASH) render_clash();
@@ -298,6 +301,7 @@ static void render(struct drm_buf *b) {
   else if(page==CORE) render_core();
   else if(page==DIAG) render_diag();
   else if(page==ESIM) render_esim();
+  else if(page==UPLINK) render_uplink();
   add("</body></html>");
   html_view_render_to(pixels,html);
   for(int y=0;y<H;y++)memcpy((uint8_t*)b->map+y*b->pitch,pixels+y*W,W*2);

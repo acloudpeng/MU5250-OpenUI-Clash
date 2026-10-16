@@ -43,6 +43,9 @@
   - 触摸屏上：切换配置文件。
 
   基于 lpac。见 [eSIM 文档](docs/ESIM.md)。
+- **Wi-Fi 中继**：连上已有的 Wi-Fi（家里、酒店、办公室）作为上网通道，自己的热点照常工作，省下蜂窝流量。
+  上游网络上不了网或者断开时，自动回到蜂窝网络，恢复后再切回。可以保存多个网络，按顺序连接；网页和触摸屏上都能开关。
+  见 [Wi-Fi 中继文档](docs/WIFI-UPLINK.md)。
 - **触摸屏面板（DevUI）**：设备 320×480 屏幕上的菜单，语言跟随网页控制台。最多显示四个页面，例如电池与系统概览、eSIM。
   见[屏幕文档](docs/SCREEN.md)。
 - **有校验的更新**：每次部署都会：
@@ -176,7 +179,7 @@ sh screen/build.sh --preview
 
 - [部署](docs/DEPLOYMENT.md)：解锁、安装、更新和恢复
 - [安全](docs/SAFETY.md)：保证设备能恢复的规则
-- [控制台](docs/DASHBOARD.md)、[触摸屏面板](docs/SCREEN.md)和 [eSIM](docs/ESIM.md)
+- [控制台](docs/DASHBOARD.md)、[触摸屏面板](docs/SCREEN.md)、[eSIM](docs/ESIM.md) 和 [Wi-Fi 中继](docs/WIFI-UPLINK.md)
 - [Agent API](docs/AGENT.md)
 - [操作手册](docs/OPERATIONS.md)：解锁、部署、验证和固件更新的逐步操作
 

@@ -825,6 +825,119 @@ def core_upload(stream, length):
     return core_status()
 
 
+# ── Wi-Fi relay (agent/src/wifi_uplink.rs) ──────────────────────────────────
+# The agent saves at once and its supervisor joins in the background, so the mock walks
+# connecting → obtaining_ip → checking → online over a few seconds after a change.
+
+UPLINK_MAX = 8
+UPLINK_SCAN = [
+    {"ssid": "Home-5G", "bssid": "02:00:00:00:10:01", "frequency": 5745, "band": "5", "channel": 149, "signal": -52, "security": "wpa2_wpa3", "supported": True},
+    {"ssid": "Home", "bssid": "02:00:00:00:10:02", "frequency": 2437, "band": "2.4", "channel": 6, "signal": -58, "security": "wpa2", "supported": True},
+    {"ssid": "Cafe Free Wi-Fi", "bssid": "02:00:00:00:10:03", "frequency": 2412, "band": "2.4", "channel": 1, "signal": -71, "security": "open", "supported": True},
+    {"ssid": "Office-WPA3", "bssid": "02:00:00:00:10:04", "frequency": 5180, "band": "5", "channel": 36, "signal": -66, "security": "wpa3", "supported": True},
+    {"ssid": "Corp-Enterprise", "bssid": "02:00:00:00:10:05", "frequency": 5220, "band": "5", "channel": 44, "signal": -74, "security": None, "supported": False},
+    {"ssid": "邻居家", "bssid": "02:00:00:00:10:06", "frequency": 2462, "band": "2.4", "channel": 11, "signal": -83, "security": "wpa2", "supported": True},
+]
+UPLINK = {"revision": 0, "enabled": False, "networks": [], "changed": 0.0, "rx": 0, "tx": 0, "login_until": 0.0, "signed_in": 0.0}
+# "Cafe Free Wi-Fi" has a captive portal: it needs a web login, and login mode "signs in"
+# a few seconds after it starts.
+UPLINK_PORTAL = "Cafe Free Wi-Fi"
+
+
+def uplink_status():
+    u, now = UPLINK, time.time()
+    nets = [{k: n[k] for k in ("id", "ssid", "security", "hidden")} | {"has_password": bool(n["password"])} for n in u["networks"]]
+    view = {"revision": u["revision"], "enabled": u["enabled"], "state": "off", "reason": None, "ssid": None, "bssid": None,
+            "frequency": None, "band": None, "channel": None, "network_id": None, "signal": None, "ip": None, "prefix": None,
+            "gateway": None, "dns": [], "online": False, "online_since": None, "online_for": None, "rx_bytes": 0, "tx_bytes": 0,
+            "portal_url": None, "login_remaining": None,
+            "networks": nets, "max_networks": UPLINK_MAX, "tools": {"wpa_supplicant": True, "udhcpc": True}}
+    if not u["enabled"]:
+        return view
+    elapsed = now - u["changed"]
+    seen = {s["ssid"]: s for s in UPLINK_SCAN}
+    # The first saved network that is "in range" and whose password is right.
+    target = next((n for n in u["networks"] if n["ssid"] in seen and (n["security"] == "open" or len(n["password"]) >= 8)), None)
+    if target is None or elapsed < 2:
+        reason = "No saved network is in range" if elapsed >= 6 and target is None else None
+        return view | {"state": "connecting", "reason": reason}
+    s = seen[target["ssid"]]
+    view |= {"ssid": s["ssid"], "bssid": s["bssid"], "frequency": s["frequency"], "band": s["band"], "channel": s["channel"],
+             "network_id": target["id"], "signal": s["signal"] + random.randint(-2, 2)}
+    if elapsed < 4:
+        return view | {"state": "obtaining_ip"}
+    view |= {"ip": "192.168.31.57", "prefix": 24, "gateway": "192.168.31.1", "dns": ["192.168.31.1"]}
+    if elapsed < 7:
+        return view | {"state": "checking"}
+    if s["ssid"] == UPLINK_PORTAL and not u["signed_in"]:
+        if u["login_until"] > now and now - (u["login_until"] - 600) >= 8:
+            u["signed_in"], u["login_until"] = now, 0.0
+        elif u["login_until"] > now:
+            return view | {"state": "logging_in", "portal_url": "http://wifi.cafe.example/login", "login_remaining": int(u["login_until"] - now)}
+        else:
+            return view | {"state": "needs_login", "portal_url": "http://wifi.cafe.example/login",
+                           "reason": "This network needs a web login; start login mode, then sign in from a phone or computer"}
+    up = int(elapsed - 7) if not u["signed_in"] else int(now - u["signed_in"])
+    return view | {"state": "online", "online": True, "online_since": int(device_now() - up), "online_for": up,
+                   "rx_bytes": up * 182_000, "tx_bytes": up * 21_000}
+
+
+def uplink_set(body):
+    u = UPLINK
+    if body.get("expected_revision") != u["revision"]:
+        raise Stale("Configuration changed; reload and try again")
+    networks = u["networks"]
+    if "networks" in body:
+        old = {n["id"]: n for n in u["networks"]}
+        next_id = max(old, default=0)
+        networks = []
+        for e in body["networks"]:
+            if "id" in e and e["id"] not in old:
+                raise ValueError("Network not found; reload and try again")
+            if any(n["ssid"] == e["ssid"] for n in networks):
+                raise ValueError("This network is already saved")
+            saved = old.get(e.get("id"))
+            if e["security"] == "open":
+                password = ""
+            elif e.get("password") is not None:
+                password = e["password"]
+            else:
+                password = saved["password"] if saved else ""
+            if e["security"] != "open" and not (8 <= len(password) <= 63 or len(password) == 64):
+                raise ValueError("Wi-Fi password must be 8–63 printable ASCII characters")
+            if saved is None:
+                next_id += 1
+            networks.append({"id": saved["id"] if saved else next_id, "ssid": e["ssid"], "security": e["security"],
+                             "password": password, "hidden": bool(e.get("hidden"))})
+        if len(networks) > UPLINK_MAX:
+            raise ValueError(f"At most {UPLINK_MAX} networks can be saved")
+    enabled = body.get("enabled", u["enabled"])
+    if enabled and not networks:
+        raise ValueError("Add an upstream Wi-Fi network first")
+    first = lambda nets: nets[0]["id"] if nets else None
+    if enabled != u["enabled"] or first(networks) != first(u["networks"]):
+        u["changed"] = time.time()
+        u["signed_in"] = u["login_until"] = 0.0
+    u.update(networks=networks, enabled=enabled, revision=u["revision"] + 1)
+    return uplink_status()
+
+
+def uplink_login(body):
+    u = UPLINK
+    if body.get("enabled"):
+        if uplink_status()["ip"] is None:
+            raise ValueError("Login mode needs a joined network with an address")
+        u["login_until"] = time.time() + 600
+    else:
+        u["login_until"] = 0.0
+    return uplink_status()
+
+
+def uplink_scan(body):
+    time.sleep(2.5)
+    return {"networks": UPLINK_SCAN}
+
+
 ROUTES_PUT = {
     "/api/proxy": proxy_set,
     "/api/clash": clash_set,
@@ -833,6 +946,7 @@ ROUTES_PUT = {
     "/api/device/charge-control": put_charge_control,
     "/api/ttl/set": put_ttl_set,
     "/api/wifi/settings": put_wifi_settings,
+    "/api/wifi/uplink": uplink_set,
     "/api/usb/mode": put_usb_mode,
     "/api/usb/default": put_usb_default,
     "/api/usb/powerbank": put_powerbank,
@@ -1055,6 +1169,7 @@ ROUTES_GET = {
     "/api/cpu": lambda: dashboard_batch()["cpu"],
     "/api/memory": lambda: dashboard_batch()["memory"],
     "/api/wifi/status": lambda: STATE["wifi"],
+    "/api/wifi/uplink": uplink_status,
     "/api/usb/status": lambda: STATE["usb"],
     "/api/device/charger": lambda: STATE["charger"],
     "/api/device/charge-control": lambda: STATE["charge_control"],
@@ -1111,6 +1226,8 @@ ROUTES_POST = {
     "/api/clash/core": core_action,
     "/api/esim": esim_action,
     "/api/esim/delete": esim_delete,
+    "/api/wifi/uplink/scan": uplink_scan,
+    "/api/wifi/uplink/login": uplink_login,
     "/api/sms/list": lambda body: sms_list(),
     "/api/system/kill-bloat": lambda body: {
         "killed": [

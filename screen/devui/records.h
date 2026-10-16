@@ -43,6 +43,14 @@ struct esim_info {
   char card[9], kind[16], state[12], step[40], error[97];
   struct esim_row rows[8];
 };
+/* The Wi-Fi uplink: no password, BSSID or gateway. state is one letter: o off,
+ * u unavailable, c connecting, d getting an address, k checking, n online, i no internet,
+ * p needs a web login, g login mode (traffic on Wi-Fi until signed in). */
+struct uplink_info {
+  int has, enabled, saved, has_signal, signal;
+  unsigned long long rev, rx, tx, since;
+  char state, reason[12], ssid[65], band[4], ip[16];
+};
 struct group_row { int index, selectable, members, now; char type[16], name[193], now_name[193]; };
 /* state: -1 no answer, 0 loading, 1 ready, 2 Clash not running. */
 struct groups_view { int state, total, offset, n; unsigned long long gen; struct group_row rows[4]; };
@@ -211,6 +219,24 @@ static void parse_esim_row(char **f, int n, struct esim_info *e) {
   COPY(r->cls, f[3]);
   copy_name(r->name, sizeof(r->name), f[4]);
   COPY(r->tail, f[5]);
+}
+/* R revision enabled state reason ssid signal band ip rx tx online_since saved */
+static void parse_uplink(char **f, int n, struct uplink_info *u) {
+  if (n < 13 || !f[3][0] || f[3][1] || !strchr("oucdknipg", f[3][0])) return;
+  u->rev = u64_field(f[1]);
+  u->enabled = atoi(f[2]) != 0;
+  u->state = f[3][0];
+  COPY(u->reason, f[4]);
+  copy_name(u->ssid, sizeof(u->ssid), f[5]);
+  u->has_signal = strcmp(f[6], "-") != 0;
+  u->signal = u->has_signal ? atoi(f[6]) : 0;
+  COPY(u->band, f[7]);
+  COPY(u->ip, f[8]);
+  u->rx = u64_field(f[9]);
+  u->tx = u64_field(f[10]);
+  u->since = u64_field(f[11]);
+  u->saved = atoi(f[12]);
+  u->has = 1;
 }
 /* Reply to "groups <offset>": G state generation total offset, g rows. */
 static int parse_groups(char *buf, struct groups_view *out) {

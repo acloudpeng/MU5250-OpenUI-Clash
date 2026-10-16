@@ -19,7 +19,7 @@ canonical routing table; this document summarizes it.
 
 Every route below has a dashboard consumer, and every call the dashboard makes
 is a route below — `scripts/check-api-contract.py` enforces both directions
-(plus that the mock agent stays in step). 74 paths / 90 method+path pairs.
+(plus that the mock agent stays in step). 77 paths / 94 method+path pairs.
 
 | Family | Endpoints |
 |---|---|
@@ -30,6 +30,7 @@ is a route below — `scripts/check-api-contract.py` enforces both directions
 | Device | `GET /api/device/battery-info`, `/api/device/thermal/all`, `/api/device/battery/detail`, `/api/device/charger`; `POST /api/device/reboot`, `/api/device/shutdown` |
 | System | `POST /api/system/restart-agent`, `/api/system/kill-bloat` |
 | Wi-Fi | `GET /api/wifi/status`, `PUT /api/wifi/settings` |
+| Wi-Fi relay | `GET+PUT /api/wifi/uplink` — join an upstream Wi-Fi network and route all traffic over it while it reaches the internet, with cellular fallback; `POST /api/wifi/uplink/scan`; `POST /api/wifi/uplink/login` (login mode for captive portals). See [WIFI-UPLINK.md](WIFI-UPLINK.md) |
 | Modem | `PUT /api/data-usage/reset-day`, `PUT /api/modem/network-mode` |
 | Cell/band lock | `POST /api/cell/lock/nr`, `/api/cell/lock/lte`, `/api/cell/lock/reset`, `/api/cell/band/nr`, `/api/cell/band/lte`, `/api/cell/band/reset` |
 | Router | `GET+PUT /api/router/dns`, `/api/router/lan`, `/api/router/apn/mode`; `GET+POST /api/router/apn/profiles`; `POST /api/router/apn/profiles/delete`, `/api/router/apn/profiles/activate` |

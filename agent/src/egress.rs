@@ -36,6 +36,27 @@ pub fn run(program: &str, args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&o.stdout).trim().into())
 }
 
+/// Runs a generated network script; `label` names the feature in errors.
+pub fn script(label: &str, text: &str) -> Result<(), String> {
+    let mut cmd = Command::new("sh");
+    let out = process_runner::output(
+        &mut cmd,
+        Some(text.as_bytes()),
+        Duration::from_secs(90),
+        32768,
+    )
+    .map_err(|_| format!("{label} network operation timed out"))?;
+    if !out.status.success() {
+        // Generated policy contains only validated non-secret network identifiers.
+        let msg = String::from_utf8_lossy(&out.stderr);
+        return Err(format!(
+            "{label} network operation failed: {}",
+            msg.chars().take(350).collect::<String>()
+        ));
+    }
+    Ok(())
+}
+
 impl Egress {
     fn hooks(&self) -> [(&'static str, &'static str, &'static str, String); 8] {
         let p = self.prefix;
@@ -229,24 +250,7 @@ done
         )
     }
     pub fn script(&self, text: &str) -> Result<(), String> {
-        let mut cmd = Command::new("sh");
-        let out = process_runner::output(
-            &mut cmd,
-            Some(text.as_bytes()),
-            Duration::from_secs(90),
-            32768,
-        )
-        .map_err(|_| format!("{} network operation timed out", self.label))?;
-        if !out.status.success() {
-            // Generated policy contains only validated non-secret network identifiers.
-            let msg = String::from_utf8_lossy(&out.stderr);
-            return Err(format!(
-                "{} network operation failed: {}",
-                self.label,
-                msg.chars().take(350).collect::<String>()
-            ));
-        }
-        Ok(())
+        script(self.label, text)
     }
     /// Whether the transition guard is in place. Only meaningful under the backend's lock,
     /// where no transaction can be running: a guard seen then was left by a failed one.

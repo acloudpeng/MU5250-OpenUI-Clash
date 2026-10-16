@@ -24,6 +24,7 @@ use crate::sim;
 use crate::sms;
 use crate::usb;
 use crate::wifi;
+use crate::wifi_uplink;
 use crate::wireguard;
 
 /// How long a worker blocks before re-checking whether the listener died.
@@ -374,6 +375,10 @@ pub fn route(
         // WiFi
         (&Method::Get, "/api/wifi/status") => wifi::wifi_status(state),
         (&Method::Put, "/api/wifi/settings") => wifi::wifi_set(state, body),
+        (&Method::Get, "/api/wifi/uplink") => wifi_uplink::get(),
+        (&Method::Put, "/api/wifi/uplink") => wifi_uplink::update(body),
+        (&Method::Post, "/api/wifi/uplink/scan") => wifi_uplink::scan(),
+        (&Method::Post, "/api/wifi/uplink/login") => wifi_uplink::login(body),
         // Modem
         (&Method::Put, "/api/data-usage/reset-day") => {
             handlers::data_usage_reset_day_set(state, body)

@@ -76,6 +76,7 @@ struct snapshot {
   struct core_info core;
   struct diag_info diag;
   struct esim_info esim;
+  struct uplink_info uplink;
   char failure[97]; /* the agent's message for failed_job */
   struct row rows[MAX_ROWS];
 };
@@ -86,10 +87,11 @@ static int screen_awake = 1;
 #endif
 /* Menu features first (their numbers are the settings record's page bits), then pages
  * reached from them. */
-enum { WG, DEVICES, MENU, PROFILES, OVERVIEW, PROXY, CLASH, ESIM, NODES, GROUP, SUBS, CORE, DIAG };
+enum { WG, DEVICES, MENU, PROFILES, OVERVIEW, PROXY, CLASH, ESIM, UPLINK, NODES, GROUP, SUBS, CORE, DIAG };
 #define LEGACY_PAGES 27  /* features of a C record: WireGuard, devices, profiles, overview */
 #define MENU_PAGES 123   /* features of a V record: the above plus proxy and Clash */
 #define ESIM_MENU_PAGES 251 /* features of a W record: the above plus eSIM */
+#define UPLINK_MENU_PAGES 507 /* features of a Y record: the above plus the Wi-Fi uplink */
 static int page = MENU, offset, dialog, dirty, quitting, need_draw = 1,
                                                   return_after_save;
 static unsigned long long settings_revision;
@@ -101,14 +103,16 @@ static int settings_zh = 1;
  * the stock UI (also with older agents, whose W records end at the language). */
 static int settings_sleep = 0;
 #define L(en, zh) (settings_zh ? (zh) : (en))
-static int visible_page(int p) { return p == MENU || (p <= ESIM && (settings_menu & (1 << p))); }
+static int visible_page(int p) { return p == MENU || (p <= UPLINK && (settings_menu & (1 << p))); }
 /* Saved profiles and device routing belong to WireGuard; node, subscription and core
- * pages to Clash; diagnostics to Clash and Proxy. */
+ * pages to Clash; diagnostics to Clash and Proxy; the Wi-Fi uplink also to Overview,
+ * which shows it when the agent reports one. */
 static int reachable(int p) {
   switch (p) {
   case PROFILES: case DEVICES: return visible_page(p) || visible_page(WG);
   case NODES: case GROUP: case SUBS: case CORE: return visible_page(CLASH);
   case DIAG: return visible_page(CLASH) || visible_page(PROXY);
+  case UPLINK: return visible_page(UPLINK) || (visible_page(OVERVIEW) && data.uplink.has);
   default: return visible_page(p);
   }
 }
@@ -125,7 +129,7 @@ static unsigned long long pending, pending_revision, chosen_profile, chosen_revi
 static char chosen_name[193];
 static char notice[128], failure_text[97];
 /* What the pending job does, for its labels and its completion. */
-enum { JOB_WG = 1, JOB_BACKEND, JOB_MODE, JOB_SUB, JOB_REFRESH, JOB_SELECT, JOB_DELAY, JOB_CORE, JOB_DIAG, JOB_ESIM };
+enum { JOB_WG = 1, JOB_BACKEND, JOB_MODE, JOB_SUB, JOB_REFRESH, JOB_SELECT, JOB_DELAY, JOB_CORE, JOB_DIAG, JOB_ESIM, JOB_UPLINK };
 static int pending_kind;
 /* When the panel stops waiting for the pending job's outcome. */
 static long long pending_deadline;
@@ -139,7 +143,7 @@ static long long monotonic_ms(void) {
  * the start of a diagnosis answers in seconds. Past it the job is taken as lost. */
 static long long job_wait_ms(int kind) {
   /* An eSIM action only starts the agent's own job, which its Q record then follows. */
-  return kind == JOB_SELECT || kind == JOB_DELAY || kind == JOB_DIAG || kind == JOB_ESIM ? 60000 : 180000;
+  return kind == JOB_SELECT || kind == JOB_DELAY || kind == JOB_DIAG || kind == JOB_ESIM || kind == JOB_UPLINK ? 60000 : 180000;
 }
 static void amount(char *out, size_t n, unsigned long long v) {
   if (v >= 1073741824)
@@ -164,11 +168,11 @@ static int applying(int clash) {
 /* Proxy groups and the open group's nodes, fetched while their pages are shown. */
 static struct groups_view groups;
 static struct nodes_view nodes;
-static int group_offset, node_offset, open_group, diag_offset, diag_from = MENU, esim_offset;
+static int group_offset, node_offset, open_group, diag_offset, diag_from = MENU, esim_offset, uplink_from = MENU;
 static unsigned long long open_gen;
 static long long page_fetch_at;
 /* The confirmation dialog (5) and the subscription dialog (6). */
-enum { CF_BACKEND = 1, CF_UPDATE, CF_ROLLBACK, CF_GEO, CF_ESIM, CF_REBOOT };
+enum { CF_BACKEND = 1, CF_UPDATE, CF_ROLLBACK, CF_GEO, CF_ESIM, CF_REBOOT, CF_UPLINK };
 static char confirm_req[96];
 static int confirm_what, confirm_target, confirm_job;
 static unsigned long long confirm_rev, chosen_sub, chosen_sub_rev;
@@ -195,8 +199,9 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
   char *save, *line = strtok_r(buf, "\n", &save);
   int valid = 0, v_ok = 0, v_idle = 0, v_level = 0, v_home = 0, v_mask = 0;
   int w_ok = 0, w_idle = 0, w_level = 0, w_home = 0, w_mask = 0, w_sleep = 0;
-  unsigned long long v_rev = 0, w_rev = 0;
-  char v_lang[4] = "zh", w_lang[4] = "zh";
+  int y_ok = 0, y_idle = 0, y_level = 0, y_home = 0, y_mask = 0, y_sleep = 0;
+  unsigned long long v_rev = 0, w_rev = 0, y_rev = 0;
+  char v_lang[4] = "zh", w_lang[4] = "zh", y_lang[4] = "zh";
   while (line) {
     if (line[0] == 'S' &&
         sscanf(line, "S %llu %d %d %d %d %llu %llu %llu %d %llu", &s.rev,
@@ -241,10 +246,22 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
         snprintf(w_lang, sizeof(w_lang), "%s", lang);
       }
     }
+    /* Y: the same with the Wi-Fi uplink; preferred over W. */
+    else if (line[0] == 'Y') {
+      char lang[4] = "";
+      if (sscanf(line, "Y %llu %d %d %d %d %3s %d", &y_rev, &y_idle, &y_level, &y_home, &y_mask, lang, &y_sleep) == 7 &&
+          (y_sleep == 0 || y_sleep == 1) && (!strcmp(lang, "zh") || !strcmp(lang, "en")) &&
+          y_idle >= 30 && y_idle <= 600 && y_level >= 20 && y_level <= 255 &&
+          y_home >= 0 && y_home <= UPLINK && y_mask > 0 && !(y_mask & ~UPLINK_MENU_PAGES) &&
+          (y_home == MENU || (y_mask & (1 << y_home)))) {
+        y_ok = 1;
+        snprintf(y_lang, sizeof(y_lang), "%s", lang);
+      }
+    }
     else if (line[0] == 'J')
       /* fresh, the newest job the records already show, is absent from older agents. */
       s.has_fresh = sscanf(line, "J %d %llu %llu %d %llu", &s.busy, &s.job, &s.done, &s.result, &s.fresh) == 5;
-    else if (line[0] && strchr("BKUMXxEQq", line[0]) && line[1] == '\t') {
+    else if (line[0] && strchr("BKUMXxEQqR", line[0]) && line[1] == '\t') {
       char *f[16];
       int n = split_tabs(line, f, 16);
       switch (f[0][0]) {
@@ -257,6 +274,7 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
       case 'E': if (n >= 3) { s.failed_job = u64_field(f[1]); COPY(s.failure, f[2]); } break;
       case 'Q': parse_esim(f, n, &s.esim); break;
       case 'q': parse_esim_row(f, n, &s.esim); break;
+      case 'R': parse_uplink(f, n, &s.uplink); break;
       }
     }
     else if (line[0] == 'O')
@@ -294,7 +312,10 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
     }
     line = strtok_r(NULL, "\n", &save);
   }
-  if (w_ok) {
+  if (y_ok) {
+    s.settings_rev = y_rev; s.idle_seconds = y_idle; s.brightness = y_level; s.idle_sleep = y_sleep;
+    s.home_page = y_home; s.menu_mask = y_mask; s.zh = strcmp(y_lang, "en") != 0;
+  } else if (w_ok) {
     s.settings_rev = w_rev; s.idle_seconds = w_idle; s.brightness = w_level; s.idle_sleep = w_sleep;
     s.home_page = w_home; s.menu_mask = w_mask; s.zh = strcmp(w_lang, "en") != 0;
   } else if (v_ok) {
@@ -428,6 +449,7 @@ static const char *job_failure(int kind, int result) {
   case JOB_CORE: return L("The core request was refused.", "内核请求被拒绝。");
   case JOB_DIAG: return L("Diagnostics could not start.", "无法启动诊断。");
   case JOB_ESIM: return L("The eSIM request was refused.", "eSIM 请求被拒绝。");
+  case JOB_UPLINK: return L("The Wi-Fi relay could not be switched.", "无法切换 Wi-Fi 中继。");
   default: return L("Apply failed. Check OpenUI.", "应用失败，请在 OpenUI 中检查。");
   }
 }
@@ -1603,6 +1625,82 @@ static void esim_tests(struct drm_buf *b,const char *dir) {
   settings_menu=80;assert(!reachable(ESIM));page=MENU;render(b);assert(!strstr(html,"act:esim"));
   puts("PASS eSIM page (zh/en): W settings record, profile records, switch and restart confirmations, paging, stale generations, running jobs and card states");
 }
+/* The Wi-Fi relay page: Y settings, the R record, Overview's row, switching and states. */
+static void uplink_tests(struct drm_buf *b,const char *dir) {
+  char text[4096];
+  struct snapshot s,prefs;
+  unsigned long long now=(unsigned long long)time(NULL);
+  reset_job();
+  snprintf(text,sizeof(text),
+    "S 7 1 0 0 0 0 0 0 1 %llu\nO 83 320 18372 34.5 12.4\n"
+    "B\toff\t0\t7\t1\t-\t0\t12\t1\t-\t0\n"
+    "R\t6\t1\tn\t-\t\xF0\x9F\x8F\xA8 Hotel 酒店 5G\t-58\t5\t192.168.50.23\t734003200\t52428800\t%llu\t2\n"
+    "C 50 90 200 2 27 zh\nV 50 90 200 2 112 zh\nW 50 90 200 2 208 zh 1\nY 50 90 200 2 464 zh 1\nJ 0 5 5 0 5\n.\n",now,now-3725);
+  assert(parse_snapshot(text,&s)&&s.uplink.has&&s.uplink.enabled&&s.uplink.state=='n'&&s.uplink.rev==6);
+  assert(!strcmp(s.uplink.ssid,"Hotel 酒店 5G")&&s.uplink.has_signal&&s.uplink.signal==-58&&!strcmp(s.uplink.band,"5"));
+  assert(!strcmp(s.uplink.ip,"192.168.50.23")&&s.uplink.saved==2&&!strcmp(s.uplink.reason,""));
+  data=s;assert(update_settings(&data)&&settings_menu==464&&visible_page(UPLINK)&&visible_page(ESIM)&&!visible_page(PROXY));
+  /* Y wins over W; without Y (or with a bad one) W applies, which has no relay. */
+  char no_y[]="W 51 90 200 2 240 zh 1\n.\n",bad_y[]="W 52 90 200 2 240 zh 1\nY 52 90 200 2 1488 zh 1\n.\n";
+  char short_y[]="W 53 90 200 2 240 zh 1\nY 53 90 200 2 464 zh\n.\n",home_y[]="W 54 90 200 2 240 en 1\nY 54 90 200 8 464 en 0\n.\n";
+  assert(parse_snapshot(no_y,&prefs)&&update_settings(&prefs)&&settings_menu==240&&!visible_page(UPLINK));
+  assert(parse_snapshot(bad_y,&prefs)&&update_settings(&prefs)&&settings_menu==240);
+  assert(parse_snapshot(short_y,&prefs)&&update_settings(&prefs)&&settings_menu==240);
+  assert(parse_snapshot(home_y,&prefs)&&update_settings(&prefs)&&settings_home==UPLINK&&!settings_zh&&!settings_sleep);
+  /* A malformed R record is ignored. */
+  char bad_r[]="V 55 90 200 2 112 zh\nR\t6\t1\tz\t-\tX\t-\t-\t-\t0\t0\t0\t1\nR\t6\t1\tn\n.\n";
+  assert(parse_snapshot(bad_r,&prefs)&&!prefs.uplink.has);
+  settings_zh=1;settings_menu=464;
+  page=MENU;capture_both(b,dir,"menu-uplink");assert(strstr(html,"act:uplink")&&strstr(html,"Hotel"));
+  press_id(b,"uplink");assert(page==UPLINK);capture_both(b,dir,"uplink");
+  assert(strstr(html,"192.168.50.23")&&strstr(html,"Traffic: Wi-Fi")&&strstr(html,"-58 dBm"));
+  /* Turning off asks first and names the revision shown. */
+  press_id(b,"utoggle");assert(dialog==5&&confirm_what==CF_UPLINK&&!confirm_target&&confirm_rev==6);
+  capture_both(b,dir,"uplink-confirm-off");
+  press_id(b,"confirm");expect_request("uplink 6 off\n");assert(pending_kind==JOB_UPLINK&&!dialog&&job_wait_ms(JOB_UPLINK)==60000);
+  capture(b,dir,"uplink-applying");assert(strstr(html,"正在应用"));
+  /* A newer revision saved elsewhere answers a conflict. */
+  data.job=data.done=data.fresh=pending;data.has_fresh=1;data.result=1;data.failed_job=pending;
+  snprintf(data.failure,sizeof(data.failure),"Configuration changed; reload and try again");
+  settle_jobs();assert(dialog==3&&!pending&&strstr(notice,"设置已被更改"));capture(b,dir,"uplink-conflict");
+  press_id(b,"refresh");assert(!dialog&&page==UPLINK);reset_job();data.result=0;
+  /* States: wrong password while connecting, no internet, unavailable, off. */
+  data.uplink.state='c';snprintf(data.uplink.reason,sizeof(data.uplink.reason),"password");data.uplink.ip[0]=0;data.uplink.has_signal=0;
+  data.uplink.ssid[0]=0;capture_both(b,dir,"uplink-password");assert(!strstr(html,"Traffic: Wi-Fi")&&strstr(html,"Wrong Wi-Fi password"));
+  data.uplink.state='i';snprintf(data.uplink.reason,sizeof(data.uplink.reason),"internet");
+  snprintf(data.uplink.ssid,sizeof(data.uplink.ssid),"Cafe");snprintf(data.uplink.ip,sizeof(data.uplink.ip),"10.0.0.8");
+  capture_both(b,dir,"uplink-nointernet");assert(strstr(html,"no internet")&&strstr(html,"id=\"ulogin\" href=\"act:ulogin\""));
+  /* A web login: login mode starts at once (no confirmation), then traffic is on Wi-Fi. */
+  data.uplink.state='p';snprintf(data.uplink.reason,sizeof(data.uplink.reason),"portal");
+  capture_both(b,dir,"uplink-portal");assert(strstr(html,"web login")&&strstr(html,"Start login"));
+  press_id(b,"ulogin");expect_request("uplink login\n");assert(pending_kind==JOB_UPLINK&&!dialog);reset_job();
+  data.uplink.state='g';data.uplink.reason[0]=0;
+  capture_both(b,dir,"uplink-login");assert(strstr(html,"Traffic: Wi-Fi")&&strstr(html,"id=\"ulogin\" href=\"act:none\""));
+  data.uplink.state='i';snprintf(data.uplink.reason,sizeof(data.uplink.reason),"internet");
+  data.uplink.state='u';snprintf(data.uplink.reason,sizeof(data.uplink.reason),"supplicant");data.uplink.ssid[0]=0;data.uplink.ip[0]=0;
+  capture(b,dir,"uplink-unavailable");assert(strstr(html,"wpa_supplicant"));
+  data.uplink.state='o';data.uplink.enabled=0;data.uplink.reason[0]=0;data.uplink.rx=data.uplink.tx=0;
+  capture_both(b,dir,"uplink-off");
+  press_id(b,"utoggle");assert(dialog==5&&confirm_target==1);capture_both(b,dir,"uplink-confirm-on");
+  press_id(b,"confirm");expect_request("uplink 6 on\n");reset_job();
+  /* Nothing saved: turning on is refused here, networks are added on the webpage. */
+  data.uplink.saved=0;render(b);assert(strstr(html,"id=\"utoggle\" href=\"act:none\""));capture(b,dir,"uplink-empty");
+  test_request[0]=0;press_id(b,"utoggle");assert(!test_request[0]&&!dialog);
+  data.uplink.saved=2;
+  /* Stale status disables the switch. */
+  data.stamp=now-20;render(b);assert(strstr(html,"id=\"utoggle\" href=\"act:none\""));data.stamp=now;
+  press_id(b,"back");assert(page==MENU);
+  /* Overview shows the relay without the menu item and goes back to Overview. */
+  settings_menu=240;data.uplink.state='n';data.uplink.enabled=1;snprintf(data.uplink.ssid,sizeof(data.uplink.ssid),"Hotel 酒店 5G");
+  assert(!visible_page(UPLINK)&&reachable(UPLINK));
+  page=MENU;render(b);assert(!strstr(html,"act:uplink"));
+  settings_menu=240;page=OVERVIEW;capture_both(b,dir,"overview-uplink");
+  press_id(b,"uplink");assert(page==UPLINK&&uplink_from==OVERVIEW);press_id(b,"back");assert(page==OVERVIEW);
+  /* An agent without the relay: no row, and the page is not reachable. */
+  data.uplink.has=0;assert(!reachable(UPLINK));render(b);assert(!strstr(html,"act:uplink"));
+  page=UPLINK;track_status(0);assert(page==MENU);
+  puts("PASS Wi-Fi relay page (zh/en): Y settings record, R record, menu and Overview rows, on/off confirmations, conflicts and states");
+}
 int main(int argc, char **argv) {
   power_self_test();
   if(argc<2)return 2;
@@ -1679,6 +1777,7 @@ int main(int argc, char **argv) {
   puts("PASS DevUI HTML hit testing, menu navigation, profile version capture, device pagination/drafts, escaping, confirmations, disabled states and rotation");
   proxy_tests(&b,argv[1]);
   esim_tests(&b,argv[1]);
+  uplink_tests(&b,argv[1]);
   free(b.map);
   return 0;
 }

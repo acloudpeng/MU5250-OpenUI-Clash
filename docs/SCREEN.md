@@ -138,6 +138,17 @@ scripts or shell commands.
   the page also reads it on entry until it has been read once. **Restart device** is
   enabled only while a switch waits for the firmware, and asks first. Downloading,
   renaming, deleting and notifications stay on the webpage. See [ESIM.md](ESIM.md).
+- **Wi-Fi relay:** the Wi-Fi uplink: state (on Wi-Fi, connecting, getting an address,
+  checking, no internet, needs web login, login mode, unavailable or off) with the reason when it is not carrying
+  traffic, whether traffic uses Wi-Fi or mobile data, the network name, signal and band,
+  address, time online and traffic since the client interface was added. **Turn on** /
+  **Turn off** asks first; turning on needs a saved network. Networks and passwords are
+  added on the webpage (no text entry on the screen). For a network that needs a web
+  login (or has no internet) **Start login** sits next to **Turn off** and starts ten
+  minutes of login mode at once; the login itself happens in a browser on a phone or
+  computer on the hotspot. A menu item of its own, and a row
+  on **Overview** whenever the agent reports the uplink, so it is reachable without
+  changing the menu; it returns to the page it was opened from.
 - **Saved profiles:** up to five named profiles. Switching preserves the current
   enable state and device routing; confirmation remembers the profile ID and
   WireGuard revision to prevent overwriting concurrent webpage edits.
@@ -219,14 +230,19 @@ python3 scripts/verify-devui-settings.py --gateway 192.168.0.1 --port 2222 \
   older screen knows (with WireGuard, Proxy or Clash chosen it keeps the WireGuard, Saved
   profiles and Device routing pages for them); `V` carries the choice for screens built
   before eSIM (pages 5 Proxy and 6 Clash; the menu instead of an eSIM startup page); `W`
-  carries the full choice (page 7 eSIM) and then the idle action (`1` turns the screen
-  off and stays, `0` returns to the stock UI). Screens built before the idle action read
-  six fields and return to the stock UI. Each screen uses the newest record it accepts.
+  carries the choice for screens built before the Wi-Fi relay (page 7 eSIM; the menu
+  instead of a relay startup page) and then the idle action (`1` turns the screen off
+  and stays, `0` returns to the stock UI); `Y` carries the full choice (page 8 Wi-Fi
+  relay) with the idle action. Screens built before the idle action read six fields of
+  `W` and return to the stock UI. Each screen uses the newest record it accepts.
   Tab-separated proxy records follow: `B` (active backend, conflict, per-backend
   revision, readiness and reason code), `K` (Clash summary), `U` (subscriptions, no
   URLs), `M` (core versions and job), `X`/`x` (diagnostics verdict and checks) and `E`
   (the agent's message for the last failed job), `Q` and `q` (eSIM card, job and
-  profiles; no EID, only an ICCID's last four digits). `J` ends with the newest job the
+  profiles; no EID, only an ICCID's last four digits) and `R` (the Wi-Fi uplink:
+  revision, on/off, a one-letter state, a reason code, network name, signal, band,
+  address, traffic, online-since time and the number of saved networks; no password,
+  BSSID or gateway; older screens ignore it). `J` ends with the newest job the
   records already reflect. The reply stays under 40 KiB.
 - Queries `groups <offset>` and `nodes <gen> <group> <offset>` return four rows at a
   time from a proxies view the agent refreshes only while the screen asks; groups and
@@ -239,12 +255,14 @@ python3 scripts/verify-devui-settings.py --gateway 192.168.0.1 --port 2222 \
   `csub`, `crefresh`, `select`, `delay`, `core check|update <tag>|rollback|geodata`
   `diag`, `esim scan`, `esim enable <generation> <index>` (a profile of the list the
   screen shows; a newer list answers `ERR Stale`) and `esim reboot` (only while a switch
-  waits for a restart), plus the WireGuard `toggle`, `devices` and `profile` kept for older
+  waits for a restart), `uplink login` (login mode), `uplink <rev> on|off` (the uplink's saved revision; a newer one
+  answers a conflict), plus the WireGuard `toggle`, `devices` and `profile` kept for older
   screens. Revisioned actions return 409 conflicts as "Settings changed". One job runs
   at a time; jobs execute in the agent and continue after screen exit. A job always
   reports a result, even if its thread fails; the screen stops waiting after 180 s
-  (60 s for node selection, delay tests and diagnostics) and says no result arrived. Status older
-  than ten seconds disables mutation controls.
+  (60 s for node selection, delay tests, diagnostics, eSIM actions and the relay
+  switch) and says no result arrived. Status older than ten seconds disables mutation
+  controls.
 
 The independent supervisor checks factory boot synchronization and records the
 stock UI, touch process and brightness before taking over. The display uses RGB565
