@@ -60,6 +60,31 @@ pub enum Job {
     Uplink { revision: u64, enabled: bool },
     /// `uplink login`: ten minutes of login mode for a network that wants a web login.
     UplinkLogin,
+    /// Pocket OS toolbox actions: stock UI switch, Wi-Fi/USB/Network/TTL/Power/System controls.
+    Tool(Tool),
+}
+
+/// Pocket OS toolbox actions from the panel.
+#[derive(Debug, PartialEq)]
+pub enum Tool {
+    /// Return to the ZTE stock UI (`ztedevui`) cleanly.
+    StockUi,
+    /// Toggle 2.4GHz ("2g") or 5GHz ("5g") Wi-Fi radio.
+    WifiToggle { band: String, enabled: bool },
+    /// Switch USB mode (`rndis`, `cdc_ncm`, `mtp`, `charge_only`) with optional ADB.
+    UsbMode { mode: String, adb: bool },
+    /// Switch cellular network mode (`5g_sa_nsa`, `5g_sa`, `5g_nsa`, `4g_only`, `auto`).
+    NetMode { mode: String },
+    /// Set IPv4/IPv6 hop limit / TTL (`0` clears TTL mangling, `64`/`65`/`128` applies it).
+    Ttl { value: u16 },
+    /// Toggle charging (`true` resumes, `false` pauses).
+    ChargeSwitch { enabled: bool },
+    /// Set charge stop limit (`70`..=`90` enables hysteresis, `100` disables limit).
+    ChargeLimit { max_level: u8 },
+    /// Kill ZTE carrier/telemetry bloatware processes to free RAM.
+    KillBloat,
+    /// Drop Linux pagecache/dentries/inodes (`sync` + `/proc/sys/vm/drop_caches`).
+    DropCaches,
 }
 
 /// eSIM work from the panel. Profiles come back as indices into the card view of
@@ -191,6 +216,43 @@ pub fn parse(line: &str) -> Result<Request, &'static str> {
             revision: revision(rev)?,
             enabled: *value == "on",
         }),
+        ["stockui"] => job(Job::Tool(Tool::StockUi)),
+        ["wifi", band @ ("2g" | "5g"), value @ ("0" | "1")] => job(Job::Tool(Tool::WifiToggle {
+            band: (*band).into(),
+            enabled: *value == "1",
+        })),
+        ["usb", mode @ ("rndis" | "cdc_ncm" | "mtp" | "charge_only"), adb @ ("0" | "1")] => {
+            job(Job::Tool(Tool::UsbMode {
+                mode: (*mode).into(),
+                adb: *adb == "1",
+            }))
+        }
+        ["netmode", mode @ ("5g_sa_nsa" | "5g_sa" | "5g_nsa" | "4g_only" | "auto")] => {
+            job(Job::Tool(Tool::NetMode {
+                mode: (*mode).into(),
+            }))
+        }
+        ["ttl", val] => {
+            let v = number(val, "Invalid TTL")?;
+            if !matches!(v, 0 | 64 | 65 | 128) {
+                return Err("Invalid TTL");
+            }
+            job(Job::Tool(Tool::Ttl { value: v as u16 }))
+        }
+        ["charge", "switch", value @ ("0" | "1")] => job(Job::Tool(Tool::ChargeSwitch {
+            enabled: *value == "1",
+        })),
+        ["charge", "limit", level] => {
+            let lvl = number(level, "Invalid charge limit")?;
+            if !matches!(lvl, 70 | 80 | 90 | 100) {
+                return Err("Invalid charge limit");
+            }
+            job(Job::Tool(Tool::ChargeLimit {
+                max_level: lvl as u8,
+            }))
+        }
+        ["bloat", "kill"] => job(Job::Tool(Tool::KillBloat)),
+        ["cache", "drop"] => job(Job::Tool(Tool::DropCaches)),
         [_, _, _, _] | [_, _, _] | [_, _] | [_] => Err("Unsupported action"),
         _ => Err("Invalid action"),
     }
@@ -534,6 +596,50 @@ pub fn diag_records(v: &Value) -> String {
     }
     out
 }
+/// `H\trssi\trsrp\trsrq\tsinr\tradio\tband\tnet_select\tlte_bands\tnr_bands\tpci\tkbps_down\tkbps_up\tcpu_pct\tmem_pct\ttemp_mc\tbloat_cnt\twifi_2g_on\twifi_5g_on\twifi_clients\twifi_ssid\tusb_mode\tusb_adb\tttl_val\tchg_enabled\tchg_limit_on\tchg_max\tchg_stop\tchg_start\tbatt_mv\tbatt_ma\tbatt_health`
+/// Extended Pocket OS telemetry record for Signal, Wi-Fi, Power, Toolbox, and System subpages.
+pub fn toolbox_record(v: &Value) -> String {
+    let i = |k: &str| v[k].as_i64().unwrap_or(0);
+    let u = |k: &str| v[k].as_u64().unwrap_or(0);
+    let b = |k: &str| u8::from(v[k] == true);
+    let w = |k: &str, max: usize| word(v[k].as_str().unwrap_or(""), max);
+    let t = |k: &str, max: usize| text_bytes(v[k].as_str().unwrap_or(""), max);
+    format!(
+        "H\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+        i("rssi"),
+        i("rsrp"),
+        i("rsrq"),
+        i("sinr"),
+        w("radio", 12),
+        t("band", 24),
+        w("net_select", 16),
+        t("lte_bands", 24),
+        t("nr_bands", 24),
+        t("pci", 12),
+        u("kbps_down"),
+        u("kbps_up"),
+        u("cpu_pct"),
+        u("mem_pct"),
+        i("temp_mc"),
+        u("bloat_cnt"),
+        b("wifi_2g_on"),
+        b("wifi_5g_on"),
+        u("wifi_clients"),
+        t("wifi_ssid", 32),
+        w("usb_mode", 16),
+        b("usb_adb"),
+        u("ttl_val"),
+        b("chg_enabled"),
+        b("chg_limit_on"),
+        u("chg_max"),
+        u("chg_stop"),
+        u("chg_start"),
+        u("batt_mv"),
+        i("batt_ma"),
+        w("batt_health", 16),
+    )
+}
+
 /// The status reply: fixed records, then device rows while they fit, then the tail.
 pub fn status(head: &[&str], devices: &[String], tail: &str) -> String {
     let fixed = head.iter().map(|s| s.len()).sum::<usize>() + tail.len();
@@ -1232,5 +1338,90 @@ mod tests {
             assert_eq!(uplink_reason(Some(reason)), code, "{reason}");
         }
         assert_eq!(uplink_reason(None), "-");
+    }
+    #[test]
+    fn toolbox_requests_and_record() {
+        assert_eq!(parse("stockui"), Ok(Request::Job(Job::Tool(Tool::StockUi))));
+        assert_eq!(
+            parse("wifi 5g 1"),
+            Ok(Request::Job(Job::Tool(Tool::WifiToggle {
+                band: "5g".into(),
+                enabled: true
+            })))
+        );
+        assert_eq!(
+            parse("usb rndis 1"),
+            Ok(Request::Job(Job::Tool(Tool::UsbMode {
+                mode: "rndis".into(),
+                adb: true
+            })))
+        );
+        assert_eq!(
+            parse("netmode 5g_sa"),
+            Ok(Request::Job(Job::Tool(Tool::NetMode {
+                mode: "5g_sa".into()
+            })))
+        );
+        assert_eq!(
+            parse("ttl 64"),
+            Ok(Request::Job(Job::Tool(Tool::Ttl { value: 64 })))
+        );
+        assert!(parse("ttl 99").is_err());
+        assert_eq!(
+            parse("charge switch 0"),
+            Ok(Request::Job(Job::Tool(Tool::ChargeSwitch {
+                enabled: false
+            })))
+        );
+        assert_eq!(
+            parse("charge limit 80"),
+            Ok(Request::Job(Job::Tool(Tool::ChargeLimit { max_level: 80 })))
+        );
+        assert!(parse("charge limit 50").is_err());
+        assert_eq!(
+            parse("bloat kill"),
+            Ok(Request::Job(Job::Tool(Tool::KillBloat)))
+        );
+        assert_eq!(
+            parse("cache drop"),
+            Ok(Request::Job(Job::Tool(Tool::DropCaches)))
+        );
+        let h = toolbox_record(&json!({
+            "rssi": -65,
+            "rsrp": -92,
+            "rsrq": -10,
+            "sinr": 18,
+            "radio": "NR5G-SA",
+            "band": "N78",
+            "net_select": "5g_sa_nsa",
+            "lte_bands": "1,3,8",
+            "nr_bands": "41,78",
+            "pci": "105",
+            "kbps_down": 125000,
+            "kbps_up": 32000,
+            "cpu_pct": 14,
+            "mem_pct": 42,
+            "temp_mc": 38500,
+            "bloat_cnt": 3,
+            "wifi_2g_on": true,
+            "wifi_5g_on": true,
+            "wifi_clients": 5,
+            "wifi_ssid": "ZTE-U60Pro",
+            "usb_mode": "rndis",
+            "usb_adb": true,
+            "ttl_val": 64,
+            "chg_enabled": true,
+            "chg_limit_on": true,
+            "chg_max": 80,
+            "chg_stop": 80,
+            "chg_start": 70,
+            "batt_mv": 4120,
+            "batt_ma": 850,
+            "batt_health": "Good"
+        }));
+        assert_eq!(
+            h,
+            "H\t-65\t-92\t-10\t18\tNR5G-SA\tN78\t5g_sa_nsa\t1,3,8\t41,78\t105\t125000\t32000\t14\t42\t38500\t3\t1\t1\t5\tZTE-U60Pro\trndis\t1\t64\t1\t1\t80\t80\t70\t4120\t850\tGood\n"
+        );
     }
 }

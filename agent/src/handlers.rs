@@ -316,6 +316,30 @@ pub fn system_kill_bloat(_state: &AppState, body: &[u8]) -> (u16, Value) {
     }
 }
 
+/// POST /api/system/drop-caches — sync and drop kernel pagecache/dentries/inodes
+pub fn system_drop_caches() -> (u16, Value) {
+    let before = system::read_meminfo();
+    let _ = std::process::Command::new("sync").status();
+    if let Err(e) = std::fs::write("/proc/sys/vm/drop_caches", b"3\n") {
+        return (500, json!({"ok": false, "error": format!("drop_caches: {e}")}));
+    }
+    let after = system::read_meminfo();
+    let freed_kb = match (&before, &after) {
+        (Some(b), Some(a)) => a.available_kb.saturating_sub(b.available_kb),
+        _ => 0,
+    };
+    (
+        200,
+        json!({
+            "ok": true,
+            "data": {
+                "freed_kb": freed_kb,
+                "memory": after,
+            }
+        }),
+    )
+}
+
 /// GET /api/dashboard — batch endpoint aggregating all dashboard data.
 ///
 /// This is the app's heartbeat: Home, Signal and Modem/Data all read it rather

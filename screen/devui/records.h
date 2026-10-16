@@ -51,6 +51,23 @@ struct uplink_info {
   unsigned long long rev, rx, tx, since;
   char state, reason[12], ssid[65], band[4], ip[16];
 };
+struct toolbox_info {
+  int has;
+  long long rssi, rsrp, rsrq, sinr;
+  char radio[16], band[16], net_select[16], lte_bands[32], nr_bands[32], pci[16];
+  unsigned long long kbps_down, kbps_up, cpu_pct, mem_pct;
+  long long temp_mc;
+  unsigned long long bloat_cnt;
+  int wifi_2g_on, wifi_5g_on;
+  unsigned long long wifi_clients;
+  char wifi_ssid[49], usb_mode[16];
+  int usb_adb;
+  unsigned long long ttl_val;
+  int chg_enabled, chg_limit_on;
+  unsigned long long chg_max, chg_stop, chg_start, batt_mv;
+  long long batt_ma;
+  char batt_health[24];
+};
 struct group_row { int index, selectable, members, now; char type[16], name[193], now_name[193]; };
 /* state: -1 no answer, 0 loading, 1 ready, 2 Clash not running. */
 struct groups_view { int state, total, offset, n; unsigned long long gen; struct group_row rows[4]; };
@@ -237,6 +254,45 @@ static void parse_uplink(char **f, int n, struct uplink_info *u) {
   u->since = u64_field(f[11]);
   u->saved = atoi(f[12]);
   u->has = 1;
+}
+/* H rssi rsrp rsrq sinr radio band net_select lte_bands nr_bands pci kbps_down kbps_up
+ * cpu_pct mem_pct temp_mc bloat_cnt wifi_2g_on wifi_5g_on wifi_clients wifi_ssid
+ * usb_mode usb_adb ttl_val chg_enabled chg_limit_on chg_max chg_stop chg_start
+ * batt_mv batt_ma batt_health */
+static void parse_toolbox(char **f, int n, struct toolbox_info *h) {
+  if (n < 32) return;
+  h->has = 1;
+  h->rssi = strtoll(f[1], NULL, 10);
+  h->rsrp = strtoll(f[2], NULL, 10);
+  h->rsrq = strtoll(f[3], NULL, 10);
+  h->sinr = strtoll(f[4], NULL, 10);
+  COPY(h->radio, f[5]);
+  COPY(h->band, f[6]);
+  COPY(h->net_select, f[7]);
+  COPY(h->lte_bands, f[8]);
+  COPY(h->nr_bands, f[9]);
+  COPY(h->pci, f[10]);
+  h->kbps_down = u64_field(f[11]);
+  h->kbps_up = u64_field(f[12]);
+  h->cpu_pct = u64_field(f[13]);
+  h->mem_pct = u64_field(f[14]);
+  h->temp_mc = strtoll(f[15], NULL, 10);
+  h->bloat_cnt = u64_field(f[16]);
+  h->wifi_2g_on = atoi(f[17]) != 0;
+  h->wifi_5g_on = atoi(f[18]) != 0;
+  h->wifi_clients = u64_field(f[19]);
+  copy_name(h->wifi_ssid, sizeof(h->wifi_ssid), f[20]);
+  COPY(h->usb_mode, f[21]);
+  h->usb_adb = atoi(f[22]) != 0;
+  h->ttl_val = u64_field(f[23]);
+  h->chg_enabled = atoi(f[24]) != 0;
+  h->chg_limit_on = atoi(f[25]) != 0;
+  h->chg_max = u64_field(f[26]);
+  h->chg_stop = u64_field(f[27]);
+  h->chg_start = u64_field(f[28]);
+  h->batt_mv = u64_field(f[29]);
+  h->batt_ma = strtoll(f[30], NULL, 10);
+  COPY(h->batt_health, f[31]);
 }
 /* Reply to "groups <offset>": G state generation total offset, g rows. */
 static int parse_groups(char *buf, struct groups_view *out) {

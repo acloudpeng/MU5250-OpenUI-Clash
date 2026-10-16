@@ -108,7 +108,8 @@ static void tap(int x,int y) {
   if(!strcmp(a,"back")) { back();return; }
   static const struct { const char *id; int page; } links[]={
     {"wireguard",WG},{"overview",OVERVIEW},{"profiles",PROFILES},{"proxy",PROXY},
-    {"clash",CLASH},{"nodes",NODES},{"subs",SUBS},{"core",CORE},{"esim",ESIM}};
+    {"clash",CLASH},{"nodes",NODES},{"subs",SUBS},{"core",CORE},{"esim",ESIM},
+    {"wifi",WIFI_PAGE},{"signal",SIGNAL_PAGE},{"usb",USB_PAGE},{"power",POWER_PAGE},{"booster",BOOSTER_PAGE}};
   for(size_t i=0;i<sizeof(links)/sizeof(links[0]);i++)
     if(!strcmp(a,links[i].id)) { if(reachable(links[i].page)){group_offset=0;go(links[i].page);} return; }
   if(!strcmp(a,"devices")) { if(reachable(DEVICES))enter_devices();return; }
@@ -219,5 +220,39 @@ static void tap(int x,int y) {
     if(!strcmp(a,"drun")&&!blocked()&&data.diag.has&&!data.diag.running)send_job("diag\n",JOB_DIAG,0);
     else if(!strcmp(a,"prev")&&diag_offset>0)diag_offset-=4;
     else if(!strcmp(a,"next")&&diag_offset+4<data.diag.n)diag_offset+=4;
+  } else if(page==WIFI_PAGE&&!blocked()&&data.toolbox.has) {
+    if(!strcmp(a,"w2on")&&!data.toolbox.wifi_2g_on)send_job("tool wifi_toggle 2g 1\n",JOB_TOOL,0);
+    else if(!strcmp(a,"w2off")&&data.toolbox.wifi_2g_on)send_job("tool wifi_toggle 2g 0\n",JOB_TOOL,0);
+    else if(!strcmp(a,"w5on")&&!data.toolbox.wifi_5g_on)send_job("tool wifi_toggle 5g 1\n",JOB_TOOL,0);
+    else if(!strcmp(a,"w5off")&&data.toolbox.wifi_5g_on)send_job("tool wifi_toggle 5g 0\n",JOB_TOOL,0);
+  } else if(page==SIGNAL_PAGE&&!blocked()&&data.toolbox.has) {
+    static const char *modes[]={"5G_NSA_SA","5G_SA","5G_NSA","4G_ONLY"};
+    if((i=digit_id(a,'n','3'))==-1&&!strncmp(a,"net",3)&&a[3]>='0'&&a[3]<='3'&&!a[4]) {
+      char req[64];snprintf(req,sizeof(req),"tool net_mode %s\n",modes[a[3]-'0']);
+      send_job(req,JOB_TOOL,0);
+    }
+  } else if(page==USB_PAGE&&!blocked()&&data.toolbox.has) {
+    static const char *umodes[]={"rndis","ncm","ecm"};
+    if(!strncmp(a,"usb",3)&&a[3]>='0'&&a[3]<='2'&&!a[4]) {
+      char req[64];snprintf(req,sizeof(req),"tool usb_mode %s %d\n",umodes[a[3]-'0'],data.toolbox.usb_adb?1:0);
+      send_job(req,JOB_TOOL,0);
+    } else if(!strcmp(a,"usbadb")) {
+      const char *m=data.toolbox.usb_mode[0]?data.toolbox.usb_mode:"rndis";
+      char req[64];snprintf(req,sizeof(req),"tool usb_mode %s %d\n",m,data.toolbox.usb_adb?0:1);
+      send_job(req,JOB_TOOL,0);
+    } else if(!strcmp(a,"ttl0"))send_job("tool ttl 0\n",JOB_TOOL,0);
+    else if(!strcmp(a,"ttl64"))send_job("tool ttl 64\n",JOB_TOOL,0);
+    else if(!strcmp(a,"ttl65"))send_job("tool ttl 65\n",JOB_TOOL,0);
+    else if(!strcmp(a,"ttl128"))send_job("tool ttl 128\n",JOB_TOOL,0);
+  } else if(page==POWER_PAGE&&!blocked()&&data.toolbox.has) {
+    if(!strcmp(a,"chgon"))send_job("tool charge_switch 1\n",JOB_TOOL,0);
+    else if(!strcmp(a,"chgoff"))send_job("tool charge_switch 0\n",JOB_TOOL,0);
+    else if(!strcmp(a,"lim70"))send_job("tool charge_limit 70\n",JOB_TOOL,0);
+    else if(!strcmp(a,"lim80"))send_job("tool charge_limit 80\n",JOB_TOOL,0);
+    else if(!strcmp(a,"lim90"))send_job("tool charge_limit 90\n",JOB_TOOL,0);
+    else if(!strcmp(a,"lim100"))send_job("tool charge_limit 100\n",JOB_TOOL,0);
+  } else if(page==BOOSTER_PAGE&&!blocked()) {
+    if(!strcmp(a,"killbloat"))send_job("tool kill_bloat\n",JOB_TOOL,0);
+    else if(!strcmp(a,"dropcache"))send_job("tool drop_caches\n",JOB_TOOL,0);
   }
 }

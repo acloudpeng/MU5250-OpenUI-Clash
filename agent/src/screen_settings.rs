@@ -13,14 +13,19 @@ const FILE: &str = "/data/local/tmp/openui-devui/settings.json";
 /// Present once settings have been checked for the pre-proxy menu, so an owner who picks
 /// the old four features again keeps them.
 const MIGRATED: &str = "/data/local/tmp/openui-devui/menu-v2";
-/// Features the screen menu can show, in menu order; at most four at a time.
-const MENU_ITEMS: [&str; 8] = [
+/// Features the screen menu can show, in menu order; at most nine at a time (up to a 3x3 Pocket OS grid).
+const MENU_ITEMS: [&str; 13] = [
     "overview",
     "proxy",
     "wireguard",
     "clash",
     "esim",
     "uplink",
+    "wifi",
+    "signal",
+    "usb",
+    "power",
+    "booster",
     "profiles",
     "devices",
 ];
@@ -36,6 +41,8 @@ const WIREGUARD_PAGES: u32 = 0b1011;
 const ESIM_PAGE: u32 = 1 << 7;
 /// The Wi-Fi uplink page (bit 8), which screens before it reject in a `W` record.
 const UPLINK_PAGE: u32 = 1 << 8;
+/// Pages a screen built before Pocket OS toolbox pages knows (bits 0..=8).
+const PRE_TOOLBOX_PAGES: u32 = 0x1ff;
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
@@ -91,9 +98,9 @@ impl Settings {
         if self.menu_items.is_empty() {
             return Err("Choose at least one menu item");
         }
-        // The screen has room for four menu rows.
-        if self.menu_items.len() > 4 {
-            return Err("Choose at most four menu items");
+        // The screen has room for up to nine menu tiles (2x2 or 3x3 grid).
+        if self.menu_items.len() > 9 {
+            return Err("Choose at most nine menu items");
         }
         let mut seen = std::collections::HashSet::new();
         for item in &self.menu_items {
@@ -115,9 +122,11 @@ impl Settings {
     /// WireGuard's pages, so such a screen keeps its profiles and device routing (the
     /// new screen reaches those through WireGuard). `V` is the same for screens built
     /// before eSIM, without it and the uplink; `W` for screens built before the Wi-Fi
-    /// uplink, without it; `Y` carries the full choice. Page numbers: wireguard 0,
-    /// devices 1, menu 2, profiles 3, overview 4, proxy 5, clash 6, esim 7, uplink 8.
-    /// `W` and `Y` end with the idle action (1 sleep, 0 stock UI); screens that read six
+    /// uplink, without it; `Y` carries bits 0..=8 for pre-toolbox screens, and `Z`
+    /// carries the full choice when any toolbox page (9..=13) is selected. Page numbers:
+    /// wireguard 0, devices 1, menu 2, profiles 3, overview 4, proxy 5, clash 6, esim 7,
+    /// uplink 8, wifi 9, signal 10, usb 11, power 12, booster 13.
+    /// `W`, `Y` and `Z` end with the idle action (1 sleep, 0 stock UI); screens that read six
     /// fields of `W` return to the stock UI when idle.
     pub fn projection(&self) -> String {
         let page = |s: &str| match s {
@@ -129,6 +138,11 @@ impl Settings {
             "clash" => 6,
             "esim" => 7,
             "uplink" => 8,
+            "wifi" => 9,
+            "signal" => 10,
+            "usb" => 11,
+            "power" => 12,
+            "booster" => 13,
             _ => 2,
         };
         let mask = self.menu_items.iter().fold(0u32, |m, s| m | (1 << page(s)));
@@ -139,9 +153,10 @@ impl Settings {
                 if pages & (1 << home) != 0 { home } else { 2 },
             )
         };
-        let (proxy_mask, proxy_home) = without(mask, home, !(ESIM_PAGE | UPLINK_PAGE));
-        let (esim_mask, esim_home) = without(mask, home, !UPLINK_PAGE);
-        let mut legacy = match mask & LEGACY_PAGES {
+        let (y_mask, y_home) = without(mask, home, PRE_TOOLBOX_PAGES);
+        let (esim_mask, esim_home) = without(y_mask, y_home, !UPLINK_PAGE);
+        let (proxy_mask, proxy_home) = without(y_mask, y_home, !(ESIM_PAGE | UPLINK_PAGE));
+        let mut legacy = match y_mask & LEGACY_PAGES {
             0 => LEGACY_PAGES,
             m => m,
         };
@@ -149,7 +164,7 @@ impl Settings {
         if self.menu_items.iter().any(tunnel) {
             legacy |= WIREGUARD_PAGES;
         }
-        let legacy_home = without(legacy, home, legacy).1;
+        let legacy_home = without(legacy, y_home, legacy).1;
         let line = |kind: char, home: u32, mask: u32| {
             format!(
                 "{kind} {} {} {} {home} {mask} {}",
@@ -157,13 +172,24 @@ impl Settings {
             )
         };
         let sleep = u8::from(self.idle_sleep);
-        format!(
-            "{}\n{}\n{} {sleep}\n{} {sleep}\n",
-            line('C', legacy_home, legacy),
-            line('V', proxy_home, proxy_mask),
-            line('W', esim_home, esim_mask),
-            line('Y', home, mask),
-        )
+        if mask & !PRE_TOOLBOX_PAGES == 0 && home <= 8 {
+            format!(
+                "{}\n{}\n{} {sleep}\n{} {sleep}\n",
+                line('C', legacy_home, legacy),
+                line('V', proxy_home, proxy_mask),
+                line('W', esim_home, esim_mask),
+                line('Y', y_home, y_mask),
+            )
+        } else {
+            format!(
+                "{}\n{}\n{} {sleep}\n{} {sleep}\n{} {sleep}\n",
+                line('C', legacy_home, legacy),
+                line('V', proxy_home, proxy_mask),
+                line('W', esim_home, esim_mask),
+                line('Y', y_home, y_mask),
+                line('Z', home, mask),
+            )
+        }
     }
 }
 /// Settings saved with the old default menu showed every feature there was; they get the
@@ -351,7 +377,18 @@ mod tests {
             ("menu_items", json!(["overview", "nodes"])),
             (
                 "menu_items",
-                json!(["overview", "proxy", "wireguard", "clash", "devices"]),
+                json!([
+                    "overview",
+                    "proxy",
+                    "wireguard",
+                    "clash",
+                    "esim",
+                    "profiles",
+                    "devices",
+                    "signal",
+                    "wifi",
+                    "power"
+                ]),
             ),
             ("home_page", json!("devices")),
             ("language", json!("fr")),

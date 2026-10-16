@@ -19,6 +19,11 @@ a { text-decoration:none; color:#eef2f8; }
 .row { display:block; background:#172235; border:1px solid #273652; border-radius:12px; }
 .row.current { background:#12291f; border-color:#2f7a55; }
 .row.off { background:#121a27; border-color:#1d2738; color:#5d6b82; }
+.tile { display:block; background:#152033; border:1px solid #263859; border-radius:12px; }
+.tile.active { background:#12291f; border-color:#2f7a55; }
+.tile.warn-tile { background:#2a2012; border-color:#66491d; }
+.tile.stock { background:#1d2538; border-color:#3b4d71; }
+.pill { background:#141e30; border:1px solid #243552; border-radius:8px; text-align:center; }
 .name { position:absolute; left:14px; top:9px; right:34px; font-weight:bold; overflow:hidden; white-space:nowrap; }
 .sub { position:absolute; left:14px; top:31px; right:34px; color:#8e9bb3; overflow:hidden; white-space:nowrap; }
 .chev { position:absolute; right:12px; top:0; color:#5d6b82; font-size:24px; }

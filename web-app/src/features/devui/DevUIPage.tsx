@@ -13,11 +13,18 @@ const pages: { id: DevUIPageId; title: string; description: string }[] = [
   { id: 'clash', title: N_('Clash'), description: N_('Status, proxy mode, nodes and delay tests, subscriptions, core and geo data') },
   { id: 'esim', title: N_('eSIM'), description: N_('Profiles on a removable eUICC: switch, or restart after a switch') },
   { id: 'uplink', title: N_('Wi-Fi relay'), description: N_('Upstream Wi-Fi status, signal and traffic, with on / off control') },
+  { id: 'wifi', title: N_('Wi-Fi'), description: N_('2.4 GHz & 5 GHz radio switches, SSID and connected client count') },
+  { id: 'signal', title: N_('5G Signal'), description: N_('Live RSRP / SINR / band metrics and 5G SA / NSA / 4G mode switch') },
+  { id: 'usb', title: N_('USB & TTL'), description: N_('RNDIS / NCM / ECM USB mode, ADB toggle and TTL 64 / 65 / 128 lock') },
+  { id: 'power', title: N_('Battery & Charge'), description: N_('Real-time voltage / current / health and 70% / 80% / 90% / 100% charge limits') },
+  { id: 'booster', title: N_('Booster'), description: N_('One-tap ZTE bloatware cleanup and Linux pagecache drop for lower load') },
   { id: 'profiles', title: N_('Saved profiles'), description: N_('Switch between your saved VPN profiles') },
   { id: 'devices', title: N_('Device routing'), description: N_('Choose which devices use WireGuard') },
 ]
-/** Rows that fit the device menu. */
-const MAX_MENU_ITEMS = 4
+/** Up to 9 apps fit the Pocket OS 3×3 grid (1–4 items render as classic list rows). */
+const MAX_MENU_ITEMS = 9
+const POCKET_OS_PRESET: DevUIPageId[] = ['overview', 'proxy', 'wifi', 'signal', 'usb', 'power', 'booster', 'clash', 'esim']
+const CLASSIC_PRESET: DevUIPageId[] = ['overview', 'proxy', 'clash', 'esim']
 // i18n-ignore: each language is named in its own language
 const LANGUAGES = { zh: '中文', en: 'English' }
 const labels: Record<string, string> = { idle: N_('Stock UI'), starting: N_('Opening'), active: N_('DevUI active'), restoring: N_('Restoring'), error: N_('Recovery needs attention') }
@@ -112,8 +119,8 @@ export default function DevUIPage() {
         <div className="block text-[13px] text-ink">{t('Screen language')}<span className="float-right">{LANGUAGES[draft.language ?? 'zh']}</span><span className="mt-2 block text-xs text-ink3">{t('Follows the language switch of this panel.')}</span></div>
       </div> : <p className="text-sm text-ink2">{t('Loading display preferences…')}</p>}
     </Card>
-    <Card title={t('Menu features')}>
-      <p className="mb-3 text-xs text-ink2">{t('Choose the controls shown on the device. Hiding a menu item does not disable its network feature. Stock UI and Back remain available.')} {t('Up to four items fit the device menu. Saved profiles and Device routing stay reachable from the WireGuard page.')}</p>
+    <Card title={t('Menu features')} action={<div className="flex items-center gap-1.5"><Button variant="outline" disabled={busy || !draft} onClick={() => edit({ menu_items: POCKET_OS_PRESET, home_page: 'menu' })}>{t('Pocket OS 3×3 preset')}</Button><Button variant="outline" disabled={busy || !draft} onClick={() => edit({ menu_items: CLASSIC_PRESET, home_page: 'menu' })}>{t('Classic 4-row preset')}</Button></div>}>
+      <p className="mb-3 text-xs text-ink2">{t('Choose the controls shown on the device. Hiding a menu item does not disable its network feature. Stock UI and Back remain available.')} {t('Up to 9 apps fit the Pocket OS 3×3 grid (1–4 items use classic rows). Saved profiles and Device routing stay reachable from the WireGuard page.')}</p>
       <div className="divide-y divide-line/10">{pages.map(p => <label key={p.id} className="flex cursor-pointer items-center gap-3 py-3"><input type="checkbox" className="h-4 w-4 accent-accent" checked={draft?.menu_items.includes(p.id) ?? false} disabled={busy || !draft || (!draft.menu_items.includes(p.id) && draft.menu_items.length >= MAX_MENU_ITEMS)} onChange={e => { if (!draft) return; const items = e.target.checked ? [...draft.menu_items, p.id] : draft.menu_items.filter(id => id !== p.id); edit({ menu_items: items, home_page: draft.home_page !== 'menu' && !items.includes(draft.home_page) ? 'menu' : draft.home_page }) }} /><span><span className="block text-[13px] font-medium text-ink">{t(p.title)}</span><span className="text-xs text-ink2">{t(p.description)}</span></span></label>)}</div>
     </Card>
     <div className="sticky bottom-2 rounded-xl border border-line/10 bg-surface p-3 shadow-sm">

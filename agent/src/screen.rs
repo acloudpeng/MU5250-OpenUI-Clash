@@ -4,7 +4,7 @@ use crate::{clash, clash_diag, handlers::AppState, network_ext, proxy, system, w
 // declared here so that main.rs needs no change.
 #[path = "screen_ipc.rs"]
 mod ipc;
-use ipc::{Cache, Esim, Job, Request};
+use ipc::{Cache, Esim, Job, Request, Tool};
 use serde_json::{json, Value};
 use std::{
     fs,
@@ -42,6 +42,7 @@ static FRESH: AtomicU64 = AtomicU64::new(0);
 static FAILURE: Mutex<(u64, String)> = Mutex::new((0, String::new()));
 static PARTS: Mutex<Parts> = Mutex::new(Parts::new());
 static CLIENTS: Mutex<Vec<Value>> = Mutex::new(Vec::new());
+static APP_STATE: std::sync::OnceLock<Arc<AppState>> = std::sync::OnceLock::new();
 static PROXIES: Mutex<Proxies> = Mutex::new(Proxies {
     at: 0,
     pass: 0,
@@ -90,6 +91,8 @@ struct Parts {
     diagnostics: String,
     /// `Q` and `q`
     esim: String,
+    /// `H` (Pocket OS toolbox telemetry)
+    toolbox: String,
     /// The pass that read `B`, `K`/`U` and `X`/`x`, and the one that read `M`.
     proxy_pass: u64,
     core_pass: u64,
@@ -108,6 +111,7 @@ impl Parts {
             core: String::new(),
             diagnostics: String::new(),
             esim: String::new(),
+            toolbox: String::new(),
             proxy_pass: 0,
             core_pass: 0,
         }
@@ -387,14 +391,96 @@ fn refresh_system(state: &AppState) {
     let device = system::read_device_info();
     let memory = system::read_meminfo();
     let cpu = state.cpu.sample();
-    PARTS.lock().unwrap().system = format!(
+    let o_line = format!(
         "O {} {} {} {:.1} {:.1}\n",
         battery.as_ref().map_or(-1, |b| b.capacity),
         battery.as_ref().map_or(-999, |b| b.temperature),
         device.uptime_secs,
-        memory.map_or(-1.0, |m| m.usage_pct),
+        memory.as_ref().map_or(-1.0, |m| m.usage_pct),
         cpu.overall
     );
+    let speed = state.speed.sample();
+    let radio_sample = crate::handlers::read_radio(&state.radio);
+    let sig = radio_sample.value.as_ref().unwrap_or(&Value::Null);
+    let (_, cap_v) = crate::cell::modem_capabilities(state);
+    let cap_d = &cap_v["data"];
+    let (_, wifi_v) = crate::wifi::wifi_status(state);
+    let wifi_d = &wifi_v["data"];
+    let (_, usb_v) = crate::usb::usb_status(state);
+    let usb_d = &usb_v["data"];
+    let (_, ttl_v) = crate::server::ttl_status();
+    let ttl_d = &ttl_v["data"];
+    let (_, chg_v) = crate::device_ext::charge_control_get(state);
+    let chg_d = &chg_v["data"];
+    let (_, bat_v) = crate::device_ext::device_battery_detail(state);
+    let bat_d = &bat_v["data"];
+    let top = state.proc_tracker.sample();
+    let bloat_cnt = top.bloat_count as u64;
+    let temp_mc = battery
+        .as_ref()
+        .map(|b| b.temperature * 100)
+        .unwrap_or(0);
+    let wifi_2g_on = wifi_d["radio2g_disabled"].as_str() != Some("1");
+    let wifi_5g_on = wifi_d["radio5g_disabled"].as_str() != Some("1");
+    let wifi_clients = wifi_d["sta_2g_count"].as_u64().unwrap_or(0)
+        + wifi_d["sta_5g_count"].as_u64().unwrap_or(0);
+    let wifi_ssid = wifi_d["ssid_5g"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .or_else(|| wifi_d["ssid_2g"].as_str())
+        .unwrap_or("-");
+    let i_field = |k1: &str, k2: &str| -> i64 {
+        sig.get(k1)
+            .or_else(|| sig.get(k2))
+            .and_then(|v| {
+                v.as_i64()
+                    .or_else(|| v.as_str().and_then(|s| s.trim().parse::<i64>().ok()))
+            })
+            .unwrap_or(0)
+    };
+    let s_field = |k1: &str, k2: &str| -> &str {
+        sig.get(k1)
+            .or_else(|| sig.get(k2))
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or("-")
+    };
+    let h_line = ipc::toolbox_record(&json!({
+        "rssi": i_field("rssi", "network_signalbar"),
+        "rsrp": i_field("rsrp", "nr5g_rsrp"),
+        "rsrq": i_field("rsrq", "nr5g_rsrq"),
+        "sinr": i_field("sinr", "nr5g_sinr"),
+        "radio": s_field("network_type", "sub_network_type"),
+        "band": s_field("wan_active_band", "nr5g_action_band"),
+        "net_select": cap_d["net_select"].as_str().unwrap_or("-"),
+        "lte_bands": s_field("lte_ca_pcell_band", "wan_active_band"),
+        "nr_bands": s_field("nr5g_action_band", "nr_ca_pcell_band"),
+        "pci": s_field("nr5g_cell_id", "lte_pci"),
+        "kbps_down": (speed.rx_speed * 8.0 / 1000.0).round() as u64,
+        "kbps_up": (speed.tx_speed * 8.0 / 1000.0).round() as u64,
+        "cpu_pct": cpu.overall.round() as u64,
+        "mem_pct": memory.as_ref().map_or(0, |m| m.usage_pct.round() as u64),
+        "temp_mc": temp_mc,
+        "bloat_cnt": bloat_cnt,
+        "wifi_2g_on": wifi_2g_on,
+        "wifi_5g_on": wifi_5g_on,
+        "wifi_clients": wifi_clients,
+        "wifi_ssid": wifi_ssid,
+        "usb_mode": usb_d["current_mode"].as_str().unwrap_or("-"),
+        "usb_adb": usb_d["adb_enabled"].as_bool().unwrap_or(false),
+        "ttl_val": ttl_d["ttl_value"].as_u64().unwrap_or(0),
+        "chg_enabled": chg_d["charging_enabled"].as_bool().unwrap_or(true),
+        "chg_limit_on": chg_d["charge_limit_enabled"].as_bool().unwrap_or(false),
+        "chg_max": chg_d["max_charge_level"].as_u64().unwrap_or(100),
+        "chg_stop": chg_d["hysteresis_stop"].as_u64().unwrap_or(80),
+        "chg_start": chg_d["hysteresis_start"].as_u64().unwrap_or(70),
+        "batt_mv": bat_d["voltage_now"].as_i64().unwrap_or(0).max(0) as u64 / 1000,
+        "batt_ma": bat_d["current_now"].as_i64().unwrap_or(0) / 1000,
+        "batt_health": bat_d["health"].as_str().unwrap_or("-"),
+    }));
+    let mut p = PARTS.lock().unwrap();
+    p.system = o_line;
+    p.toolbox = h_line;
 }
 /// `B`, `K`/`U`, `X`/`x`, `Q`/`q` and `M`: quick reads that never take the WireGuard lock. The
 /// periodic refresher and the job thread both run this. `M` is stored after the others:
@@ -482,6 +568,7 @@ fn status() -> String {
             &p.diagnostics,
             &p.esim,
             &uplink,
+            &p.toolbox,
         ],
         &p.devices,
         &tail,
@@ -501,6 +588,7 @@ enum Work {
     Reboot,
     Uplink { revision: u64, enabled: bool },
     UplinkLogin,
+    Tool(Tool),
 }
 fn work(job: Job) -> Result<Work, &'static str> {
     let proxies = || PROXIES.lock().unwrap();
@@ -529,7 +617,73 @@ fn work(job: Job) -> Result<Work, &'static str> {
         Job::Esim(Esim::Reboot) => return Err("No restart is needed"),
         Job::Uplink { revision, enabled } => Work::Uplink { revision, enabled },
         Job::UplinkLogin => Work::UplinkLogin,
+        Job::Tool(t) => Work::Tool(t),
     })
+}
+fn run_tool(t: &Tool) -> (u16, Value) {
+    let body = |v: &Value| serde_json::to_vec(v).unwrap_or_default();
+    let Some(state) = APP_STATE.get() else {
+        return (503, json!({"ok":false,"error":"Agent state not ready"}));
+    };
+    match t {
+        Tool::StockUi => {
+            let (code, v) = restore();
+            (if code == 202 { 200 } else { code }, v)
+        }
+        Tool::WifiToggle { band, enabled } => {
+            let key = if band == "2g" {
+                "radio2g_disabled"
+            } else {
+                "radio5g_disabled"
+            };
+            let val = if *enabled { "0" } else { "1" };
+            crate::wifi::wifi_set(state, &body(&json!({ key: val })))
+        }
+        Tool::UsbMode { mode, adb } => {
+            crate::usb::usb_mode_set(state, &body(&json!({"mode": mode, "adb": adb})))
+        }
+        Tool::NetMode { mode } => {
+            crate::cell::modem_network_mode_set(state, &body(&json!({"net_select": mode})))
+        }
+        Tool::Ttl { value } => {
+            if *value == 0 {
+                crate::server::ttl_clear()
+            } else {
+                crate::server::ttl_set(&body(&json!({"ttl": value})))
+            }
+        }
+        Tool::ChargeSwitch { enabled } => {
+            crate::device_ext::charge_control_set(
+                state,
+                &body(&json!({"charging_enabled": enabled})),
+            )
+        }
+        Tool::ChargeLimit { max_level } => {
+            if *max_level >= 100 {
+                crate::device_ext::charge_control_set(
+                    state,
+                    &body(&json!({
+                        "charge_limit_enabled": false,
+                        "max_charge_level": 100
+                    })),
+                )
+            } else {
+                let stop = *max_level;
+                let start = stop.saturating_sub(10).max(50);
+                crate::device_ext::charge_control_set(
+                    state,
+                    &body(&json!({
+                        "charge_limit_enabled": true,
+                        "max_charge_level": stop,
+                        "hysteresis_stop": stop,
+                        "hysteresis_start": start
+                    })),
+                )
+            }
+        }
+        Tool::KillBloat => crate::handlers::system_kill_bloat(state, b"{\"all\":true}"),
+        Tool::DropCaches => crate::handlers::system_drop_caches(),
+    }
 }
 fn run(work: &Work) -> (u16, Value) {
     let body = |v: &Value| serde_json::to_vec(v).unwrap_or_default();
@@ -560,6 +714,7 @@ fn run(work: &Work) -> (u16, Value) {
             Ok(()) => (200, json!({"ok":true})),
             Err(e) => (400, json!({"ok":false,"error":e})),
         },
+        Work::Tool(t) => run_tool(t),
     }
 }
 /// Ends a job on every path, a panic included: publishes its result (failed unless the
@@ -613,6 +768,11 @@ fn start_job(job: Job) -> String {
         match &work {
             Work::Wireguard(_) if code == 200 => store_wireguard(&reply["data"], begin_pass()),
             Work::Wireguard(_) | Work::Backend(_) => refresh_wireguard(),
+            Work::Tool(_) => {
+                if let Some(state) = APP_STATE.get() {
+                    refresh_system(state);
+                }
+            }
             _ => {}
         }
         if matches!(work, Work::Select(_) | Work::Delay(_)) || proxies_wanted() {
@@ -655,6 +815,7 @@ fn request(line: &str) -> String {
     }
 }
 pub fn start(state: Arc<AppState>) {
+    let _ = APP_STATE.set(state.clone());
     if fs::create_dir_all(DIR).is_err()
         || fs::set_permissions(DIR, fs::Permissions::from_mode(0o700)).is_err()
     {

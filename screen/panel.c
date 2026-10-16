@@ -77,6 +77,7 @@ struct snapshot {
   struct diag_info diag;
   struct esim_info esim;
   struct uplink_info uplink;
+  struct toolbox_info toolbox;
   char failure[97]; /* the agent's message for failed_job */
   struct row rows[MAX_ROWS];
 };
@@ -87,11 +88,12 @@ static int screen_awake = 1;
 #endif
 /* Menu features first (their numbers are the settings record's page bits), then pages
  * reached from them. */
-enum { WG, DEVICES, MENU, PROFILES, OVERVIEW, PROXY, CLASH, ESIM, UPLINK, NODES, GROUP, SUBS, CORE, DIAG };
+enum { WG, DEVICES, MENU, PROFILES, OVERVIEW, PROXY, CLASH, ESIM, UPLINK, WIFI_PAGE, SIGNAL_PAGE, USB_PAGE, POWER_PAGE, BOOSTER_PAGE, NODES, GROUP, SUBS, CORE, DIAG };
 #define LEGACY_PAGES 27  /* features of a C record: WireGuard, devices, profiles, overview */
 #define MENU_PAGES 123   /* features of a V record: the above plus proxy and Clash */
 #define ESIM_MENU_PAGES 251 /* features of a W record: the above plus eSIM */
 #define UPLINK_MENU_PAGES 507 /* features of a Y record: the above plus the Wi-Fi uplink */
+#define TOOLBOX_MENU_PAGES 16379 /* features of a Z record: the above plus Pocket OS toolbox pages */
 static int page = MENU, offset, dialog, dirty, quitting, need_draw = 1,
                                                   return_after_save;
 static unsigned long long settings_revision;
@@ -103,7 +105,7 @@ static int settings_zh = 1;
  * the stock UI (also with older agents, whose W records end at the language). */
 static int settings_sleep = 0;
 #define L(en, zh) (settings_zh ? (zh) : (en))
-static int visible_page(int p) { return p == MENU || (p <= UPLINK && (settings_menu & (1 << p))); }
+static int visible_page(int p) { return p == MENU || (p <= BOOSTER_PAGE && (settings_menu & (1 << p))); }
 /* Saved profiles and device routing belong to WireGuard; node, subscription and core
  * pages to Clash; diagnostics to Clash and Proxy; the Wi-Fi uplink also to Overview,
  * which shows it when the agent reports one. */
@@ -129,7 +131,7 @@ static unsigned long long pending, pending_revision, chosen_profile, chosen_revi
 static char chosen_name[193];
 static char notice[128], failure_text[97];
 /* What the pending job does, for its labels and its completion. */
-enum { JOB_WG = 1, JOB_BACKEND, JOB_MODE, JOB_SUB, JOB_REFRESH, JOB_SELECT, JOB_DELAY, JOB_CORE, JOB_DIAG, JOB_ESIM, JOB_UPLINK };
+enum { JOB_WG = 1, JOB_BACKEND, JOB_MODE, JOB_SUB, JOB_REFRESH, JOB_SELECT, JOB_DELAY, JOB_CORE, JOB_DIAG, JOB_ESIM, JOB_UPLINK, JOB_TOOL };
 static int pending_kind;
 /* When the panel stops waiting for the pending job's outcome. */
 static long long pending_deadline;
@@ -143,7 +145,7 @@ static long long monotonic_ms(void) {
  * the start of a diagnosis answers in seconds. Past it the job is taken as lost. */
 static long long job_wait_ms(int kind) {
   /* An eSIM action only starts the agent's own job, which its Q record then follows. */
-  return kind == JOB_SELECT || kind == JOB_DELAY || kind == JOB_DIAG || kind == JOB_ESIM || kind == JOB_UPLINK ? 60000 : 180000;
+  return kind == JOB_SELECT || kind == JOB_DELAY || kind == JOB_DIAG || kind == JOB_ESIM || kind == JOB_UPLINK || kind == JOB_TOOL ? 60000 : 180000;
 }
 static void amount(char *out, size_t n, unsigned long long v) {
   if (v >= 1073741824)
@@ -200,8 +202,9 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
   int valid = 0, v_ok = 0, v_idle = 0, v_level = 0, v_home = 0, v_mask = 0;
   int w_ok = 0, w_idle = 0, w_level = 0, w_home = 0, w_mask = 0, w_sleep = 0;
   int y_ok = 0, y_idle = 0, y_level = 0, y_home = 0, y_mask = 0, y_sleep = 0;
-  unsigned long long v_rev = 0, w_rev = 0, y_rev = 0;
-  char v_lang[4] = "zh", w_lang[4] = "zh", y_lang[4] = "zh";
+  int z_ok = 0, z_idle = 0, z_level = 0, z_home = 0, z_mask = 0, z_sleep = 0;
+  unsigned long long v_rev = 0, w_rev = 0, y_rev = 0, z_rev = 0;
+  char v_lang[4] = "zh", w_lang[4] = "zh", y_lang[4] = "zh", z_lang[4] = "zh";
   while (line) {
     if (line[0] == 'S' &&
         sscanf(line, "S %llu %d %d %d %d %llu %llu %llu %d %llu", &s.rev,
@@ -258,12 +261,24 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
         snprintf(y_lang, sizeof(y_lang), "%s", lang);
       }
     }
+    /* Z: the same with Pocket OS toolbox pages; preferred over Y. */
+    else if (line[0] == 'Z') {
+      char lang[4] = "";
+      if (sscanf(line, "Z %llu %d %d %d %d %3s %d", &z_rev, &z_idle, &z_level, &z_home, &z_mask, lang, &z_sleep) == 7 &&
+          (z_sleep == 0 || z_sleep == 1) && (!strcmp(lang, "zh") || !strcmp(lang, "en")) &&
+          z_idle >= 30 && z_idle <= 600 && z_level >= 20 && z_level <= 255 &&
+          z_home >= 0 && z_home <= BOOSTER_PAGE && z_mask > 0 && !(z_mask & ~TOOLBOX_MENU_PAGES) &&
+          (z_home == MENU || (z_mask & (1 << z_home)))) {
+        z_ok = 1;
+        snprintf(z_lang, sizeof(z_lang), "%s", lang);
+      }
+    }
     else if (line[0] == 'J')
       /* fresh, the newest job the records already show, is absent from older agents. */
       s.has_fresh = sscanf(line, "J %d %llu %llu %d %llu", &s.busy, &s.job, &s.done, &s.result, &s.fresh) == 5;
-    else if (line[0] && strchr("BKUMXxEQqR", line[0]) && line[1] == '\t') {
-      char *f[16];
-      int n = split_tabs(line, f, 16);
+    else if (line[0] && strchr("BKUMXxEQqRH", line[0]) && line[1] == '\t') {
+      char *f[36];
+      int n = split_tabs(line, f, 36);
       switch (f[0][0]) {
       case 'B': parse_backend(f, n, &s.backend); break;
       case 'K': parse_clash(f, n, &s.clash); break;
@@ -275,6 +290,7 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
       case 'Q': parse_esim(f, n, &s.esim); break;
       case 'q': parse_esim_row(f, n, &s.esim); break;
       case 'R': parse_uplink(f, n, &s.uplink); break;
+      case 'H': parse_toolbox(f, n, &s.toolbox); break;
       }
     }
     else if (line[0] == 'O')
@@ -312,7 +328,10 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
     }
     line = strtok_r(NULL, "\n", &save);
   }
-  if (y_ok) {
+  if (z_ok) {
+    s.settings_rev = z_rev; s.idle_seconds = z_idle; s.brightness = z_level; s.idle_sleep = z_sleep;
+    s.home_page = z_home; s.menu_mask = z_mask; s.zh = strcmp(z_lang, "en") != 0;
+  } else if (y_ok) {
     s.settings_rev = y_rev; s.idle_seconds = y_idle; s.brightness = y_level; s.idle_sleep = y_sleep;
     s.home_page = y_home; s.menu_mask = y_mask; s.zh = strcmp(y_lang, "en") != 0;
   } else if (w_ok) {
@@ -925,6 +944,11 @@ static int panel(int heartbeat, int idle_seconds) {
       if (exchange("status\n", reply, sizeof(reply)) == 0) {
         contact = now;
         if (parse_snapshot(reply, &incoming)) {
+          struct snapshot prev = data;
+          prev.stamp = incoming.stamp;
+          prev.uptime = incoming.uptime;
+          int data_diff = memcmp(&prev, &incoming, sizeof(struct snapshot)) != 0 ||
+                          (page == OVERVIEW && data.uptime / 60 != incoming.uptime / 60);
           data = incoming;
           int old_brightness = settings_brightness;
           int changed = update_settings(&data);
@@ -932,7 +956,11 @@ static int panel(int heartbeat, int idle_seconds) {
             on_level = settings_brightness;
             if (screen_awake && !first && old_brightness != on_level) brightness(on_level);
           }
+          int old_page = page, old_dialog = dialog;
+          unsigned long long old_pending = pending;
           track_status(changed);
+          if (!changed && !data_diff && page == old_page && dialog == old_dialog && pending == old_pending)
+            need_draw = 0;
         }
       }
     }
@@ -1566,7 +1594,7 @@ static void esim_tests(struct drm_buf *b,const char *dir) {
   assert(!strcmp(s.esim.rows[1].tail,"4567")&&!s.esim.kind[0]&&s.esim.firmware_ready==-1&&!s.esim.reboot);
   data=s;assert(update_settings(&data)&&settings_menu==208&&visible_page(ESIM)&&visible_page(CLASH)&&!visible_page(PROXY));
   /* W wins over V; without W the V record, which has no eSIM, applies. */
-  char no_w[]="C 41 90 200 2 27 zh\nV 41 90 200 2 80 zh\n.\n",bad_w[]="V 42 90 200 2 80 zh\nW 42 90 200 2 464 zh\n.\n";
+  char no_w[]="C 41 90 200 2 27 zh\nV 41 90 200 2 80 zh\n.\n",bad_w[]="V 42 90 200 2 80 zh\nW 42 90 200 2 8396 zh\n.\n";
   struct snapshot prefs;
   assert(parse_snapshot(no_w,&prefs)&&update_settings(&prefs)&&settings_menu==80&&!visible_page(ESIM));
   assert(parse_snapshot(bad_w,&prefs)&&update_settings(&prefs)&&settings_menu==80);
@@ -1701,6 +1729,37 @@ static void uplink_tests(struct drm_buf *b,const char *dir) {
   page=UPLINK;track_status(0);assert(page==MENU);
   puts("PASS Wi-Fi relay page (zh/en): Y settings record, R record, menu and Overview rows, on/off confirmations, conflicts and states");
 }
+static void toolbox_tests(struct drm_buf *b, const char *dir) {
+  char text[4096];
+  struct snapshot s;
+  unsigned long long now=(unsigned long long)time(NULL);
+  snprintf(text,sizeof(text),
+    "S 7 1 0 0 0 0 0 0 1 %llu\nO 83 320 18372 34.5 12.4\n"
+    "H\t-65\t-88\t-10\t19\t5G SA\tN78\t5G_NSA_SA\tB1,B3\tN78,N41\t502\t256000\t42000\t12\t35\t34200\t2\t1\t1\t5\tU60Pro_5G\trndis\t0\t64\t1\t1\t80\t80\t70\t4120\t450\tGood\n"
+    "Z 50 90 200 2 16096 zh 1\nJ 0 6 6 0 6\n.\n",now);
+  assert(parse_snapshot(text,&s)&&s.toolbox.has&&s.toolbox.rsrp==-88&&s.toolbox.ttl_val==64&&s.toolbox.wifi_clients==5);
+  data=s;assert(update_settings(&data)&&settings_menu==16096);
+  page=MENU;capture_both(b,dir,"menu-toolbox-3x3");
+  assert(strstr(html,"class=\"box tile\"")&&strstr(html,"act:wifi")&&strstr(html,"act:signal")&&strstr(html,"act:usb")&&strstr(html,"act:power")&&strstr(html,"act:booster"));
+  press_id(b,"wifi");assert(page==WIFI_PAGE);capture_both(b,dir,"toolbox-wifi");
+  press_id(b,"w2off");expect_request("tool wifi_toggle 2g 0\n");assert(pending_kind==JOB_TOOL);reset_job();
+  press_id(b,"back");assert(page==MENU);
+  press_id(b,"signal");assert(page==SIGNAL_PAGE);capture_both(b,dir,"toolbox-signal");
+  press_id(b,"net1");expect_request("tool net_mode 5G_SA\n");reset_job();
+  press_id(b,"back");assert(page==MENU);
+  press_id(b,"usb");assert(page==USB_PAGE);capture_both(b,dir,"toolbox-usb");
+  press_id(b,"ttl65");expect_request("tool ttl 65\n");reset_job();
+  press_id(b,"usb1");expect_request("tool usb_mode ncm 0\n");reset_job();
+  press_id(b,"back");assert(page==MENU);
+  press_id(b,"power");assert(page==POWER_PAGE);capture_both(b,dir,"toolbox-power");
+  press_id(b,"lim90");expect_request("tool charge_limit 90\n");reset_job();
+  press_id(b,"back");assert(page==MENU);
+  press_id(b,"booster");assert(page==BOOSTER_PAGE);capture_both(b,dir,"toolbox-booster");
+  press_id(b,"killbloat");expect_request("tool kill_bloat\n");reset_job();
+  press_id(b,"dropcache");expect_request("tool drop_caches\n");reset_job();
+  press_id(b,"back");assert(page==MENU);
+  puts("PASS Pocket OS 3x3 Toolbox grid and Wi-Fi, 5G Signal, USB & TTL, Battery & Charge, and Booster pages (zh/en)");
+}
 int main(int argc, char **argv) {
   power_self_test();
   if(argc<2)return 2;
@@ -1778,6 +1837,7 @@ int main(int argc, char **argv) {
   proxy_tests(&b,argv[1]);
   esim_tests(&b,argv[1]);
   uplink_tests(&b,argv[1]);
+  toolbox_tests(&b,argv[1]);
   free(b.map);
   return 0;
 }

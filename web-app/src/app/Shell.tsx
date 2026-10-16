@@ -1,8 +1,9 @@
 /* eslint-disable react-refresh/only-export-components */
 import { Suspense, useEffect, useState, type ReactNode } from 'react'
-import { useAlerts } from './HomeContext'
-import { IActivity, IGauge, IGlobe, IHome, ISim, ISignal, IX, IMoon, ISun, IMonitor } from '../icons'
+import { useAlerts, useHome } from './HomeContext'
+import { IActivity, IBattery, ICpu, IGauge, IGlobe, IHome, ISim, ISignal, IX, IMoon, ISun, IMonitor } from '../icons'
 import { Spinner } from '../ui/primitives'
+import { formatSpeed } from '../format'
 import { N_, t, type Lang } from '../i18n'
 
 export type Group = 'home' | 'signal' | 'network' | 'proxy' | 'modem' | 'devui' | 'system'
@@ -58,6 +59,70 @@ function AlertBanner() {
           </button>
         </div>
       ))}
+    </div>
+  )
+}
+
+// ── Global status pill bar (fed by HomeContext — zero extra requests) ─────────
+
+function StatusPillBar({ onNavigate }: { onNavigate: (g: Group) => void }) {
+  const { data } = useHome()
+  if (!data) return null
+  const sig = data.signal
+  const batt = data.battery
+  const spd = data.speed
+  const cpu = data.cpu
+  const mem = data.memory
+  const temp = data.thermal?.cpu_temp_c
+  const memPct = mem ? Math.round(mem.usage_pct) : null
+
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-line/8 bg-surface px-3 py-2 text-[12px] shadow-xs">
+      <button
+        onClick={() => onNavigate('signal')}
+        className="flex items-center gap-1.5 rounded-lg bg-surface2/80 px-2.5 py-1 font-medium text-ink transition-colors hover:bg-surface2"
+      >
+        <ISignal size={14} className="text-accent" />
+        <span className="font-semibold">{sig?.type ?? '5G'}</span>
+        {sig?.rsrp != null && <span className="tnum text-ink3">{sig.rsrp} dBm</span>}
+      </button>
+
+      {spd && (
+        <div className="flex items-center gap-2 rounded-lg bg-surface2/60 px-2.5 py-1 font-medium">
+          <span className="tnum text-ok">↓ {formatSpeed(spd.rx_bps)}</span>
+          <span className="text-line/40">·</span>
+          <span className="tnum text-accent">↑ {formatSpeed(spd.tx_bps)}</span>
+        </div>
+      )}
+
+      {batt && (
+        <button
+          onClick={() => onNavigate('system')}
+          className="flex items-center gap-1.5 rounded-lg bg-surface2/60 px-2.5 py-1 font-medium text-ink transition-colors hover:bg-surface2"
+        >
+          <IBattery size={14} className={batt.charging ? 'text-ok' : 'text-ink2'} />
+          <span className="tnum font-semibold">{batt.percent}%</span>
+          {batt.temperature_c != null && <span className="tnum text-ink3">{batt.temperature_c.toFixed(0)}°C</span>}
+        </button>
+      )}
+
+      <button
+        onClick={() => onNavigate('system')}
+        className="flex items-center gap-2 rounded-lg bg-surface2/60 px-2.5 py-1 font-medium text-ink2 transition-colors hover:bg-surface2 hover:text-ink"
+      >
+        <ICpu size={14} />
+        <span className="tnum">CPU {cpu ? `${cpu.overall.toFixed(0)}%` : '—'}</span>
+        {memPct != null && <span className="tnum">· RAM {memPct}%</span>}
+        {temp != null && <span className="tnum text-ink3">· {temp.toFixed(0)}°C</span>}
+      </button>
+
+      <button
+        onClick={() => onNavigate('devui')}
+        className="ml-auto flex items-center gap-1.5 rounded-lg border border-accent/25 bg-accent/10 px-2.5 py-1 font-semibold text-accent transition-colors hover:bg-accent/15"
+      >
+        <IMonitor size={13} />
+        <span>{t('Pocket OS')}</span>
+      </button>
     </div>
   )
 }
@@ -172,6 +237,7 @@ export default function Shell({
         <main className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-shell px-4 pb-24 pt-4 lg:px-6 lg:pb-10 lg:pt-6">
             {import.meta.env.MODE === 'demo' && <p className="mb-4 rounded-lg bg-amber-100 px-3 py-2 text-xs font-semibold text-amber-800">{t('Demo data · OpenUI with WireGuard & Clash · No device connected')}</p>}
+            <StatusPillBar onNavigate={onNavigate} />
             <AlertBanner />
             <Suspense
               fallback={

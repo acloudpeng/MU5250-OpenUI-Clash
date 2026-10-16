@@ -48,4 +48,5 @@ export default {
   'CPU temperature critically high ({temp}°C)': 'CPU 温度过高（{temp}°C）',
   'CPU temperature elevated ({temp}°C)': 'CPU 温度偏高（{temp}°C）',
   'Dashboard refresh failed; displayed readings may be old. {error}': '面板刷新失败，显示的读数可能已过时。{error}',
+  'Pocket OS': '随身系统',
 } satisfies Dict

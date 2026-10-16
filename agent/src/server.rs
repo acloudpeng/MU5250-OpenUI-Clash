@@ -361,6 +361,7 @@ pub fn route(
         (&Method::Post, "/api/esim") => esim::post(body),
         (&Method::Post, "/api/esim/delete") => esim::delete_profile(body),
         (&Method::Post, "/api/system/kill-bloat") => handlers::system_kill_bloat(state, body),
+        (&Method::Post, "/api/system/drop-caches") => handlers::system_drop_caches(),
         (&Method::Post, "/api/system/restart-agent") => device_ext::agent_restart(state),
         (&Method::Post, "/api/device/reboot") => device_ext::device_reboot(state),
         (&Method::Post, "/api/device/shutdown") => device_ext::device_shutdown(state),
@@ -537,7 +538,7 @@ fn at_port(state: &AppState) -> (u16, Value) {
 
 // --- TTL handlers ---
 
-fn ttl_status() -> (u16, Value) {
+pub fn ttl_status() -> (u16, Value) {
     let ipv4 = std::process::Command::new("iptables")
         .args(["-t", "mangle", "-L", "PREROUTING", "-n"])
         .bounded_output();
@@ -583,7 +584,7 @@ fn ttl_status() -> (u16, Value) {
     )
 }
 
-fn ttl_set(body: &[u8]) -> (u16, Value) {
+pub fn ttl_set(body: &[u8]) -> (u16, Value) {
     let val: Value = match serde_json::from_slice(body) {
         Ok(v) => v,
         Err(_) => return (400, json!({"ok": false, "error": "invalid JSON"})),
@@ -648,7 +649,7 @@ fn ttl_set(body: &[u8]) -> (u16, Value) {
     }
 }
 
-fn ttl_clear() -> (u16, Value) {
+pub fn ttl_clear() -> (u16, Value) {
     let _ = std::process::Command::new("sh").args(["-c",
         "iptables -t mangle -S PREROUTING 2>/dev/null | grep 'TTL --ttl-set' | while read -r rule; do iptables -t mangle $(echo \"$rule\" | sed 's/-A/-D/'); done"
     ]).bounded_output();
