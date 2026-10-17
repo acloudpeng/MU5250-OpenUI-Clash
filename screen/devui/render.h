@@ -97,7 +97,7 @@ static const char *summary_class(void) {
     !data.has || !data.enabled ? "muted" : data.connected ? "good" : "warn";
 }
 static const char *tone_color(const char *c) {
-  return !strcmp(c,"good") ? "#4ade9a" : !strcmp(c,"bad") ? "#ff8a8a" : !strcmp(c,"warn") ? "#fbbf5a" : "#5d6b82";
+  return !strcmp(c,"good") ? "#4cc97a" : !strcmp(c,"bad") ? "#f06a6a" : !strcmp(c,"warn") ? "#eaa646" : "#646c78";
 }
 static const char *summary_color(void) { return tone_color(summary_class()); }
 static const char *active_profile(void) {
@@ -107,17 +107,18 @@ static const char *active_profile(void) {
 static int selected_count(void) {
   int n=0;for(int i=0;i<data.n;i++) n+=data.rows[i].selected;return n;
 }
+/* The title bar: back at the top left, then the page title. Pages start below y 64. */
 static void header(const char *title) {
-  add("<div class=\"box title\" style=\"left:16px;top:16px;width:200px;height:32px\">");shortened(title,200,24);add("</div>");
-  linkbox(220,8,92,48,"back",L("‹ Back","‹ 返回"),1,PLAIN);
-  rect(0,64,W,1,"line",NULL);
+  rect(0,0,W,61,"bar",NULL);
+  linkbox(6,6,84,48,"back",L("‹ Back","‹ 返回"),1,PLAIN);
+  add("<div class=\"box title\" style=\"left:102px;top:14px;width:206px;height:32px\">");shortened(title,206,24);add("</div>");
 }
 static void dot(int x, int y, const char *color) {
   add("<div class=\"box\" style=\"left:%dpx;top:%dpx;width:10px;height:10px;border-radius:5px;background:%s\"></div>",x,y,color);
 }
 static void battery_badge(int x, int y, int large) {
   int percent = data.battery < 0 ? 0 : data.battery > 100 ? 100 : data.battery;
-  const char *color = data.battery < 0 ? "#8e9bb3" : percent <= 20 ? "#ff8a8a" : "#4ade9a";
+  const char *color = data.battery < 0 ? "#9aa1ac" : percent <= 20 ? "#f06a6a" : "#4cc97a";
   int w=large?62:30, h=large?30:16;
   add("<div class=\"box\" style=\"left:%dpx;top:%dpx;width:%dpx;height:%dpx;border:2px solid %s;border-radius:%dpx\"></div>",x,y,w,h,color,large?6:3);
   add("<div class=\"box\" style=\"left:%dpx;top:%dpx;width:3px;height:%dpx;background:%s\"></div>",x+w+1,y+h/3,h-2*(h/3),color);
@@ -131,21 +132,126 @@ static void stat_row(int y, const char *label, const char *value, double percent
   box(26,y,130,20,"muted",label);box(156,y,138,20,"head right",value);
   if(percent<0)return;
   int fill=(int)(percent<0?0:percent>100?268:percent*268/100);
-  rect(26,y+26,268,6,"bar",NULL);
-  if(fill>0)rect(26,y+26,fill,6,"fill",percent>=85?"#ff8a8a":percent>=60?"#fbbf5a":"#7fa9ff");
+  rect(26,y+26,268,6,"bar-track",NULL);
+  if(fill>0)rect(26,y+26,fill,6,"fill",percent>=85?"#f06a6a":percent>=60?"#eaa646":"#4c9eeb");
+}
+/* A section label above a group of controls. */
+static void section(int y, const char *text) { sbox(16,y,292,20,"label",text); }
+/* A row that turns something on or off: a title, its state and a switch on the right.
+ * `id` stays the same whichever way it points; `action` is what a tap does now. */
+static void switch_row(int x, int y, int w, int h, const char *id, const char *action, const char *title, const char *detail, int on, int enabled) {
+  add("<a id=\"%s\" href=\"act:%s\" class=\"box row%s\" style=\"left:%dpx;top:%dpx;width:%dpx;height:%dpx\">",id,enabled?action:"none",enabled?"":" off",x,y,w,h);
+  add("<div class=\"name\" style=\"top:%dpx;right:70px\">",(h-44)/2);shortened(title,w-84,16);
+  add("</div><div class=\"sub\" style=\"top:%dpx;right:70px\">",(h-44)/2+22);shortened(detail,w-84,16);add("</div>");
+  add("<div class=\"box track%s\" style=\"left:%dpx;top:%dpx;width:44px;height:24px\"></div>",on?" on":"",w-58,(h-24)/2);
+  add("<div class=\"box knob\" style=\"left:%dpx;top:%dpx;width:18px;height:18px\"></div></a>",w-58+(on?23:3),(h-24)/2+3);
 }
 static void dialog_card(int y, int h) {
-  rect(0,65,W,H-65,"shade",NULL);
+  rect(0,61,W,H-61,"shade",NULL);
   add("<div class=\"box card\" style=\"left:12px;top:%dpx;width:296px;height:%dpx\"></div>",y,h);
 }
 #include "pages.h"
+/* Main menu features: their names (shorter on a tile), marks, row details and the word
+ * or two a tile shows. */
+static const char *menu_title(int p, int tile) {
+  switch(p) {
+  case OVERVIEW: return L("Overview","概览");
+  case PROXY: return L("Proxy","代理");
+  case WG: return "WireGuard";
+  case CLASH: return "Clash";
+  case ESIM: return "eSIM";
+  case UPLINK: return L("Wi-Fi relay","Wi-Fi 中继");
+  case WIFI_PAGE: return "Wi-Fi";
+  case SIGNAL_PAGE: return L("Signal","信号");
+  case USB_PAGE: return tile?L("USB & TTL","USB/TTL"):L("USB & TTL","USB 与 TTL");
+  case POWER_PAGE: return tile?L("Battery","电池"):L("Battery & charge","电池与充电");
+  case BOOSTER_PAGE: return tile?L("Booster","加速"):L("Booster","加速清理");
+  case PROFILES: return tile?L("Profiles","配置"):L("Saved profiles","已保存配置");
+  default: return tile?L("Routing","分流"):L("Device routing","设备分流");
+  }
+}
+static const char *menu_icon(int p) {
+  switch(p) {
+  case OVERVIEW: return "&#9673;";      /* ◉ */
+  case PROXY: return "&#8644;";         /* ⇄ */
+  case WG: return "&#9919;";            /* ⚿ */
+  case CLASH: return "&#10022;";        /* ✦ */
+  case ESIM: return "&#9635;";          /* ▣ */
+  case UPLINK: return "&#8673;";        /* ⇡ */
+  case WIFI_PAGE: return "&#8779;";     /* ≋ */
+  case SIGNAL_PAGE: return "&#9602;&#9604;&#9606;"; /* ▂▄▆ */
+  case USB_PAGE: return "&#8652;";      /* ⇌ */
+  case POWER_PAGE: return "&#9889;";    /* ⚡ */
+  case BOOSTER_PAGE: return "&#10227;"; /* ⟳ */
+  case PROFILES: return "&#9776;";      /* ☰ */
+  default: return "&#8862;";            /* ⊞ */
+  }
+}
+static const char *menu_detail(int p) {
+  const struct backend_info *bk=&data.backend;
+  switch(p) {
+  case OVERVIEW: return L("Battery, uptime and load","电池、运行时间与系统负载");
+  case PROXY: return !bk->has||bk->active==BK_OFF?L("Off / WireGuard / Clash","关闭 / WireGuard / Clash"):
+    bk->active==BK_WG?L("Active: WireGuard","当前：WireGuard"):L("Active: Clash","当前：Clash");
+  case WG: return L("Tunnel status and on / off","隧道状态与开关");
+  case CLASH: return L("Nodes, subscriptions and core","节点、订阅与内核");
+  case ESIM: return esim_summary();
+  case UPLINK: return uplink_summary();
+  case WIFI_PAGE: return L("Bands and connected clients","频段开关与在线终端");
+  case SIGNAL_PAGE: return L("Signal and network mode","信号与网络制式");
+  case USB_PAGE: return L("USB mode and TTL","USB 模式与 TTL");
+  case POWER_PAGE: return L("Charging and limit","充电开关与上限");
+  case BOOSTER_PAGE: return L("Free memory","清理内存与冗余进程");
+  case PROFILES: return L("Switch between up to 5 configs","在最多 5 个配置之间切换");
+  default: return L("Choose WireGuard or direct","选择走 WireGuard 或直连");
+  }
+}
+static void tile_state(int p, char *buf, size_t n, const char **cls) {
+  const struct toolbox_info *h=&data.toolbox;
+  const struct backend_info *bk=&data.backend;
+  *cls="muted";
+  switch(p) {
+  case OVERVIEW: snprintf(buf,n,"CPU %.0f%%",data.cpu); return;
+  case PROXY:
+    *cls=bk->has?proxy_class():"muted";
+    snprintf(buf,n,"%s",!bk->has||bk->active==BK_OFF?L("Off","关闭"):bk->active==BK_WG?"WireGuard":"Clash"); return;
+  case WG: *cls=summary_class(); snprintf(buf,n,"%s",summary()); return;
+  case CLASH: *cls=data.clash.has?clash_class():"muted"; snprintf(buf,n,"%s",data.clash.has?clash_summary():"--"); return;
+  case ESIM:
+    if(data.esim.has&&!strcmp(data.esim.card,"euicc"))snprintf(buf,n,"%s",esim_summary());
+    else snprintf(buf,n,"%s",data.esim.has&&!strcmp(data.esim.card,"sim")?L("SIM card","普通 SIM"):"--");
+    return;
+  case UPLINK: *cls=uplink_class(); snprintf(buf,n,"%s",data.uplink.has?uplink_state_text(data.uplink.state):"--"); return;
+  case WIFI_PAGE:
+    if(!h->wifi_2g_on&&!h->wifi_5g_on){*cls="warn";snprintf(buf,n,"%s",L("Off","已关闭"));}
+    else snprintf(buf,n,L("%llu online","%llu 台在线"),h->wifi_clients);
+    return;
+  case SIGNAL_PAGE:
+    if(!h->has||h->rsrp==NO_FIGURE){snprintf(buf,n,"--");return;}
+    *cls=h->rsrp>-95?"good":h->rsrp>-110?"warn":"bad";snprintf(buf,n,"%lld dBm",h->rsrp); return;
+  case USB_PAGE:
+    if(h->ttl_val)snprintf(buf,n,"TTL %llu",h->ttl_val);
+    else snprintf(buf,n,"%s",h->usb_mode[0]?h->usb_mode:"--");
+    return;
+  case POWER_PAGE:
+    if(!h->chg_enabled){*cls="warn";snprintf(buf,n,"%s",L("Paused","已停充"));}
+    else if(h->chg_limit_on)snprintf(buf,n,L("Limit %llu%%","上限 %llu%%"),h->chg_stop);
+    else if(data.battery>=0)snprintf(buf,n,"%d%%",data.battery);
+    else snprintf(buf,n,"--");
+    return;
+  case BOOSTER_PAGE: snprintf(buf,n,L("RAM %.0f%%","内存 %.0f%%"),data.memory>=0?data.memory:0.0); return;
+  case PROFILES: snprintf(buf,n,"%s",active_profile()); return;
+  default: snprintf(buf,n,"%d / %d",selected_count(),data.n); return;
+  }
+}
 static uint16_t pixels[W * H];
 /* The current page as HTML. Cheap next to laying it out and drawing it. */
 static void build_html(void) {
   html_used=0;html[0]=0;
   add("<!DOCTYPE html><html lang=\"%s\"><head><meta charset=\"UTF-8\"><style>%s</style></head><body>",L("en","zh"),style_asset);
   char tmp[256],rx[32],tx[32];
-  if (dialog) {
+  if (dialog>=DLG_POWER) render_power_dialog();
+  else if (dialog) {
     header(page_title());
     if (dialog==5) render_confirm();
     else if (dialog==6) render_sub_dialog();
@@ -175,76 +281,67 @@ static void build_html(void) {
       linkbox(24,284,272,56,"refresh",page==WG||page==PROFILES||page==DEVICES?L("Refresh and back","刷新并返回"):L("Refresh","刷新"),1,PRIMARY);
     }
   } else if(page==MENU) {
-    box(16,10,180,32,"title","OpenUI");
-    box(16,40,180,20,"muted",data.toolbox.has?L("Pocket OS Toolbox","随身系统工具箱"):L("Device control","设备控制"));
-    linkbox(208,8,104,48,"stock",L("Stock UI","原厂界面"),1,PLAIN);
-    add("<div class=\"box card\" style=\"left:12px;top:72px;width:296px;height:56px\"></div>");
-    battery_badge(28,92,0);
-    rect(108,84,1,32,"line",NULL);
-    /* The active proxy backend when the agent reports it, else WireGuard as before. */
+    box(16,14,170,32,"title","OpenUI");
+    linkbox(196,8,116,48,"stock",L("Stock UI","原厂界面"),1,PLAIN);
+    /* Status card: battery and signal, then the proxy and the current speed. */
     const struct backend_info *bk=&data.backend;
-    const char *cls=bk->has?proxy_class():summary_class();
-    dot(122,83,tone_color(cls));
-    if(data.toolbox.has) {
-      char d_rate[24],u_rate[24],spd_line[96];
-      format_rate(d_rate,sizeof(d_rate),data.toolbox.kbps_down);
-      format_rate(u_rate,sizeof(u_rate),data.toolbox.kbps_up);
-      snprintf(spd_line,sizeof(spd_line),"%s · ↓%s ↑%s",
-               !bk->has||bk->active==BK_WG?"WG":bk->active==BK_CLASH?"Clash":L("Direct","直连"),d_rate,u_rate);
-      sbox(138,78,162,20,"muted",spd_line);
-    } else {
-      box(138,78,160,20,"muted",!bk->has||bk->active==BK_WG?"WireGuard":bk->active==BK_CLASH?"Clash":L("Proxy","代理"));
+    const struct toolbox_info *tb=&data.toolbox;
+    add("<div class=\"box card\" style=\"left:10px;top:64px;width:300px;height:84px\"></div>");
+    battery_badge(24,78,0);
+    if(tb->has&&tb->rsrp!=NO_FIGURE) {
+      snprintf(tmp,sizeof(tmp),"%s %lld dBm",tb->radio[0]?tb->radio:"5G",tb->rsrp);
+      snprintf(rx,sizeof(rx),"head right %s",tb->rsrp>-95?"good":tb->rsrp>-110?"warn":"bad");
+      sbox(130,76,166,20,rx,tmp);
+    } else if(data.uptime) {
+      if(data.uptime>=86400)snprintf(tmp,sizeof(tmp),L("Up %llud %lluh","已运行 %llu 天 %llu 时"),data.uptime/86400,data.uptime/3600%24);
+      else snprintf(tmp,sizeof(tmp),L("Up %lluh %llum","已运行 %llu 时 %llu 分"),data.uptime/3600,data.uptime/60%60);
+      sbox(130,76,166,20,"muted right",tmp);
     }
-    add("<div class=\"box head %s\" style=\"left:122px;top:100px;width:178px;height:20px\">",cls);shortened(bk->has?proxy_summary():summary(),176,16);add("</div>");
+    rect(22,105,276,1,"line",NULL);
+    /* The active proxy backend when the agent reports it, else WireGuard as before. */
+    const char *cls=bk->has?proxy_class():summary_class();
+    dot(24,121,tone_color(cls));
+    /* The backend's name first when the line has room for both. */
+    int room=tb->has?148:254;
+    if(bk->has&&bk->active==BK_OFF)snprintf(tmp,sizeof(tmp),"%s",proxy_summary());
+    else {
+      snprintf(tmp,sizeof(tmp),"%s · %s",bk->has&&bk->active==BK_CLASH?"Clash":"WireGuard",bk->has?proxy_summary():summary());
+      if(html_view_text_width_px(tmp,16)>room)snprintf(tmp,sizeof(tmp),"%s",bk->has?proxy_summary():summary());
+    }
+    snprintf(rx,sizeof(rx),"head %s",strcmp(cls,"muted")?cls:"");
+    if(tb->has) {
+      char d_rate[24],u_rate[24],rates[64];
+      format_rate(d_rate,sizeof(d_rate),tb->kbps_down);format_rate(u_rate,sizeof(u_rate),tb->kbps_up);
+      sbox(42,116,room,20,rx,tmp);
+      snprintf(rates,sizeof(rates),"↓%s ↑%s",d_rate,u_rate);
+      sbox(190,116,106,20,"muted right",rates);
+    } else sbox(42,116,room,20,rx,tmp);
     const int pages[] = {OVERVIEW,PROXY,WG,CLASH,ESIM,UPLINK,WIFI_PAGE,SIGNAL_PAGE,USB_PAGE,POWER_PAGE,BOOSTER_PAGE,PROFILES,DEVICES};
     const char *ids[] = {"overview","proxy","wireguard","clash","esim","uplink","wifi","signal","usb","power","booster","profiles","devices"};
-    const char *titles[] = {
-      L("Overview","概览"),L("Proxy","代理"),"WireGuard","Clash","eSIM",L("Wi-Fi relay","Wi-Fi 中继"),
-      L("Wi-Fi","Wi-Fi"),L("5G Signal","5G 信号"),L("USB & TTL","USB / TTL"),
-      L("Battery","电池充电"),L("Booster","加速清理"),
-      L("Saved profiles","已保存配置"),L("Device routing","设备分流")
-    };
-    char wifi_det[64],sig_det[64],usb_det[64],pwr_det[64],bst_det[64];
-    snprintf(wifi_det,sizeof(wifi_det),L("%s · %llu clients","%s · %llu 台在线"),
-             (data.toolbox.wifi_2g_on&&data.toolbox.wifi_5g_on)?"2.4G+5G":data.toolbox.wifi_5g_on?"5G":data.toolbox.wifi_2g_on?"2.4G":L("Off","已关"),
-             data.toolbox.wifi_clients);
-    snprintf(sig_det,sizeof(sig_det),"%s %s (%llddBm)",
-             data.toolbox.radio[0]?data.toolbox.radio:"5G",data.toolbox.band[0]?data.toolbox.band:"Auto",data.toolbox.rsrp);
-    if(data.toolbox.ttl_val)snprintf(usb_det,sizeof(usb_det),"%s · TTL %llu",data.toolbox.usb_mode[0]?data.toolbox.usb_mode:"rndis",data.toolbox.ttl_val);
-    else snprintf(usb_det,sizeof(usb_det),"%s%s",data.toolbox.usb_mode[0]?data.toolbox.usb_mode:"rndis",data.toolbox.usb_adb?" + ADB":"");
-    if(data.toolbox.chg_limit_on)snprintf(pwr_det,sizeof(pwr_det),L("Limit %llu%% · %lldmA","限充 %llu%% · %lldmA"),data.toolbox.chg_stop,data.toolbox.batt_ma);
-    else snprintf(pwr_det,sizeof(pwr_det),"%s · %lldmA",data.toolbox.chg_enabled?L("Charging","充电中"):L("Paused","已停充"),data.toolbox.batt_ma);
-    snprintf(bst_det,sizeof(bst_det),L("RAM %.0f%% · %llu bloat","内存 %.0f%% · %llu 冗余"),data.memory>=0?data.memory:0.0,data.toolbox.bloat_cnt);
-    const char *details[] = {
-      L("Battery, uptime and load","电池、运行时间与系统负载"),
-      !bk->has||bk->active==BK_OFF?L("Off / WireGuard / Clash","关闭 / WireGuard / Clash"):bk->active==BK_WG?L("Active: WireGuard","当前：WireGuard"):L("Active: Clash","当前：Clash"),
-      L("Tunnel status and on / off","隧道状态与开关"),L("Nodes, subscriptions and core","节点、订阅与内核"),
-      esim_summary(),uplink_summary(),
-      wifi_det,sig_det,usb_det,pwr_det,bst_det,
-      L("Switch between up to 5 configs","在最多 5 个配置之间切换"),L("Choose WireGuard or direct","选择走 WireGuard 或直连")
-    };
     int vis_idx[13], vis_cnt=0;
     for(int i=0;i<13;i++) if(visible_page(pages[i])) vis_idx[vis_cnt++]=i;
     if(vis_cnt<=4) {
       for(int r=0;r<vis_cnt;r++) {
         int i=vis_idx[r];
-        nav_row(12,140+68*r,296,60,ids[i],titles[i],details[i],"",1);
+        nav_row(10,160+64*r,300,58,ids[i],menu_title(pages[i],0),menu_detail(pages[i]),"",1);
       }
     } else {
+      /* Up to nine tiles: a mark, the feature and its state in a word or two. */
       int show=vis_cnt>9?9:vis_cnt;
       for(int r=0;r<show;r++) {
-        int i=vis_idx[r];
-        int col=r%3, row_i=r/3;
-        int tx=12+col*101, ty=136+row_i*92;
-        add("<a id=\"%s\" href=\"act:%s\" class=\"box tile\" style=\"left:%dpx;top:%dpx;width:94px;height:84px\">",ids[i],ids[i],tx,ty);
-        add("<div class=\"box head\" style=\"left:8px;top:14px;width:78px;height:20px\">");shortened(titles[i],78,16);add("</div>");
-        add("<div class=\"box muted\" style=\"left:8px;top:44px;width:78px;height:20px\">");shortened(details[i],78,16);add("</div></a>");
+        int i=vis_idx[r],x=10+(r%3)*102,y=158+(r/3)*86;
+        const char *scls="muted";
+        tile_state(pages[i],tmp,sizeof(tmp),&scls);
+        add("<a id=\"%s\" href=\"act:%s\" class=\"box tile\" style=\"left:%dpx;top:%dpx;width:96px;height:80px\">",ids[i],ids[i],x,y);
+        add("<div class=\"box icon\" style=\"left:10px;top:9px;width:76px;height:20px\">%s</div>",menu_icon(pages[i]));
+        add("<div class=\"box head\" style=\"left:10px;top:31px;width:78px;height:20px\">");shortened(menu_title(pages[i],1),78,16);
+        add("</div><div class=\"box %s\" style=\"left:10px;top:53px;width:78px;height:20px\">",scls);shortened(tmp,78,16);add("</div></a>");
       }
     }
-    box(16,418,292,20,"muted",L("Power key: tap to sleep / wake.","电源键短按：息屏 / 唤醒"));
+    box(16,424,292,20,"muted",L("Power: tap to sleep, hold for menu.","电源键：短按息屏，长按关机或重启"));
     if(settings_sleep) snprintf(tmp,sizeof(tmp),L("Screen turns off after %d s idle.","空闲 %d 秒后熄屏"),settings_idle);
     else snprintf(tmp,sizeof(tmp),L("Stock UI returns after %d s idle.","空闲 %d 秒后返回原厂界面"),settings_idle);
-    box(16,440,292,20,"muted",tmp);
+    box(16,446,292,20,"faint",tmp);
   } else if(page==WG) {
     header("WireGuard");
     add("<div class=\"box card\" style=\"left:12px;top:76px;width:296px;height:92px\"></div>");

@@ -175,6 +175,12 @@ static unsigned long long open_gen;
 static long long page_fetch_at;
 /* The confirmation dialog (5) and the subscription dialog (6). */
 enum { CF_BACKEND = 1, CF_UPDATE, CF_ROLLBACK, CF_GEO, CF_ESIM, CF_REBOOT, CF_UPLINK };
+/* The long-press power menu (dialog 7), its confirmation (8) and the wait after it (9):
+ * what was chosen (1 restart, 2 shut down), until when to wait, and why it failed. */
+enum { DLG_POWER = 7, DLG_POWER_CONFIRM, DLG_POWERING };
+static int power_choice;
+static long long power_deadline;
+static char power_error[96];
 static char confirm_req[96];
 static int confirm_what, confirm_target, confirm_job;
 static unsigned long long confirm_rev, chosen_sub, chosen_sub_rev;
@@ -578,6 +584,13 @@ static void brightness(int v) {
 }
 /* Observe the dedicated key device without grabbing it: factory long-press
  * handling remains available. Never open the touchscreen as the power key. */
+static int power_mono;
+static long long power_now(void) {
+  if (power_mono) return monotonic_ms();
+  struct timespec t;
+  clock_gettime(CLOCK_REALTIME, &t);
+  return (long long)t.tv_sec * 1000 + t.tv_nsec / 1000000;
+}
 static int power_open(void) {
   for (int i = 0; i < 32; i++) {
     char path[64], name[128] = {0};
@@ -589,6 +602,9 @@ static int power_open(void) {
         !strcmp(name, "pmic_pwrkey") &&
         ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(keys)), keys) >= 0 &&
         (keys[KEY_POWER / 8] & (1u << (KEY_POWER % 8)))) {
+      /* Monotonic stamps: a hold is timed against monotonic_ms() while the key is down. */
+      int clock = CLOCK_MONOTONIC;
+      power_mono = ioctl(fd, EVIOCSCLOCKID, &clock) == 0;
       return fd;
     }
     close(fd);
@@ -1012,15 +1028,26 @@ static int panel(int heartbeat, int idle_seconds) {
     if ((p[0].revents | p[1].revents) & (POLLERR | POLLHUP | POLLNVAL)) goto end;
     struct input_event ev;
     input.suppress = 0;
+    int held = 0;
     while (read(keyfd, &ev, sizeof(ev)) == sizeof(ev)) {
       long long stamp = (long long)ev.time.tv_sec * 1000 + ev.time.tv_usec / 1000;
-      if (power_event(&key, ev.type, ev.code, ev.value, stamp)) {
+      int press = power_event(&key, ev.type, ev.code, ev.value, stamp);
+      if (press == POWER_SHORT) {
         if (screen_toggle(&on_level)) goto end;
         input.multi = 1;
         input.suppress = 1; /* Reject touch queued across a backlight transition. */
         last = monotonic_ms();
-      }
+      } else if (press == POWER_LONG) held = 1;
     }
+    /* A long press opens the power menu, waking a dark screen for it. */
+    if (held || power_hold(&key, power_now())) {
+      if (!screen_awake && screen_toggle(&on_level)) goto end;
+      input.multi = 1;
+      input.suppress = 1;
+      last = monotonic_ms();
+      power_menu();
+    }
+    power_tick();
     while (read(input.fd, &ev, sizeof(ev)) == sizeof(ev)) {
       if (input_event(&input, &ev) && screen_awake)
         last = monotonic_ms();
@@ -1247,6 +1274,13 @@ static void press_id(struct drm_buf *b,const char *id) {
   assert(html_view_rect(selector,&x,&y,&w,&h));
   assert(w>=48&&h>=48&&x>=0&&y>=0&&x+w<=W&&y+h<=H);
   tap(x+w/2,y+h/2);
+}
+/* The id is not on the page (it has no control by that name). */
+static void press_id_absent(struct drm_buf *b,const char *id) {
+  render(b);
+  char selector[48];snprintf(selector,sizeof(selector),"#%s",id);
+  int x,y,w,h;
+  assert(!html_view_rect(selector,&x,&y,&w,&h));
 }
 #define CJK48 "超长名称测试超长名称测试超长名称测试超长名称测试超长名称测试超长名称测试超长名称测试超长名称测试"
 /* A status from an agent with proxy support; names are worst-case CJK. */
@@ -1734,7 +1768,7 @@ static void toolbox_tests(struct drm_buf *b, const char *dir) {
   page=MENU;capture_both(b,dir,"menu-toolbox-3x3");
   assert(strstr(html,"class=\"box tile\"")&&strstr(html,"act:wifi")&&strstr(html,"act:signal")&&strstr(html,"act:usb")&&strstr(html,"act:power")&&strstr(html,"act:booster"));
   press_id(b,"wifi");assert(page==WIFI_PAGE);capture_both(b,dir,"toolbox-wifi");
-  press_id(b,"w2off");expect_request("tool wifi_toggle 2g 0\n");assert(pending_kind==JOB_TOOL);reset_job();
+  press_id(b,"w2");expect_request("tool wifi_toggle 2g 0\n");assert(pending_kind==JOB_TOOL);reset_job();
   press_id(b,"back");assert(page==MENU);
   press_id(b,"signal");assert(page==SIGNAL_PAGE);capture_both(b,dir,"toolbox-signal");
   assert(strstr(html,"5G Auto"));
@@ -1752,10 +1786,23 @@ static void toolbox_tests(struct drm_buf *b, const char *dir) {
   press_id(b,"killbloat");expect_request("tool kill_bloat\n");reset_job();
   press_id(b,"dropcache");expect_request("tool drop_caches\n");reset_job();
   press_id(b,"back");assert(page==MENU);
+  /* A long press opens the power menu over any page or dialog, even with stale status;
+   * shutting down asks first and then waits for the agent, which restores the stock UI;
+   * a refusal, or a device still running after the wait, brings the menu back. */
+  page=CLASH;dialog=2;data.stamp=0;power_menu();assert(dialog==DLG_POWER);capture_both(b,dir,"power-menu");
+  press_id(b,"dismiss");assert(!dialog&&!test_request[0]);
+  power_menu();press_id(b,"poff");assert(dialog==DLG_POWER_CONFIRM);capture_both(b,dir,"power-confirm");
+  press_id(b,"confirm");expect_request("power off\n");assert(dialog==DLG_POWERING);capture_both(b,dir,"power-wait");
+  power_menu();press_id_absent(b,"confirm");assert(dialog==DLG_POWERING);
+  power_deadline=monotonic_ms()-1;power_tick();assert(dialog==DLG_POWER&&strstr(power_error,"没有关机"));capture(b,dir,"power-failed");
+  stub_job="ERR Busy\n";press_id(b,"preboot");press_id(b,"confirm");expect_request("power reboot\n");
+  assert(dialog==DLG_POWER&&strstr(power_error,"已在"));stub_job="OK 1\n";
+  stub_job=NULL;press_id(b,"preboot");press_id(b,"confirm");assert(dialog==DLG_POWER&&strstr(power_error,"没有响应"));stub_job="OK 1\n";
+  press_id(b,"stock");assert(quitting);quitting=0;dialog=0;power_error[0]=0;data.stamp=(unsigned long long)time(NULL);page=MENU;reset_job();
   /* An unchanged page is not laid out or drawn again; a change on it, or a forced frame, is. */
   drawn_valid=0;page=MENU;assert(render_changed(b,0)&&!render_changed(b,0));
   data.toolbox.kbps_down+=1000;assert(render_changed(b,0)&&!render_changed(b,0)&&render_changed(b,1));
-  puts("PASS Pocket OS 3x3 Toolbox grid and Wi-Fi, 5G Signal, USB & TTL, Battery & Charge, and Booster pages (zh/en); unchanged pages are not redrawn");
+  puts("PASS toolbox grid, Wi-Fi, signal, USB & TTL, battery and booster pages (zh/en); power menu, confirmation, wait and refusals; unchanged pages are not redrawn");
 }
 /* --replay <status stream> <page>…: how often a recorded stream of agent status replies
  * (each ending in "."), polled every two seconds, makes each page lay out and draw itself:
@@ -1882,7 +1929,7 @@ int main(int argc, char **argv) {
   page=MENU;capture(&b,argv[1],"menu-custom");
   assert(strstr(html,"act:overview") && !strstr(html,"act:wireguard"));
   press_id(&b,"overview");assert(page==OVERVIEW);press_id(&b,"wireguard");assert(page==OVERVIEW);
-  data.battery=12;capture(&b,argv[1],"battery-low");assert(strstr(html,"12%") && strstr(html,"#ff8a8a"));
+  data.battery=12;capture(&b,argv[1],"battery-low");assert(strstr(html,"12%") && strstr(html,"#f06a6a"));
   data.battery=-1;capture(&b,argv[1],"battery-unknown");assert(strstr(html,"--%"));
   char bad_settings[]="C 4 0 0 4 99\n.\n";assert(!parse_snapshot(bad_settings,&prefs));
   /* The language field of the C record switches every page; Chinese is the default. */

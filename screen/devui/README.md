@@ -36,6 +36,8 @@ OpenUI provides a separate **DevUI** sidebar page for opening/restoring the scre
 and editing brightness, idle return, startup page and menu visibility. Preferences
 are projected through the existing root socket. The agent's non-exclusive power
 observer can launch DevUI after four short presses when the optional shortcut is
-enabled. The panel handles its own short-press sleep/wake. Initial display setup
+enabled. The panel handles its own short-press sleep/wake, and a 1.5-second hold opens
+its power menu (shut down, restart, stock UI), which the agent carries out after
+restoring the stock UI. Initial display setup
 commits the frame before enabling the backlight and completes two follow-up
 Atomic commits before reporting readiness.

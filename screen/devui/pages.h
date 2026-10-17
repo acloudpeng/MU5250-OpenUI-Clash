@@ -16,11 +16,11 @@ static const char *page_title(void) {
   case DIAG: return L("Diagnostics","诊断");
   case ESIM: return "eSIM";
   case UPLINK: return L("Wi-Fi relay","Wi-Fi 中继");
-  case WIFI_PAGE: return L("Wi-Fi Control","Wi-Fi 控制");
-  case SIGNAL_PAGE: return L("5G & Signal","5G 与信号");
-  case USB_PAGE: return L("USB & TTL","USB 与防检测");
-  case POWER_PAGE: return L("Battery & Charge","电池与充电");
-  case BOOSTER_PAGE: return L("Booster","加速与清理");
+  case WIFI_PAGE: return "Wi-Fi";
+  case SIGNAL_PAGE: return L("Signal","信号");
+  case USB_PAGE: return L("USB & TTL","USB 与 TTL");
+  case POWER_PAGE: return L("Battery","电池与充电");
+  case BOOSTER_PAGE: return L("Booster","加速清理");
   default: return "OpenUI";
   }
 }
@@ -697,125 +697,124 @@ static void render_uplink(void) {
   footer(416,40,L("Manage networks in OpenUI. The hotspot may change channel.","网络与密码请在 OpenUI 中管理；连接后热点可能切换信道。"),"muted");
 }
 static void format_rate(char *buf, size_t n, unsigned long long kbps) {
-  if(kbps>=1000)snprintf(buf,n,"%.1fM",(double)kbps/1000.0);
+  if(kbps>=100000)snprintf(buf,n,"%.0fM",(double)kbps/1000.0);
+  else if(kbps>=1000)snprintf(buf,n,"%.1fM",(double)kbps/1000.0);
   else snprintf(buf,n,"%lluK",kbps);
 }
 static void render_wifi(void) {
   const struct toolbox_info *h=&data.toolbox;
   char tmp[128];
-  header(L("Wi-Fi Control","Wi-Fi 控制"));
-  add("<div class=\"box card\" style=\"left:12px;top:72px;width:296px;height:108px\"></div>");
-  kv_row(82,L("Primary SSID","主网络名称"),h->wifi_ssid[0]?h->wifi_ssid:"--","accent");
-  snprintf(tmp,sizeof(tmp),L("%llu connected","已连接 %llu 台"),h->wifi_clients);
-  kv_row(108,L("Active Clients","在线终端"),tmp,h->wifi_clients?"good":"muted");
-  snprintf(tmp,sizeof(tmp),"2.4G %s · 5G %s",h->wifi_2g_on?L("ON","开启"):L("OFF","关闭"),h->wifi_5g_on?L("ON","开启"):L("OFF","关闭"));
-  kv_row(134,L("Radio State","射频状态"),tmp,(h->wifi_2g_on||h->wifi_5g_on)?"good":"warn");
-  box(16,192,288,20,"head",L("2.4 GHz Radio Band","2.4 GHz 频段开关"));
-  linkbox(12,218,142,54,"w2on",L("2.4G ON","开启 2.4G"),!blocked()&&h->has,h->wifi_2g_on?CHOSEN:PRIMARY);
-  linkbox(166,218,142,54,"w2off",L("2.4G OFF","关闭 2.4G"),!blocked()&&h->has,!h->wifi_2g_on?CHOSEN:DANGER);
-  box(16,286,288,20,"head",L("5 GHz High-Speed Band","5 GHz 高速频段开关"));
-  linkbox(12,312,142,54,"w5on",L("5G ON","开启 5G"),!blocked()&&h->has,h->wifi_5g_on?CHOSEN:PRIMARY);
-  linkbox(166,312,142,54,"w5off",L("5G OFF","关闭 5G"),!blocked()&&h->has,!h->wifi_5g_on?CHOSEN:DANGER);
-  footer(404,40,pending&&pending_kind==JOB_TOOL?L("Applying Wi-Fi radio changes...","正在应用 Wi-Fi 射频设置..."):
-         L("Toggle bands directly; edit SSID/password in Web UI.","可直接开关频段；修改名称与密码请前往网页后台。"),pending?"warn":"muted");
+  int can=!blocked()&&h->has;
+  header(L("Wi-Fi","Wi-Fi"));
+  add("<div class=\"box card\" style=\"left:12px;top:72px;width:296px;height:72px\"></div>");
+  kv_row(84,L("Wi-Fi name","网络名称"),h->wifi_ssid[0]?h->wifi_ssid:"--","");
+  snprintf(tmp,sizeof(tmp),L("%llu connected","%llu 台在线"),h->wifi_clients);
+  kv_row(110,L("Clients","在线终端"),tmp,h->wifi_clients?"good":"");
+  section(156,L("Bands","频段"));
+  switch_row(12,180,296,60,"w2",h->wifi_2g_on?"w2off":"w2on","2.4 GHz",h->wifi_2g_on?L("On · wider range","已开启 · 覆盖更远"):L("Off","已关闭"),h->wifi_2g_on,can);
+  switch_row(12,248,296,60,"w5",h->wifi_5g_on?"w5off":"w5on","5 GHz",h->wifi_5g_on?L("On · faster nearby","已开启 · 近距离更快"):L("Off","已关闭"),h->wifi_5g_on,can);
+  footer(324,40,pending&&pending_kind==JOB_TOOL?L("Applying Wi-Fi changes...","正在应用 Wi-Fi 设置..."):
+         L("Clients on a band you turn off disconnect. Name and password are in OpenUI.","关闭频段会断开其上的终端；名称与密码请在 OpenUI 中修改。"),pending?"warn":"muted");
 }
 static void render_signal(void) {
   const struct toolbox_info *h=&data.toolbox;
   char tmp[128],d_rate[24],u_rate[24];
-  header(L("5G & Signal","5G 与信号"));
+  int can=!blocked()&&h->has;
+  header(L("Signal","信号"));
   add("<div class=\"box card\" style=\"left:12px;top:72px;width:296px;height:132px\"></div>");
-  snprintf(tmp,sizeof(tmp),"%s · %s",h->radio[0]?h->radio:"5G",h->band[0]?h->band:"Auto");
-  kv_row(80,L("Network / Band","当前网络 / 频段"),tmp,"accent");
-  snprintf(tmp,sizeof(tmp),"%lld dBm / %lld dB",h->rsrp,h->sinr);
-  kv_row(104,"RSRP / SINR",tmp,h->rsrp>-95?"good":h->rsrp>-110?"warn":"bad");
+  snprintf(tmp,sizeof(tmp),"%s · %s",h->radio[0]?h->radio:"--",h->band[0]?h->band:"--");
+  kv_row(80,L("Network","网络"),tmp,"accent");
+  if(h->rsrp==NO_FIGURE)snprintf(tmp,sizeof(tmp),"--");
+  else snprintf(tmp,sizeof(tmp),"%lld dBm / %lld dB",h->rsrp,h->sinr);
+  kv_row(104,"RSRP / SINR",tmp,h->rsrp==NO_FIGURE?"":h->rsrp>-95?"good":h->rsrp>-110?"warn":"bad");
   snprintf(tmp,sizeof(tmp),"%lld dB · PCI %s",h->rsrq,h->pci[0]?h->pci:"-");
   kv_row(128,"RSRQ / PCI",tmp,"");
   format_rate(d_rate,sizeof(d_rate),h->kbps_down);format_rate(u_rate,sizeof(u_rate),h->kbps_up);
   snprintf(tmp,sizeof(tmp),"↓ %s  ↑ %s",d_rate,u_rate);
-  kv_row(152,L("Live Speed","实时速率"),tmp,"good");
-  snprintf(tmp,sizeof(tmp),"LTE:%s NR:%s",h->lte_bands[0]?h->lte_bands:"-",h->nr_bands[0]?h->nr_bands:"-");
-  kv_row(176,L("Active CA","载波聚合"),tmp,"muted");
-  box(16,214,288,20,"head",L("Network Mode Switch","网络制式切换"));
+  kv_row(152,L("Speed","实时速率"),tmp,"");
+  snprintf(tmp,sizeof(tmp),"LTE %s · NR %s",h->lte_bands[0]?h->lte_bands:"-",h->nr_bands[0]?h->nr_bands:"-");
+  kv_row(176,L("Carriers","载波"),tmp,"");
+  section(216,L("Network mode","网络制式"));
   int is_sa=!strcmp(h->net_select,"Only_5G");
   int is_nsa=!strcmp(h->net_select,"LTE_AND_5G");
   int is_4g=!strcmp(h->net_select,"Only_LTE");
   int is_auto=!is_sa&&!is_nsa&&!is_4g;
-  linkbox(12,240,142,54,"net0",L("5G Auto","5G 自动"),!blocked()&&h->has,is_auto?CHOSEN:PRIMARY);
-  linkbox(166,240,142,54,"net1",L("5G SA Only","仅 5G SA"),!blocked()&&h->has,is_sa?CHOSEN:PLAIN);
-  linkbox(12,304,142,54,"net2",L("5G NSA","5G NSA"),!blocked()&&h->has,is_nsa?CHOSEN:PLAIN);
-  linkbox(166,304,142,54,"net3",L("4G Only","仅 4G LTE"),!blocked()&&h->has,is_4g?CHOSEN:PLAIN);
-  footer(396,40,pending&&pending_kind==JOB_TOOL?L("Switching modem network mode...","正在切换基带网络制式..."):
-         L("Band locking and cell locking are available in Web UI.","精细锁频段与锁小区可在网页端操作。"),pending?"warn":"muted");
+  linkbox(12,240,142,52,"net0",L("5G Auto","5G 自动"),can,is_auto?CHOSEN:PLAIN);
+  linkbox(166,240,142,52,"net1",L("5G SA only","仅 5G SA"),can,is_sa?CHOSEN:PLAIN);
+  linkbox(12,300,142,52,"net2","5G NSA",can,is_nsa?CHOSEN:PLAIN);
+  linkbox(166,300,142,52,"net3",L("4G only","仅 4G"),can,is_4g?CHOSEN:PLAIN);
+  footer(368,40,pending&&pending_kind==JOB_TOOL?L("Switching the network mode...","正在切换网络制式..."):
+         L("Band and cell locking are in OpenUI.","锁频段与锁小区请在 OpenUI 中操作。"),pending?"warn":"muted");
 }
 static void render_usb(void) {
   const struct toolbox_info *h=&data.toolbox;
   char tmp[128];
-  header(L("USB & TTL","USB 与防检测"));
+  int can=!blocked()&&h->has;
+  header(L("USB & TTL","USB 与 TTL"));
   add("<div class=\"box card\" style=\"left:12px;top:72px;width:296px;height:60px\"></div>");
-  snprintf(tmp,sizeof(tmp),"%s",h->usb_mode[0]?h->usb_mode:"rndis");
-  kv_row(82,L("USB Mode","当前 USB 模式"),tmp,"accent");
-  if(h->ttl_val)snprintf(tmp,sizeof(tmp),"TTL = %llu",h->ttl_val);
-  else snprintf(tmp,sizeof(tmp),"%s",L("Off (Default)","关闭（系统默认）"));
-  kv_row(106,L("Anti-Detect TTL","防检测 TTL"),tmp,h->ttl_val?"good":"muted");
-  box(16,146,288,20,"head",L("USB Tethering Protocol","USB 网络共享模式"));
+  kv_row(80,L("USB mode","USB 模式"),h->usb_mode[0]?h->usb_mode:"--","");
+  if(h->ttl_val)snprintf(tmp,sizeof(tmp),"%llu",h->ttl_val);
+  else snprintf(tmp,sizeof(tmp),"%s",L("Off","关闭"));
+  kv_row(104,"TTL",tmp,h->ttl_val?"good":"");
+  section(144,L("USB tethering","USB 共享模式"));
   int is_rndis=!strncmp(h->usb_mode,"rndis",5);
   int is_ncm=!strncmp(h->usb_mode,"ncm",3);
   int is_ecm=!strncmp(h->usb_mode,"ecm",3);
-  linkbox(12,172,92,56,"usb0","RNDIS",!blocked()&&h->has,is_rndis?CHOSEN:PLAIN);
-  linkbox(114,172,92,56,"usb1","NCM",!blocked()&&h->has,is_ncm?CHOSEN:PLAIN);
-  linkbox(216,172,92,56,"usb2","ECM",!blocked()&&h->has,is_ecm?CHOSEN:PLAIN);
-  box(16,240,288,20,"muted",L("USB drops briefly on a switch.","切换时 USB 会断开几秒"));
-  box(16,262,288,20,"muted",L("NCM is experimental.","NCM 为实验性模式"));
-  box(16,296,288,20,"head",L("TTL Spoofing Presets","TTL 防检测预设"));
-  linkbox(12,322,68,56,"ttl0",L("Off","关"),!blocked()&&h->has,h->ttl_val==0?CHOSEN:PLAIN);
-  linkbox(88,322,68,56,"ttl64","64",!blocked()&&h->has,h->ttl_val==64?CHOSEN:PRIMARY);
-  linkbox(164,322,68,56,"ttl65","65",!blocked()&&h->has,h->ttl_val==65?CHOSEN:PRIMARY);
-  linkbox(240,322,68,56,"ttl128","128",!blocked()&&h->has,h->ttl_val==128?CHOSEN:PRIMARY);
-  footer(396,40,pending&&pending_kind==JOB_TOOL?L("Applying USB / TTL configuration...","正在应用 USB 与 TTL 设置..."):
-         L("TTL 64/65 bypasses hotspot carrier throttling.","TTL 64/65 可绕过运营商热点共享限制。"),pending?"warn":"muted");
+  linkbox(12,168,92,52,"usb0","RNDIS",can,is_rndis?CHOSEN:PLAIN);
+  linkbox(114,168,92,52,"usb1","NCM",can,is_ncm?CHOSEN:PLAIN);
+  linkbox(216,168,92,52,"usb2","ECM",can,is_ecm?CHOSEN:PLAIN);
+  box(16,226,292,40,"wrap faint",L("USB drops for a few seconds on a switch. NCM is experimental.","切换时 USB 会断开几秒；NCM 为实验性模式。"));
+  section(276,L("TTL for shared devices","共享设备的 TTL"));
+  linkbox(12,300,68,52,"ttl0",L("Off","关"),can,h->ttl_val==0?CHOSEN:PLAIN);
+  linkbox(88,300,68,52,"ttl64","64",can,h->ttl_val==64?CHOSEN:PLAIN);
+  linkbox(164,300,68,52,"ttl65","65",can,h->ttl_val==65?CHOSEN:PLAIN);
+  linkbox(240,300,68,52,"ttl128","128",can,h->ttl_val==128?CHOSEN:PLAIN);
+  footer(368,40,pending&&pending_kind==JOB_TOOL?L("Applying USB and TTL settings...","正在应用 USB 与 TTL 设置..."):
+         L("A fixed TTL makes shared devices look like the router itself.","固定 TTL 可让共享设备看起来与本机相同。"),pending?"warn":"muted");
 }
 static void render_power(void) {
   const struct toolbox_info *h=&data.toolbox;
   char tmp[128];
-  header(L("Battery & Charge","电池与充电"));
-  add("<div class=\"box card\" style=\"left:12px;top:72px;width:296px;height:110px\"></div>");
-  if(data.battery>=0)snprintf(tmp,sizeof(tmp),"%d%% · %.1f °C",data.battery,data.temperature>-900?data.temperature/10.0:0.0);
-  else snprintf(tmp,sizeof(tmp),"--%%");
-  kv_row(82,L("Battery Level","当前电量与温度"),tmp,data.battery<=20?"bad":"good");
+  int can=!blocked()&&h->has;
+  header(L("Battery","电池与充电"));
+  add("<div class=\"box card\" style=\"left:12px;top:72px;width:296px;height:104px\"></div>");
+  if(data.battery>=0&&data.temperature>-900)snprintf(tmp,sizeof(tmp),"%d%% · %.1f °C",data.battery,data.temperature/10.0);
+  else if(data.battery>=0)snprintf(tmp,sizeof(tmp),"%d%%",data.battery);
+  else snprintf(tmp,sizeof(tmp),"--");
+  kv_row(80,L("Level","电量"),tmp,data.battery<0?"":data.battery<=20?"bad":"good");
   snprintf(tmp,sizeof(tmp),"%llu mV · %lld mA",h->batt_mv,h->batt_ma);
-  kv_row(108,L("Voltage / Current","电压与电流"),tmp,"accent");
-  if(h->chg_limit_on)snprintf(tmp,sizeof(tmp),L("Stop %llu%% / Resume %llu%%","%llu%% 停充 / %llu%% 复充"),h->chg_stop,h->chg_start);
-  else snprintf(tmp,sizeof(tmp),"%s",h->chg_enabled?L("Full Charge (100%)","充满模式 (100%)"):L("Charging Paused","已暂停充电"));
-  kv_row(134,L("Charge Policy","充电策略"),tmp,h->chg_limit_on?"good":"");
-  kv_row(156,L("Battery Health","电池健康"),h->batt_health[0]?h->batt_health:"Good","muted");
-  box(16,194,288,20,"head",L("Charging Switch","充电总开关"));
-  linkbox(12,220,142,52,"chgon",L("Allow Charge","允许充电"),!blocked()&&h->has,h->chg_enabled?CHOSEN:PRIMARY);
-  linkbox(166,220,142,52,"chgoff",L("Pause Charge","暂停充电"),!blocked()&&h->has,!h->chg_enabled?CHOSEN:DANGER);
-  box(16,284,288,20,"head",L("Battery Protection Limit","电池保护上限（旁路供电）"));
+  kv_row(102,L("Power","电压 / 电流"),tmp,"");
+  if(h->chg_limit_on)snprintf(tmp,sizeof(tmp),L("%llu%% · on at %llu%%","%llu%% 停 · %llu%% 复充"),h->chg_stop,h->chg_start);
+  else snprintf(tmp,sizeof(tmp),"%s",L("Charge to 100%","充满 100%"));
+  kv_row(124,L("Limit","充电上限"),tmp,"");
+  kv_row(146,L("Health","电池健康"),h->batt_health[0]?h->batt_health:"--","");
+  switch_row(12,188,296,60,"chg",h->chg_enabled?"chgoff":"chgon",L("Charging","充电"),
+             h->chg_enabled?L("Allowed","允许充电"):L("Paused · runs from the charger","已暂停 · 由充电器直接供电"),h->chg_enabled,can);
+  section(262,L("Stop charging at","充到多少停止"));
   int lim = h->chg_limit_on ? (int)h->chg_stop : 100;
-  linkbox(12,310,68,52,"lim70","70%",!blocked()&&h->has,lim==70?CHOSEN:PLAIN);
-  linkbox(88,310,68,52,"lim80","80%",!blocked()&&h->has,lim==80?CHOSEN:PRIMARY);
-  linkbox(164,310,68,52,"lim90","90%",!blocked()&&h->has,lim==90?CHOSEN:PLAIN);
-  linkbox(240,310,68,52,"lim100","100%",!blocked()&&h->has,lim>=100?CHOSEN:PLAIN);
-  footer(392,40,pending&&pending_kind==JOB_TOOL?L("Updating charge protection...","正在更新充电保护策略..."):
-         L("80% limit reduces heat and battery wear when plugged in.","80% 保护上限可大幅降低插电发热与电池损耗。"),pending?"warn":"muted");
+  linkbox(12,286,68,52,"lim70","70%",can,lim==70?CHOSEN:PLAIN);
+  linkbox(88,286,68,52,"lim80","80%",can,lim==80?CHOSEN:PLAIN);
+  linkbox(164,286,68,52,"lim90","90%",can,lim==90?CHOSEN:PLAIN);
+  linkbox(240,286,68,52,"lim100","100%",can,lim>=100?CHOSEN:PLAIN);
+  footer(354,40,pending&&pending_kind==JOB_TOOL?L("Updating charging...","正在更新充电设置..."):
+         L("A limit of 80% keeps the battery cooler when always plugged in.","长期插电时，80% 上限可减少发热和电池损耗。"),pending?"warn":"muted");
 }
 static void render_booster(void) {
   const struct toolbox_info *h=&data.toolbox;
   char tmp[128];
-  header(L("Booster","加速与清理"));
+  header(L("Booster","加速清理"));
   add("<div class=\"box card\" style=\"left:12px;top:72px;width:296px;height:138px\"></div>");
   snprintf(tmp,sizeof(tmp),"%.1f%%",data.cpu);
-  stat_row(82,L("CPU Load","CPU 负载"),tmp,data.cpu);
+  stat_row(82,"CPU",tmp,data.cpu);
   if(data.memory>=0)snprintf(tmp,sizeof(tmp),"%.1f%%",data.memory);else strcpy(tmp,"--");
-  stat_row(124,L("Memory Usage","内存占用"),tmp,data.memory);
-  snprintf(tmp,sizeof(tmp),L("%llu bloat processes","%llu 个冗余进程"),h->bloat_cnt);
-  kv_row(172,L("Vendor Telemetry","中兴冗余服务"),tmp,h->bloat_cnt?"warn":"good");
-  linkbox(12,226,296,56,"killbloat",L("Kill ZTE Bloatware & Free CPU","一键清理冗余进程（释放负载）"),!blocked(),PRIMARY);
-  linkbox(12,294,296,56,"dropcache",L("Flush Kernel PageCache (Drop Caches)","一键释放系统内存缓存"),!blocked(),PLAIN);
-  linkbox(12,362,296,52,"stock",L("Switch to Stock ZTE UI","切换到中兴原厂界面"),1,PLAIN);
-  footer(424,40,pending&&pending_kind==JOB_TOOL?L("Optimizing system resources...","正在清理系统资源..."):
-         L("Safely stops non-essential telemetry & frees RAM.","安全终止非必要遥测服务并回收内存缓存。"),pending?"warn":"muted");
+  stat_row(124,L("Memory","内存"),tmp,data.memory);
+  snprintf(tmp,sizeof(tmp),L("%llu running","%llu 个在运行"),h->bloat_cnt);
+  kv_row(172,L("Optional services","可选服务"),tmp,h->bloat_cnt?"warn":"good");
+  linkbox(12,222,296,56,"killbloat",L("Stop optional services","停止可选服务"),!blocked(),PRIMARY);
+  linkbox(12,288,296,56,"dropcache",L("Free cached memory","释放内存缓存"),!blocked(),PLAIN);
+  linkbox(12,354,296,52,"stock",L("Return to the stock UI","返回原厂界面"),1,PLAIN);
+  footer(418,40,pending&&pending_kind==JOB_TOOL?L("Freeing resources...","正在清理..."):
+         L("Stops vendor services the router does not need.","停止路由器用不到的厂商服务。"),pending?"warn":"muted");
 }
 static void render_confirm(void) {
   const struct backend_info *b=&data.backend;
@@ -872,4 +871,30 @@ static void render_confirm(void) {
   if(detail[0])sbox(28,236,264,20,"head accent",detail);
   linkbox(24,284,128,56,"dismiss",L("Cancel","取消"),1,PLAIN);
   linkbox(168,284,128,56,"confirm",button,!blocked(),tone);
+}
+/* The long-press power menu, its confirmation and the wait after it, over the whole screen. */
+static void render_power_dialog(void) {
+  rect(0,0,W,H,"shade",NULL);
+  int off=power_choice==2;
+  if(dialog==DLG_POWER) {
+    add("<div class=\"box card\" style=\"left:12px;top:72px;width:296px;height:356px\"></div>");
+    box(28,88,264,32,"title",L("Power","电源"));
+    if(power_error[0])box(28,124,264,40,"wrap bad",power_error);
+    else box(28,124,264,40,"wrap muted",L("Shutting down or restarting goes through the stock UI.","关机和重启会先回到原厂界面。"));
+    linkbox(24,172,272,56,"poff",L("Shut down","关机"),1,DANGER);
+    linkbox(24,236,272,56,"preboot",L("Restart","重启"),1,DANGER);
+    linkbox(24,300,272,52,"stock",L("Return to the stock UI","返回原厂界面"),1,PLAIN);
+    linkbox(24,360,272,52,"dismiss",L("Cancel","取消"),1,PLAIN);
+  } else if(dialog==DLG_POWER_CONFIRM) {
+    add("<div class=\"box card\" style=\"left:12px;top:112px;width:296px;height:244px\"></div>");
+    box(28,128,264,32,"title",off?L("Shut down?","关机？"):L("Restart the device?","重启设备？"));
+    box(28,170,264,80,"wrap",off?L("All connections drop. The stock screen shows first, then the device turns off.","所有连接都会断开。屏幕先回到原厂界面，然后关机。"):
+        L("All connections drop for about a minute. The stock screen shows first.","所有连接会断开约一分钟。屏幕会先回到原厂界面。"));
+    linkbox(24,284,128,56,"dismiss",L("Cancel","取消"),1,PLAIN);
+    linkbox(168,284,128,56,"confirm",off?L("Shut down","关机"):L("Restart","重启"),1,DANGER);
+  } else {
+    add("<div class=\"box card\" style=\"left:12px;top:168px;width:296px;height:132px\"></div>");
+    box(28,184,264,32,"title",off?L("Shutting down...","正在关机..."):L("Restarting...","正在重启..."));
+    box(28,226,264,60,"wrap muted",L("The stock screen comes back in a few seconds.","几秒后屏幕会回到原厂界面。"));
+  }
 }

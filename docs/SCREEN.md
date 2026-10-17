@@ -15,8 +15,9 @@ never turns a proxy off or changes saved device routing.
 2. Open it with **DevUI → Open DevUI screen**, or on the lit stock UI hold two fingers
    still on the screen for two seconds. **Open DevUI at startup** and the four-press
    power-button shortcut are optional.
-3. Tap a menu row to open it; **‹ Back** is at the top right and **Stock UI** on the
-   main menu leaves DevUI. A short power press turns the display off or on. After the
+3. Tap a menu row or tile to open it; **‹ Back** is at the top left and **Stock UI** on
+   the main menu leaves DevUI. A short power press turns the display off or on; holding
+   the power key opens the power menu (shut down, restart, stock UI). After the
    idle time (two minutes by default) the screen turns off and DevUI stays, or, if
    chosen, the stock UI returns.
 
@@ -58,6 +59,24 @@ Touch actions are ignored while dark, including touches queued across wake-up.
 The display stops redrawing while asleep; agent jobs and supervisor heartbeats
 continue. This controls the LCD backlight, not whole-device suspend or power-off.
 
+**Power menu.** The stock UI draws its own shut-down/restart menu on a long press, but
+DevUI has stopped the stock UI, so DevUI provides one. Hold the power key for
+**1.5 seconds**: the menu opens over any page or dialog, waking a dark screen first,
+with **Shut down**, **Restart**, **Return to the stock UI** and **Cancel**. Shutting
+down or restarting asks once more, then the panel sends `power off` or
+`power reboot` to the agent and shows *Shutting down…* / *Restarting…*.
+- The agent answers at once, even while a screen job runs or the status is stale,
+  and then restores the stock UI (so the firmware shows its own shut-down or restart
+  screen and never finds the display taken) before it calls
+  `zwrt_mc.device.manager device_poweroff` (the webpage's shutdown) or
+  `system reboot`. A second request in the next minute is refused as busy.
+- If the agent does not answer, or the device is still running 30 seconds later, the
+  menu comes back with the reason; **Return to the stock UI** then leads to the stock
+  long-press menu.
+- The hold is timed from the key's own event stamps (`EVIOCSCLOCKID` monotonic), so a
+  press and release read together after a slow frame still count as a long press.
+  A hold opens the menu once; its release is not a short press.
+
 Enable **Press four times to open DevUI** in the webpage and click **Save DevUI
 settings**. From the stock UI, make four short presses within **2.5 seconds**,
 leaving no more than **0.7 seconds** between presses. The agent waits 350 ms after
@@ -69,7 +88,7 @@ agent restarts after being saved.
 The observer reads `pmic_pwrkey` without EVIOCGRAB and does not stop the factory
 key service. Stock UI may turn its display on and off during the four presses.
 Long presses, auto-repeat, incomplete sequences and dropped events cannot launch
-DevUI. Events are drained while the shortcut is disabled or DevUI is already
+DevUI from the stock UI. Events are drained while the shortcut is disabled or DevUI is already
 running, so they cannot be replayed when it becomes enabled. The shortcut requires
 a verified screen component and a completed factory boot handshake. It does not
 modify factory menus, binaries, boot scripts, power-off or hardware-reset behavior.
@@ -85,7 +104,7 @@ modify factory menus, binaries, boot scripts, power-off or hardware-reset behavi
 | Idle time | 30–600 seconds; default 120 seconds, measured from touch or a short power press |
 | When idle | Turn the screen off and stay in DevUI (default), or return to the stock UI |
 | Startup page | Main menu or any visible feature; applies on the next opening |
-| Menu features | Up to nine of Overview, Proxy, WireGuard, Clash, eSIM, Wi-Fi relay, Wi-Fi, 5G signal, USB & TTL, Battery & charge, Booster, Saved profiles and Device routing; default Overview, Proxy, WireGuard, Clash |
+| Menu features | Up to nine of Overview, Proxy, WireGuard, Clash, eSIM, Wi-Fi relay, Wi-Fi, Signal, USB & TTL, Battery & charge, Booster, Saved profiles and Device routing; default Overview, Proxy, WireGuard, Clash |
 
 At least one feature must remain visible and at most nine fit the menu: up to four show
 as rows, five to nine as a 3×3 grid of tiles (the toolbox). The DevUI webpage has a
@@ -117,8 +136,16 @@ Rendered by the native preview build (`sh screen/build.sh --preview`), English:
 | ![Main menu](images/screen-menu.png) | ![Toolbox menu, 3×3](images/screen-toolbox.png) | ![Overview with the Wi-Fi relay row](images/screen-overview.png) |
 | ![WireGuard](images/screen-home.png) | ![Device routing](images/screen-devices.png) | ![Saved profiles](images/screen-profiles.png) |
 | ![eSIM](images/screen-esim.png) | ![Wi-Fi relay](images/screen-uplink.png) | ![Wi-Fi relay needing a web login](images/screen-uplink-login.png) |
-| ![Toolbox: Wi-Fi](images/screen-wifi.png) | ![Toolbox: 5G signal](images/screen-signal.png) | ![Toolbox: USB and TTL](images/screen-usb.png) |
-| ![Toolbox: battery and charge](images/screen-power.png) | ![Toolbox: booster](images/screen-booster.png) | |
+| ![Toolbox: Wi-Fi](images/screen-wifi.png) | ![Toolbox: signal](images/screen-signal.png) | ![Toolbox: USB and TTL](images/screen-usb.png) |
+| ![Toolbox: battery and charge](images/screen-power.png) | ![Toolbox: booster](images/screen-booster.png) | ![Power menu (hold the power key)](images/screen-power-menu.png) |
+
+Every page has the same title bar: **‹ Back** at the top left, then the page title. The
+colours are the web panel's dark theme. On the main menu a status card shows the
+battery, the signal (with toolbox data) or the uptime, the active proxy and, with
+toolbox data, the current speed. Rows (up to four features) carry a line of detail;
+tiles (five to nine) carry a mark, a short name and the feature's state in a word or
+two (Off, 5 online, −88 dBm, TTL 64, Limit 80%…). Choices show the current one in
+green and the others plain; on/off settings are switches.
 
 - **Overview:** a battery icon with a proportional fill and large percentage,
   a low-battery color at 20% or below, battery temperature, uptime, CPU and memory.
@@ -162,14 +189,15 @@ Rendered by the native preview build (`sh screen/build.sh --preview`), English:
   on **Overview** whenever the agent reports the uplink, so it is reachable without
   changing the menu; it returns to the page it was opened from.
 - **Toolbox pages** (menu options, shown as tiles with five or more features):
-  - **Wi-Fi:** the main SSID, connected clients, and on/off per band (2.4 GHz, 5 GHz)
+  - **Wi-Fi:** the main SSID, connected clients, and a switch per band (2.4 GHz, 5 GHz)
     through the same Wi-Fi settings as the webpage.
-  - **5G signal:** network type and band, RSRP/SINR/RSRQ, PCI, live speed, and the
-    preferred network mode (5G auto, 5G SA only, 5G NSA, 4G only).
+  - **Signal:** network type and band, RSRP/SINR/RSRQ, PCI, live speed, carriers, and
+    the preferred network mode (5G auto, 5G SA only, 5G NSA, 4G only).
   - **USB & TTL:** USB mode (RNDIS, NCM, ECM; switching drops USB briefly, NCM is
     experimental) and TTL off/64/65/128.
-  - **Battery & charge:** level, temperature, voltage, current and health; allow or pause
-    charging; charge limit 70/80/90 % (10 % hysteresis) or none.
+  - **Battery & charge:** level, temperature, voltage, current and health; a charging
+    switch (off pauses charging and runs the device from the charger); charge limit
+    70/80/90 % (10 % hysteresis) or none.
   - **Booster:** CPU, memory and vendor processes; stop the optional vendor processes,
     drop the kernel caches, or return to the stock UI.
 
@@ -298,6 +326,9 @@ python3 scripts/verify-devui-settings.py --gateway 192.168.0.1 --port 2222 \
   (60 s for node selection, delay tests, diagnostics, eSIM actions and the relay
   switch) and says no result arrived. Status older than ten seconds disables mutation
   controls.
+- `power reboot|off` (the power menu) is not a job: it is answered at once with `OK`,
+  or `ERR Busy` while one is already under way (for a minute); the agent then restores
+  the stock UI and restarts or shuts the device down.
 
 The independent supervisor checks factory boot synchronization and records the
 stock UI, touch process and brightness before taking over. The display uses RGB565

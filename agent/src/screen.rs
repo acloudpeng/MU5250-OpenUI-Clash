@@ -4,7 +4,7 @@ use crate::{clash, clash_diag, handlers::AppState, network_ext, proxy, system, w
 // declared here so that main.rs needs no change.
 #[path = "screen_ipc.rs"]
 mod ipc;
-use ipc::{Cache, Esim, Job, Request, Tool};
+use ipc::{Cache, Esim, Job, Power, Request, Tool};
 use serde_json::{json, Value};
 use std::{
     fs,
@@ -32,6 +32,8 @@ static INTEREST: AtomicU64 = AtomicU64::new(0);
 /// Last groups or nodes query; the proxies view is read only for the node pages.
 static PROXY_INTEREST: AtomicU64 = AtomicU64::new(0);
 static BUSY: AtomicBool = AtomicBool::new(false);
+/// A restart or shutdown from the power menu is under way.
+static POWERING: AtomicBool = AtomicBool::new(false);
 static JOB: AtomicU64 = AtomicU64::new(0);
 /// The last finished job and its result: 0 done, 1 conflict (409), 2 failed.
 static RESULT: Mutex<(u64, u8)> = Mutex::new((0, 0));
@@ -819,6 +821,43 @@ fn start_job(job: Job) -> String {
     }
     format!("OK {job}\n")
 }
+/// The long-press power menu. The stock UI comes back first, so the firmware shows its
+/// own shutdown or restart screen and never finds its display taken; then the device
+/// restarts or shuts down. Answered at once: the panel draws its last frame from the
+/// reply, and a busy job (or a stuck one) does not hold the device up.
+fn power(action: Power) -> String {
+    if POWERING.swap(true, Ordering::AcqRel) {
+        return "ERR Busy\n".into();
+    }
+    let spawned = std::thread::Builder::new().spawn(move || {
+        std::thread::sleep(Duration::from_millis(500));
+        let shown = running();
+        let _ = close();
+        // The supervisor restores the stock UI before it exits; ten seconds at most, then
+        // two more for the stock UI to draw.
+        for _ in 0..40 {
+            if !running() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(250));
+        }
+        if shown {
+            std::thread::sleep(Duration::from_secs(2));
+        }
+        let _ = match action {
+            Power::Reboot => crate::device_ext::reboot(),
+            Power::Off => crate::device_ext::poweroff(),
+        };
+        // Still here a minute later (refused, or off-charging): the menu works again.
+        std::thread::sleep(Duration::from_secs(60));
+        POWERING.store(false, Ordering::Release);
+    });
+    if spawned.is_err() {
+        POWERING.store(false, Ordering::Release);
+        return "ERR Cannot start\n".into();
+    }
+    "OK\n".into()
+}
 fn request(line: &str) -> String {
     INTEREST.store(now(), Ordering::Relaxed);
     match ipc::parse(line) {
@@ -837,6 +876,7 @@ fn request(line: &str) -> String {
                 .unwrap_or_else(|e| format!("ERR {e}\n"))
         }
         Ok(Request::Job(job)) => start_job(job),
+        Ok(Request::Power(action)) => power(action),
         Err(e) => format!("ERR {e}\n"),
     }
 }

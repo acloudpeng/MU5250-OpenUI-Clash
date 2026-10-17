@@ -26,6 +26,16 @@ pub enum Request {
         offset: usize,
     },
     Job(Job),
+    /// `power reboot|off`, from the long-press power menu. Not a job: it is accepted while
+    /// another job runs.
+    Power(Power),
+}
+
+/// What the long-press power menu asks for.
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum Power {
+    Reboot,
+    Off,
 }
 
 /// Work done on the job thread, one at a time.
@@ -205,6 +215,8 @@ pub fn parse(line: &str) -> Result<Request, &'static str> {
             job(Job::Core(json!({"action":"update","tag":tag})))
         }
         ["diag"] => job(Job::Diagnose),
+        ["power", "reboot"] => Ok(Request::Power(Power::Reboot)),
+        ["power", "off"] => Ok(Request::Power(Power::Off)),
         ["esim", "scan"] => job(Job::Esim(Esim::Scan)),
         ["esim", "reboot"] => job(Job::Esim(Esim::Reboot)),
         ["esim", "enable", g, i] => job(Job::Esim(Esim::Enable {
@@ -1340,6 +1352,13 @@ mod tests {
             assert_eq!(uplink_reason(Some(reason)), code, "{reason}");
         }
         assert_eq!(uplink_reason(None), "-");
+    }
+    #[test]
+    fn power_requests() {
+        assert_eq!(parse("power reboot"), Ok(Request::Power(Power::Reboot)));
+        assert_eq!(parse("power off\n"), Ok(Request::Power(Power::Off)));
+        assert!(parse("power").is_err() && parse("power halt").is_err());
+        assert!(parse("power off now").is_err());
     }
     #[test]
     fn toolbox_requests_and_record() {

@@ -109,7 +109,8 @@ pub fn device_reboot(_state: &AppState) -> (u16, Value) {
     reboot()
 }
 
-/// Restarts the device; also the screen's eSIM page, after a switch needs it.
+/// Restarts the device; also the screen's eSIM page, after a switch needs it, and its
+/// long-press power menu.
 pub fn reboot() -> (u16, Value) {
     match ubus::call("system", "reboot", Some("{}")) {
         Ok(data) => (200, json!({"ok": true, "data": data})),
@@ -118,6 +119,11 @@ pub fn reboot() -> (u16, Value) {
 }
 
 pub fn device_shutdown(_state: &AppState) -> (u16, Value) {
+    poweroff()
+}
+
+/// Shuts the device down through the firmware; also the screen's long-press power menu.
+pub fn poweroff() -> (u16, Value) {
     match ubus::call(
         "zwrt_mc.device.manager",
         "device_poweroff",

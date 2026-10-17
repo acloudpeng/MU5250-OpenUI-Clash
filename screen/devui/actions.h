@@ -73,7 +73,40 @@ static void confirm_backend(int target) {
   ask(CF_BACKEND,target,JOB_BACKEND,rev,req);
 }
 static int digit_id(const char *a, char c, char max) { return a[0]==c&&a[1]>='0'&&a[1]<=max&&!a[2]?a[1]-'0':-1; }
+/* The power menu: a long press opens it over any page or dialog, but never twice while
+ * the device is already going down. */
+static void power_menu(void) {
+  if(dialog==DLG_POWERING)return;
+  dialog=DLG_POWER;power_error[0]=0;need_draw=1;
+}
+/* The agent restores the stock UI and then restarts or shuts the device down; this panel
+ * ends when the stock UI takes the display back. */
+static void power_send(void) {
+  char reply[128]="";
+  if(exchange(power_choice==2?"power off\n":"power reboot\n",reply,sizeof(reply))==0&&!strncmp(reply,"OK",2)) {
+    dialog=DLG_POWERING;power_deadline=monotonic_ms()+30000;power_error[0]=0;
+    return;
+  }
+  dialog=DLG_POWER;
+  snprintf(power_error,sizeof(power_error),"%s",!strncmp(reply,"ERR Busy",8)?L("Already restarting or shutting down.","已在重启或关机。"):
+           L("The agent did not answer. Try the stock UI's menu.","Agent 没有响应，请返回原厂界面再试。"));
+}
+/* Still running long after the agent accepted: the menu comes back with the reason. */
+static void power_tick(void) {
+  if(dialog!=DLG_POWERING||monotonic_ms()<power_deadline)return;
+  dialog=DLG_POWER;need_draw=1;
+  snprintf(power_error,sizeof(power_error),"%s",power_choice==2?L("The device did not shut down.","设备没有关机。"):L("The device did not restart.","设备没有重启。"));
+}
+static void power_tap(const char *a) {
+  if(dialog==DLG_POWERING)return;
+  if(!strcmp(a,"dismiss")){dialog=0;power_error[0]=0;}
+  else if(dialog==DLG_POWER&&!strcmp(a,"poff")){power_choice=2;dialog=DLG_POWER_CONFIRM;}
+  else if(dialog==DLG_POWER&&!strcmp(a,"preboot")){power_choice=1;dialog=DLG_POWER_CONFIRM;}
+  else if(dialog==DLG_POWER&&!strcmp(a,"stock"))quitting=1;
+  else if(dialog==DLG_POWER_CONFIRM&&!strcmp(a,"confirm"))power_send();
+}
 static void dialog_tap(const char *a) {
+  if(dialog>=DLG_POWER){power_tap(a);return;}
   if(!strcmp(a,"dismiss"))dialog=0;
   else if(!strcmp(a,"confirm")&&!blocked()) {
     if(dialog==1)submit(1,0);
