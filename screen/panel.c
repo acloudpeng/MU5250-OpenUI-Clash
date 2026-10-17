@@ -944,11 +944,6 @@ static int panel(int heartbeat, int idle_seconds) {
       if (exchange("status\n", reply, sizeof(reply)) == 0) {
         contact = now;
         if (parse_snapshot(reply, &incoming)) {
-          struct snapshot prev = data;
-          prev.stamp = incoming.stamp;
-          prev.uptime = incoming.uptime;
-          int data_diff = memcmp(&prev, &incoming, sizeof(struct snapshot)) != 0 ||
-                          (page == OVERVIEW && data.uptime / 60 != incoming.uptime / 60);
           data = incoming;
           int old_brightness = settings_brightness;
           int changed = update_settings(&data);
@@ -956,11 +951,7 @@ static int panel(int heartbeat, int idle_seconds) {
             on_level = settings_brightness;
             if (screen_awake && !first && old_brightness != on_level) brightness(on_level);
           }
-          int old_page = page, old_dialog = dialog;
-          unsigned long long old_pending = pending;
           track_status(changed);
-          if (!changed && !data_diff && page == old_page && dialog == old_dialog && pending == old_pending)
-            need_draw = 0;
         }
       }
     }
@@ -975,12 +966,13 @@ static int panel(int heartbeat, int idle_seconds) {
     if (settling && now >= settle_at && screen_awake) need_draw = 1;
     if (need_draw && screen_awake) {
       struct drm_buf *frame = drm_draw_buf(&drm);
-      render(frame);
-      rotate_frame(frame);
-      if (first || settling || memcmp(frame->map, drm.bufs[drm.cur_buf ^ 1].map,
-                          (size_t)frame->pitch * H)) {
-        if (drm_flip(&drm) < 0)
-          goto end;
+      if (render_changed(frame, first || settling)) {
+        rotate_frame(frame);
+        if (first || settling || memcmp(frame->map, drm.bufs[drm.cur_buf ^ 1].map,
+                            (size_t)frame->pitch * H)) {
+          if (drm_flip(&drm) < 0)
+            goto end;
+        }
       }
       need_draw = 0;
       if (first) {
@@ -1760,9 +1752,81 @@ static void toolbox_tests(struct drm_buf *b, const char *dir) {
   press_id(b,"killbloat");expect_request("tool kill_bloat\n");reset_job();
   press_id(b,"dropcache");expect_request("tool drop_caches\n");reset_job();
   press_id(b,"back");assert(page==MENU);
-  puts("PASS Pocket OS 3x3 Toolbox grid and Wi-Fi, 5G Signal, USB & TTL, Battery & Charge, and Booster pages (zh/en)");
+  /* An unchanged page is not laid out or drawn again; a change on it, or a forced frame, is. */
+  drawn_valid=0;page=MENU;assert(render_changed(b,0)&&!render_changed(b,0));
+  data.toolbox.kbps_down+=1000;assert(render_changed(b,0)&&!render_changed(b,0)&&render_changed(b,1));
+  puts("PASS Pocket OS 3x3 Toolbox grid and Wi-Fi, 5G Signal, USB & TTL, Battery & Charge, and Booster pages (zh/en); unchanged pages are not redrawn");
+}
+/* --replay <status stream> <page>…: how often a recorded stream of agent status replies
+ * (each ending in "."), polled every two seconds, makes each page lay out and draw itself:
+ * on every poll (before), only on a changed snapshot, or only on changed page HTML (now);
+ * and the mean milliseconds one layout and draw takes. Measurement only. */
+static long long replay_ns(void) {
+  struct timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return (long long)t.tv_sec * 1000000000LL + t.tv_nsec;
+}
+static int replay(int argc, char **argv) {
+  FILE *f = fopen(argv[2], "rb");
+  if (!f) return 2;
+  static char stream[8 << 20];
+  size_t len = fread(stream, 1, sizeof(stream) - 1, f);
+  fclose(f);
+  stream[len] = 0;
+  static const struct { const char *name; int page; } pages[] = {
+    {"menu", MENU}, {"overview", OVERVIEW}, {"proxy", PROXY}, {"clash", CLASH}, {"esim", ESIM},
+    {"uplink", UPLINK}, {"wifi", WIFI_PAGE}, {"signal", SIGNAL_PAGE}, {"usb", USB_PAGE},
+    {"power", POWER_PAGE}, {"booster", BOOSTER_PAGE}};
+  struct drm_buf b = {.pitch = W * 2, .map = calloc(W * H, 2)};
+  printf("page polls draws_every_poll draws_changed_snapshot draws_changed_html ms_per_draw\n");
+  for (int a = 3; a < argc; a++) {
+    int target = -1;
+    for (size_t i = 0; i < sizeof(pages) / sizeof(pages[0]); i++)
+      if (!strcmp(argv[a], pages[i].name)) target = pages[i].page;
+    if (target < 0) continue;
+    memset(&data, 0, sizeof(data));
+    drawn_valid = 0;
+    int polls = 0, by_snapshot = 0, by_html = 0;
+    long long spent = 0;
+    struct snapshot last = {0};
+    for (char *at = stream; *at;) {
+      char *end = strstr(at, "\n.\n");
+      if (!end) break;
+      end += 3;
+      static char reply[49152];
+      size_t n = (size_t)(end - at) < sizeof(reply) ? (size_t)(end - at) : sizeof(reply) - 1;
+      memcpy(reply, at, n);
+      reply[n] = 0;
+      at = end;
+      struct snapshot incoming;
+      if (!parse_snapshot(reply, &incoming)) continue;
+      polls++;
+      struct snapshot prev = last;
+      prev.stamp = incoming.stamp;
+      prev.uptime = incoming.uptime;
+      by_snapshot += polls == 1 || memcmp(&prev, &incoming, sizeof(incoming)) != 0;
+      last = incoming;
+      data = incoming;
+      update_settings(&data);
+      settings_menu = 0x3fff;
+      page = target;
+      long long t0 = replay_ns();
+      int drew = render_changed(&b, 0);
+      long long t1 = replay_ns();
+      if (drew) { by_html++; spent += t1 - t0; }
+    }
+    /* The mean draw time over forced redraws of the last state. */
+    long long t0 = replay_ns();
+    for (int i = 0; i < 20; i++) render(&b);
+    double ms = (double)(replay_ns() - t0) / 20 / 1e6;
+    (void)spent;
+    printf("%s %d %d %d %d %.2f\n", argv[a], polls, polls, by_snapshot, by_html, ms);
+  }
+  free(b.map);
+  return 0;
 }
 int main(int argc, char **argv) {
+  if (argc >= 3 && !strcmp(argv[1], "--replay")) return replay(argc, argv);
   power_self_test();
   if(argc<2)return 2;
   struct drm_buf b={.pitch=W*2,.map=calloc(W*H,2)};

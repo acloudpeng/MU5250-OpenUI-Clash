@@ -139,13 +139,9 @@ static void dialog_card(int y, int h) {
   add("<div class=\"box card\" style=\"left:12px;top:%dpx;width:296px;height:%dpx\"></div>",y,h);
 }
 #include "pages.h"
-static void render(struct drm_buf *b) {
-  static int initialized;
-  static uint16_t pixels[W * H];
-  if (!initialized) {
-    html_view_init(pixels,W,H,W,0,NULL);
-    initialized=1;
-  }
+static uint16_t pixels[W * H];
+/* The current page as HTML. Cheap next to laying it out and drawing it. */
+static void build_html(void) {
   html_used=0;html[0]=0;
   add("<!DOCTYPE html><html lang=\"%s\"><head><meta charset=\"UTF-8\"><style>%s</style></head><body>",L("en","zh"),style_asset);
   char tmp[256],rx[32],tx[32];
@@ -351,6 +347,31 @@ static void render(struct drm_buf *b) {
   else if(page==POWER_PAGE) render_power();
   else if(page==BOOSTER_PAGE) render_booster();
   add("</body></html>");
+}
+static void draw_html(struct drm_buf *b) {
+  static int initialized;
+  if (!initialized) {
+    html_view_init(pixels,W,H,W,0,NULL);
+    initialized=1;
+  }
   html_view_render_to(pixels,html);
   for(int y=0;y<H;y++)memcpy((uint8_t*)b->map+y*b->pitch,pixels+y*W,W*2);
+}
+static void render(struct drm_buf *b) {
+  build_html();
+  draw_html(b);
+}
+/* The page last drawn into a frame. Equal HTML draws equal pixels (the rotation is fixed
+ * and the backlight keeps the panel's image), so a status poll that changes nothing on
+ * the page costs no layout, drawing or flip. */
+static char drawn_html[sizeof html];
+static int drawn_valid;
+/* Draws the page into `b` unless it is the page last drawn; returns whether it drew. */
+static int render_changed(struct drm_buf *b, int force) {
+  build_html();
+  if (!force && drawn_valid && !strcmp(html,drawn_html)) return 0;
+  draw_html(b);
+  memcpy(drawn_html,html,html_used+1);
+  drawn_valid=1;
+  return 1;
 }

@@ -400,29 +400,66 @@ fn refresh_system(state: &AppState) {
         cpu.overall
     );
     PARTS.lock().unwrap().system = o_line;
-    if now().saturating_sub(TOOLBOX_AT.load(Ordering::Relaxed)) >= TOOLBOX_EVERY {
-        refresh_toolbox(state);
+    if !toolbox_wanted() {
+        PARTS.lock().unwrap().toolbox.clear();
+    } else if now().saturating_sub(TOOLBOX_AT.load(Ordering::Relaxed)) >= TOOLBOX_EVERY {
+        refresh_toolbox(state, false);
     }
+}
+/// Menu features that read the `H` record; without one of them it is never read.
+const TOOLBOX_PAGES: [&str; 5] = ["wifi", "signal", "usb", "power", "booster"];
+fn toolbox_wanted() -> bool {
+    let s = crate::screen_settings::current();
+    s.menu_items
+        .iter()
+        .chain(std::iter::once(&s.home_page))
+        .any(|p| TOOLBOX_PAGES.contains(&p.as_str()))
 }
 /// How often the `H` record is read: it costs a dozen firmware and system calls, so it
 /// follows the panel's two-second status only every ten seconds (and right after an
 /// action from a toolbox page).
 const TOOLBOX_EVERY: u64 = 10;
 static TOOLBOX_AT: AtomicU64 = AtomicU64::new(0);
+/// The TTL setting changes only on request: it is read every minute, and at once after a
+/// toolbox action (`force`), instead of with each `H`.
+const TTL_EVERY: u64 = 60;
+static TTL: Mutex<(u64, u64)> = Mutex::new((0, 0));
 /// `H`: signal, traffic, Wi-Fi, USB, TTL and charging for the toolbox pages.
-fn refresh_toolbox(state: &AppState) {
+fn refresh_toolbox(state: &AppState, force: bool) {
     TOOLBOX_AT.store(now(), Ordering::Relaxed);
     let speed = state.speed.sample();
     let memory = system::read_meminfo();
     let cpu = state.cpu.sample();
     let radio_sample = crate::handlers::read_radio(&state.radio);
     let sig = radio_sample.value.as_ref().unwrap_or(&Value::Null);
-    let (_, wifi_v) = crate::wifi::wifi_status(state);
-    let wifi_d = &wifi_v["data"];
-    let (_, usb_v) = crate::usb::usb_status(state);
-    let usb_d = &usb_v["data"];
-    let (_, ttl_v) = crate::server::ttl_status();
-    let ttl_d = &ttl_v["data"];
+    // One UCI read for the radios and the SSID; clients come from the list the refresher
+    // keeps and the USB mode from sysfs, so no Wi-Fi report, iw or USB status calls.
+    let wireless = crate::ubus::uci_show("wireless");
+    let radio_on = |radio: &str| {
+        wireless
+            .get(&format!("{radio}.disabled"))
+            .map(String::as_str)
+            != Some("1")
+    };
+    let ssid = ["main_5g.ssid", "main_2g.ssid"]
+        .iter()
+        .filter_map(|k| wireless.get(*k))
+        .find(|s| !s.is_empty())
+        .map_or("-", String::as_str);
+    let wifi_clients = CLIENTS
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|c| c["medium"] == "wifi")
+        .count();
+    let ttl = {
+        let mut cached = TTL.lock().unwrap();
+        if force || cached.0 == 0 || now().saturating_sub(cached.0) >= TTL_EVERY {
+            let (_, v) = crate::server::ttl_status();
+            *cached = (now(), v["data"]["ttl_value"].as_u64().unwrap_or(0));
+        }
+        cached.1
+    };
     let (_, chg_v) = crate::device_ext::charge_control_get(state);
     let chg_d = &chg_v["data"];
     let (_, bat_v) = crate::device_ext::device_battery_detail(state);
@@ -464,17 +501,13 @@ fn refresh_toolbox(state: &AppState) {
         "mem_pct": memory.as_ref().map_or(0, |m| m.usage_pct.round() as u64),
         "temp_mc": (bat_d["temperature_c"].as_f64().unwrap_or(0.0) * 1000.0).round() as i64,
         "bloat_cnt": top.bloat_count as u64,
-        "wifi_2g_on": wifi_d["radio2_disabled"].as_str() != Some("1"),
-        "wifi_5g_on": wifi_d["radio5_disabled"].as_str() != Some("1"),
-        "wifi_clients": wifi_d["clients_total"].as_u64().unwrap_or(0),
-        "wifi_ssid": wifi_d["ssid_5g"]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .or_else(|| wifi_d["ssid_2g"].as_str())
-            .unwrap_or("-"),
-        "usb_mode": usb_d["active_mode"].as_str().unwrap_or("-"),
+        "wifi_2g_on": radio_on("wifi0"),
+        "wifi_5g_on": radio_on("wifi1"),
+        "wifi_clients": wifi_clients,
+        "wifi_ssid": ssid,
+        "usb_mode": crate::usb::detect_active_usb_mode().unwrap_or("-"),
         "usb_adb": false,
-        "ttl_val": ttl_d["ttl_value"].as_u64().unwrap_or(0),
+        "ttl_val": ttl,
         "chg_enabled": chg_d["charging_stopped"].as_bool() != Some(true),
         "chg_limit_on": chg_d["charge_limit_enabled"].as_bool().unwrap_or(false),
         "chg_max": limit,
@@ -649,7 +682,11 @@ fn run_tool(t: &Tool) -> (u16, Value) {
             &body(&json!({"mode": mode, "confirm_experimental": mode == "ncm"})),
         ),
         Tool::NetMode { mode } => {
-            crate::cell::modem_network_mode_set(state, &body(&json!({"net_select": mode})))
+            let reply =
+                crate::cell::modem_network_mode_set(state, &body(&json!({"net_select": mode})));
+            // The H read right after must show the new mode, not the cached signal sample.
+            state.radio.invalidate();
+            reply
         }
         Tool::Ttl { value } => {
             if *value == 0 {
@@ -759,7 +796,7 @@ fn start_job(job: Job) -> String {
             Work::Wireguard(_) | Work::Backend(_) => refresh_wireguard(),
             Work::Tool(_) => {
                 if let Some(state) = APP_STATE.get() {
-                    refresh_toolbox(state);
+                    refresh_toolbox(state, true);
                 }
             }
             _ => {}

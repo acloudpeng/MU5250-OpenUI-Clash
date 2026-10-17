@@ -163,7 +163,7 @@ fn wait_until_ready(
 /// Detect the currently active USB function by probing `/sys/class/net/`.
 /// `zwrt_bsp.usb list` returns `mode: "user"` (a permission flag, not the
 /// function), so we look at which gadget interface actually exists.
-fn detect_active_usb_mode() -> Option<&'static str> {
+pub(crate) fn detect_active_usb_mode() -> Option<&'static str> {
     let functions = current_composition_functions();
     if functions.iter().any(|f| f == "ncm.0") {
         Some("ncm")
