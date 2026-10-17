@@ -110,6 +110,16 @@ scripts or shell commands.
 
 ## Screen pages
 
+Rendered by the native preview build (`sh screen/build.sh --preview`), English:
+
+| | | |
+| --- | --- | --- |
+| ![Main menu](images/screen-menu.png) | ![Toolbox menu, 3×3](images/screen-toolbox.png) | ![Overview with the Wi-Fi relay row](images/screen-overview.png) |
+| ![WireGuard](images/screen-home.png) | ![Device routing](images/screen-devices.png) | ![Saved profiles](images/screen-profiles.png) |
+| ![eSIM](images/screen-esim.png) | ![Wi-Fi relay](images/screen-uplink.png) | ![Wi-Fi relay needing a web login](images/screen-uplink-login.png) |
+| ![Toolbox: Wi-Fi](images/screen-wifi.png) | ![Toolbox: 5G signal](images/screen-signal.png) | ![Toolbox: USB and TTL](images/screen-usb.png) |
+| ![Toolbox: battery and charge](images/screen-power.png) | ![Toolbox: booster](images/screen-booster.png) | |
+
 - **Overview:** a battery icon with a proportional fill and large percentage,
   a low-battery color at 20% or below, battery temperature, uptime, CPU and memory.
   Missing battery data displays `--%`. The main menu also shows a battery badge.
@@ -262,8 +272,9 @@ python3 scripts/verify-devui-settings.py --gateway 192.168.0.1 --port 2222 \
   address, traffic, online-since time and the number of saved networks; no password,
   BSSID or gateway; older screens ignore it) and `H` (the toolbox: signal, speed, CPU,
   memory, vendor processes, Wi-Fi bands and clients, USB mode, TTL, charging and
-  battery; read every ten seconds, and right after a toolbox action, because it takes a
-  dozen firmware calls). `J` ends with the newest job the
+  battery; sent only while a toolbox page is in the menu, read every ten seconds and right
+  after a toolbox action: one UCI read for the radios and SSID, clients from the list the
+  agent already keeps, the USB mode from sysfs, and the TTL rules once a minute). `J` ends with the newest job the
   records already reflect. The reply stays under 40 KiB.
 - Queries `groups <offset>` and `nodes <gen> <group> <offset>` return four rows at a
   time from a proxies view the agent refreshes only while the screen asks; groups and
@@ -317,6 +328,14 @@ the two-finger hold: one or three fingers, a lifted finger, drift, fingers alrea
 down or across dropped events, and the hold-off while DevUI runs; and the
 power-off-charging check for opening at startup. Optimized screen builds retain
 self-test assertions.
+
+Drawing: each status poll (every two seconds) rebuilds the page's HTML, which is cheap,
+and lays it out and draws it only when that HTML differs from the frame last drawn
+(first frames after the takeover are always drawn). Pages whose figures do not change
+between polls are therefore not redrawn; Overview and Booster, which show CPU and memory,
+still are. `build/screen/preview --replay <stream> <page>…` replays recorded status
+replies and reports, per page, how many polls would lay out and draw the page before and
+now, and the milliseconds one layout and draw takes.
 
 On-device `--self-test` uses synthetic events within the process; `--probe` reads
 actual touch axes and checks the dedicated power input. `--power-check` performs a

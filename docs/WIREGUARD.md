@@ -13,6 +13,12 @@ revision returns 409. Replacing one backend with the other, or turning it off, a
 confirmation. `GET /api/proxy` also says why a backend cannot be turned on yet, such as no
 imported configuration.
 
+![Proxy page, WireGuard status](images/wireguard-sidebar.png)
+
+| Dark theme | Saved configurations | Device routing |
+| --- | --- | --- |
+| ![WireGuard status, dark theme](images/wireguard-dashboard.png) | ![Saved configurations](images/wireguard-profiles.png) | ![Device routing](images/wireguard-devices.png) |
+
 ## Saved configurations (up to 5)
 
 On the **Saved configurations** tab, import a `.conf` and give it a unique name under

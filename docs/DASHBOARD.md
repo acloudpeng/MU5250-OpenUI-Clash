@@ -7,6 +7,10 @@ whose singleton ubus object makes a second UCI instance unreliable.
 
 ## Layout
 
+![Sign-in page](images/login.png)
+
+![Home: status bar, quick toolbox and readings](images/dashboard-home.png)
+
 Seven navigation groups — bottom tab bar on phones, sidebar on desktop,
 light/dark theme (auto + manual), each group lazy-loaded:
 
@@ -50,6 +54,8 @@ web-app/src/
 
 ## Wi-Fi relay
 
+![Network → Wi-Fi relay, online](images/network-relay.png)
+
 **Network → Wi-Fi relay** (`UplinkTab.tsx`, agent `wifi_uplink.rs`, `/api/wifi/uplink`)
 makes the router join an upstream Wi-Fi network and send all traffic through it while
 that network reaches the internet, falling back to the cellular connection otherwise.
@@ -76,6 +82,12 @@ that network reaches the internet, falling back to the cellular connection other
 - Names and passwords are checked as the agent checks them (1–32-byte name;
   8–63 printable ASCII characters or a 64-digit key, which WPA3 does not accept).
 - The tab polls every 3 s while open.
+
+## DevUI page
+
+![DevUI page: the device screen and ways to open it](images/devui-settings.png)
+
+![DevUI page: menu features with the toolbox presets](images/devui-features.png)
 
 ## Conventions that keep the device happy
 

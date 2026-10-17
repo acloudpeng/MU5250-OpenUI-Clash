@@ -10,6 +10,12 @@ comes back once the upstream network works again.
 Web: **Network → Wi-Fi relay**. Screen: the **Wi-Fi relay** page (a menu option, and a
 row on Overview). See [DASHBOARD.md](DASHBOARD.md) and [SCREEN.md](SCREEN.md).
 
+![Network → Wi-Fi relay, online](images/network-relay.png)
+
+| On Wi-Fi | Needs a web login |
+| --- | --- |
+| ![Screen: Wi-Fi relay](images/screen-uplink.png) | ![Screen: login mode offered](images/screen-uplink-login.png) |
+
 ## How it works
 
 The agent (`agent/src/wifi_uplink.rs`) runs a supervisor thread. Everything it creates
