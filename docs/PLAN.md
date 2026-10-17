@@ -569,3 +569,7 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
   所有提交的作者和提交信息（没有 Co-Authored-By）、发布页作者（github-actions）、仓库文件（只有上游账号名 jesther-ai），都没有 Claude。
   本次提交照旧只署 acloudpeng。唯一沾边的是早期提交 `41e5d63` 的说明里的旧文件名 `AI-OPERATIONS.md`（2026-10-10 已改名为 OPERATIONS.md），
   改它们要再改写一次历史、移动所有标签，没有动。
+
+### 2026-10-17 — 1.1.3
+- 用户：「提交推送，发布 v1.1.3」。内容：九宫格工具箱与网页状态条（用户的界面，含合并时的修复）、资源占用优化、登录页「高级后台」、渲染图更新。
+- 版本号改为 1.1.3（agent、网页、安装器和各自的锁文件）。发布说明 `docs/releases/v1.1.3.md` 用三种语言。补丁版本沿用 v1.1 的线框图。
