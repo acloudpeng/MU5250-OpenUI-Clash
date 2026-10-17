@@ -616,3 +616,8 @@ remote 名：`upstream-wireguard`、`upstream-openui`、`upstream-original`。
 ### 2026-10-17 — 1.1.4
 - 用户：「提交推送，发布 v1.1.4」。内容：触摸屏长按电源菜单、触摸屏重新设计、网页新外壳和首页。
 - 版本号改为 1.1.4（agent、网页、安装器和各自的锁文件）。发布说明 `docs/releases/v1.1.4.md` 用三种语言。补丁版本沿用 v1.1 的线框图。
+- 提交 `6369636`（触摸屏）、`27f3c39`（网页）、`b1d86c8`（文档和渲染图）、`9cd79d8`（Version 1.1.4），CI 全部通过；标签 `v1.1.4`（轻量）。
+  2026-10-17 06:49:55 UTC 发布（Latest）。14 个附件，`sha256sums.txt` 全覆盖，下载后逐个校验过：`zte-agent` `2c559033…`、
+  `dashboard-dist.tar.gz` `7ef9eca1…`（发布工作流编译）；`lpac` `66641fd6…`、`mihomo` `df75037f…`（和之前相同）；
+  `openui-screen` `62d26d9d…`（`git archive 9cd79d8` 编译，与仓库里编的一致，手工上传）。
+- 发布后 S14 用公开发布页上的 v1.1.4 跑了一遍：24/24。
