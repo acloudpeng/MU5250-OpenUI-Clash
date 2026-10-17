@@ -11,7 +11,7 @@ const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
   subtle: 'bg-surface2 text-ink hover:bg-line/10 active:bg-line/15',
   ghost: 'text-ink2 hover:bg-surface2 hover:text-ink',
   danger: 'bg-danger text-white hover:brightness-110 active:brightness-95',
-  outline: 'border border-line/15 text-ink hover:bg-surface2',
+  outline: 'border border-line/15 bg-surface text-ink hover:bg-surface2',
 }
 
 export function Button({
@@ -121,7 +121,7 @@ export function Segmented<T extends string>({
   disabled?: boolean
 }) {
   return (
-    <div className={`inline-flex rounded-lg bg-surface2 p-0.5 ${disabled ? 'opacity-50' : ''}`}>
+    <div className={`inline-flex rounded-xl bg-surface2 p-1 ${disabled ? 'opacity-50' : ''}`}>
       {options.map((o) => (
         <button
           key={o.value}
@@ -129,8 +129,8 @@ export function Segmented<T extends string>({
           disabled={disabled || o.disabled}
           aria-pressed={value === o.value}
           onClick={() => onChange(o.value)}
-          className={`rounded-[7px] px-3 py-1.5 text-[12px] font-semibold transition-colors ${
-            value === o.value ? 'bg-surface text-ink shadow-sm' : o.disabled ? 'cursor-not-allowed text-ink3 opacity-60' : 'text-ink2 hover:text-ink'
+          className={`rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-colors ${
+            value === o.value ? 'bg-raised text-ink shadow-card' : o.disabled ? 'cursor-not-allowed text-ink3 opacity-60' : 'text-ink2 hover:text-ink'
           }`}
         >
           {o.label}

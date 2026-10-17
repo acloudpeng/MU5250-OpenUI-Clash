@@ -3,6 +3,7 @@ import { t } from '../../i18n'
 import { Tabs } from '../../ui/Tabs'
 import MetricsTab from './MetricsTab'
 import ToolsTab from './ToolsTab'
+import { PageHeader } from '../../ui/primitives'
 import SettingsTab from './SettingsTab'
 
 type Tab = 'metrics' | 'tools' | 'settings'
@@ -12,10 +13,7 @@ export default function SystemGroup({ onLogout }: { onLogout: () => void }) {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-bold text-ink">{t('System')}</h1>
-        <p className="mt-0.5 text-[13px] text-ink2">{t('Health metrics, diagnostic tools and device controls')}</p>
-      </div>
+      <PageHeader title={t('System')} sub={t('Health metrics, diagnostic tools and device controls')} />
 
       <Tabs
         tabs={[

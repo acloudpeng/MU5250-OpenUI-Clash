@@ -13,6 +13,7 @@ import ConnectionsTab from './ConnectionsTab'
 import LogsTab from './LogsTab'
 import AdvancedTab from './AdvancedTab'
 import WireGuardTab from './wireguard/WireGuardTab'
+import { PageHeader } from '../../ui/primitives'
 import { t } from '../../i18n'
 
 type ClashTab = 'overview' | 'subscriptions' | 'proxies' | 'devices' | 'connections' | 'logs' | 'advanced'
@@ -55,10 +56,7 @@ function Content() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-bold text-ink">{t('Proxy')}</h1>
-        <p className="mt-0.5 text-[13px] text-ink2">{t('Choose WireGuard or Clash for your devices and configure each')}</p>
-      </div>
+      <PageHeader title={t('Proxy')} sub={t('Choose WireGuard or Clash for your devices and configure each')} />
 
       {/* After a switch, show the backend just turned on. */}
       <BackendSelector onSwitched={target => setView(target === 'off' ? shown : target)} />

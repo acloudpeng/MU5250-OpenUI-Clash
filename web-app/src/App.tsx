@@ -54,7 +54,7 @@ export default function App() {
       <Fragment key={lang}>
       <HomeProvider fast={group === 'home' || group === 'signal'}>
         <Shell group={group} onNavigate={setGroup} theme={theme} onToggleTheme={toggle} lang={lang} onToggleLang={toggleLang}>
-          {group === 'home' && <HomePage />}
+          {group === 'home' && <HomePage onNavigate={setGroup} />}
           {group === 'signal' && <SignalGroup />}
           {group === 'network' && <NetworkGroup />}
           {group === 'proxy' && <ProxyPage />}

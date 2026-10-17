@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from '../../data/api'
 import type { DevUISettings, DevUIPageId, ScreenStatus } from '../../types'
 import { Button, Select, Toggle } from '../../ui/controls'
-import { Card, Chip } from '../../ui/primitives'
+import { Card, Chip, PageHeader } from '../../ui/primitives'
 import { confirm } from '../../ui/feedback'
 import { N_, t, tm } from '../../i18n'
 
@@ -14,16 +14,16 @@ const pages: { id: DevUIPageId; title: string; description: string }[] = [
   { id: 'esim', title: N_('eSIM'), description: N_('Profiles on a removable eUICC: switch, or restart after a switch') },
   { id: 'uplink', title: N_('Wi-Fi relay'), description: N_('Upstream Wi-Fi status, signal and traffic, with on / off control') },
   { id: 'wifi', title: N_('Wi-Fi'), description: N_('2.4 GHz & 5 GHz radio switches, SSID and connected client count') },
-  { id: 'signal', title: N_('5G Signal'), description: N_('Live RSRP / SINR / band metrics and 5G SA / NSA / 4G mode switch') },
+  { id: 'signal', title: N_('Signal'), description: N_('Live RSRP / SINR / band metrics and 5G SA / NSA / 4G mode switch') },
   { id: 'usb', title: N_('USB & TTL'), description: N_('RNDIS / NCM / ECM USB mode and TTL 64 / 65 / 128') },
   { id: 'power', title: N_('Battery & Charge'), description: N_('Real-time voltage / current / health and 70% / 80% / 90% / 100% charge limits') },
   { id: 'booster', title: N_('Booster'), description: N_('One-tap ZTE bloatware cleanup and Linux pagecache drop for lower load') },
   { id: 'profiles', title: N_('Saved profiles'), description: N_('Switch between your saved VPN profiles') },
   { id: 'devices', title: N_('Device routing'), description: N_('Choose which devices use WireGuard') },
 ]
-/** Up to 9 apps fit the Pocket OS 3×3 grid (1–4 items render as classic list rows). */
+/** Up to 9 features fit the 3×3 grid (1–4 items render as list rows). */
 const MAX_MENU_ITEMS = 9
-const POCKET_OS_PRESET: DevUIPageId[] = ['overview', 'proxy', 'wifi', 'signal', 'usb', 'power', 'booster', 'clash', 'esim']
+const GRID_PRESET: DevUIPageId[] = ['overview', 'proxy', 'wifi', 'signal', 'usb', 'power', 'booster', 'clash', 'esim']
 const CLASSIC_PRESET: DevUIPageId[] = ['overview', 'proxy', 'clash', 'esim']
 // i18n-ignore: each language is named in its own language
 const LANGUAGES = { zh: '中文', en: 'English' }
@@ -90,12 +90,12 @@ export default function DevUIPage() {
   }
   const stale = draft && settings && draft.revision !== settings.revision
   return <div className="space-y-4">
-    <div><h1 className="text-xl font-bold text-ink">DevUI</h1><p className="mt-0.5 text-[13px] text-ink2">{t('Device screen, ways to open it and live menu settings')}</p></div>
+    <PageHeader title="DevUI" sub={t('Device screen, ways to open it and live menu settings')} />
     {(error || loadError) && <p role="alert" className="rounded-lg border border-danger/20 bg-danger/5 p-3 text-sm text-danger">{tm(error || loadError)}</p>}
     {message && <p role="status" className="rounded-lg bg-accent/5 p-3 text-sm text-ink">{message}</p>}
     <Card title={t('Device screen')} action={<Chip tone={status?.state === 'error' ? 'warn' : status?.running ? 'accent' : 'default'}>{status ? t(labels[status.state] ?? status.state) : t('Loading')}</Chip>}>
       <div className="space-y-3">
-        <p className="text-[13px] text-ink2">{t('Open the touchscreen menu on your U60 Pro. Short-press the power button to sleep or wake the display. Returning to the stock UI keeps your WireGuard settings and network connection.')}</p>
+        <p className="text-[13px] text-ink2">{t('Open the touchscreen menu on your U60 Pro. Short-press the power button to sleep or wake the display; hold it to shut down or restart. Returning to the stock UI keeps your proxy settings and network connection.')}</p>
         {status && (!status.available || !status.verified) && <p className="text-xs text-ink2">{t('The screen component must be installed and pass device recovery verification before it can open.')}</p>}
         <div className="flex flex-wrap gap-2">
           <Button variant="primary" disabled={busy || !status?.available || !status.verified || status.running} onClick={() => void change(true)}>{t('Open DevUI screen')}</Button>
@@ -119,8 +119,8 @@ export default function DevUIPage() {
         <div className="block text-[13px] text-ink">{t('Screen language')}<span className="float-right">{LANGUAGES[draft.language ?? 'zh']}</span><span className="mt-2 block text-xs text-ink3">{t('Follows the language switch of this panel.')}</span></div>
       </div> : <p className="text-sm text-ink2">{t('Loading display preferences…')}</p>}
     </Card>
-    <Card title={t('Menu features')} action={<div className="flex items-center gap-1.5"><Button variant="outline" disabled={busy || !draft} onClick={() => edit({ menu_items: POCKET_OS_PRESET, home_page: 'menu' })}>{t('Pocket OS 3×3 preset')}</Button><Button variant="outline" disabled={busy || !draft} onClick={() => edit({ menu_items: CLASSIC_PRESET, home_page: 'menu' })}>{t('Classic 4-row preset')}</Button></div>}>
-      <p className="mb-3 text-xs text-ink2">{t('Choose the controls shown on the device. Hiding a menu item does not disable its network feature. Stock UI and Back remain available.')} {t('Up to 9 apps fit the Pocket OS 3×3 grid (1–4 items use classic rows). Saved profiles and Device routing stay reachable from the WireGuard page.')}</p>
+    <Card title={t('Menu features')} action={<div className="flex items-center gap-1.5"><Button variant="outline" disabled={busy || !draft} onClick={() => edit({ menu_items: GRID_PRESET, home_page: 'menu' })}>{t('3×3 grid preset')}</Button><Button variant="outline" disabled={busy || !draft} onClick={() => edit({ menu_items: CLASSIC_PRESET, home_page: 'menu' })}>{t('Classic 4-row preset')}</Button></div>}>
+      <p className="mb-3 text-xs text-ink2">{t('Choose the controls shown on the device. Hiding a menu item does not disable its network feature. Stock UI and Back remain available.')} {t('Up to 9 features fit the 3×3 grid (1–4 items use rows). Saved profiles and Device routing stay reachable from the WireGuard page.')}</p>
       <div className="divide-y divide-line/10">{pages.map(p => <label key={p.id} className="flex cursor-pointer items-center gap-3 py-3"><input type="checkbox" className="h-4 w-4 accent-accent" checked={draft?.menu_items.includes(p.id) ?? false} disabled={busy || !draft || (!draft.menu_items.includes(p.id) && draft.menu_items.length >= MAX_MENU_ITEMS)} onChange={e => { if (!draft) return; const items = e.target.checked ? [...draft.menu_items, p.id] : draft.menu_items.filter(id => id !== p.id); edit({ menu_items: items, home_page: draft.home_page !== 'menu' && !items.includes(draft.home_page) ? 'menu' : draft.home_page }) }} /><span><span className="block text-[13px] font-medium text-ink">{t(p.title)}</span><span className="text-xs text-ink2">{t(p.description)}</span></span></label>)}</div>
     </Card>
     <div className="sticky bottom-2 rounded-xl border border-line/10 bg-surface p-3 shadow-sm">

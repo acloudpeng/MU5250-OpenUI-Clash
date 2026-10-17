@@ -1,10 +1,14 @@
 import type { Dict } from '.'
 
 export default {
+  'Quick controls': '快捷操作',
+  'Switched small screen to DevUI': '小屏已切换到 DevUI',
+  'Open DevUI': '打开 DevUI',
+  'Open proxy settings': '打开代理设置',
+  'DevUI settings': 'DevUI 设置',
   'Overview': '概览',
   'Mobile broadband status': '移动宽带状态',
   'Signal strength': '信号强度',
-  '{n}/5 bars': '{n}/5 格',
   'Modem mode': '网络制式',
   '1 carrier active': '1 个活动载波',
   '{n} carriers active': '{n} 个活动载波',
@@ -30,9 +34,6 @@ export default {
   'This month': '本月',
   'Total': '累计',
   'Not available': '不可用',
-  'Pocket OS Quick Toolbox': '随身系统快捷工具箱',
-  'Switched small screen to Pocket OS': '已将小屏切换至随身系统（Pocket OS）',
-  'Open Pocket OS': '打开随身系统',
   'Restore stock UI': '恢复原厂界面',
   'Restored stock ZTE UI on small screen': '已恢复小屏原厂中兴界面',
   'Network mode': '网络模式',

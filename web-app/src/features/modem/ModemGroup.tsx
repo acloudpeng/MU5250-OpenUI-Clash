@@ -5,6 +5,7 @@ import ApnTab from './ApnTab'
 import DataTab from './DataTab'
 import TtlTab from './TtlTab'
 import SmsTab from './SmsTab'
+import { PageHeader } from '../../ui/primitives'
 import EsimTab from './EsimTab'
 
 type Tab = 'apn' | 'esim' | 'data' | 'ttl' | 'sms'
@@ -14,10 +15,7 @@ export default function ModemGroup() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-bold text-ink">{t('Modem')}</h1>
-        <p className="mt-0.5 text-[13px] text-ink2">{t('APN profiles, eSIM, data usage, TTL and SMS')}</p>
-      </div>
+      <PageHeader title={t('Modem')} sub={t('APN profiles, eSIM, data usage, TTL and SMS')} />
 
       <Tabs
         tabs={[

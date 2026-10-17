@@ -17,15 +17,28 @@ export function Card({
   pad?: boolean
 }) {
   return (
-    <section className={`rounded-xl border border-line/8 bg-surface ${className}`}>
+    <section className={`rounded-2xl border border-line/8 bg-surface shadow-card ${className}`}>
       {title != null && (
-        <header className="flex items-center justify-between gap-2 border-b border-line/8 px-4 py-2.5">
-          <h2 className="text-[13px] font-semibold text-ink">{title}</h2>
+        <header className="flex min-h-12 items-center justify-between gap-2 px-4 pt-3">
+          <h2 className="text-[14px] font-semibold text-ink">{title}</h2>
           {action}
         </header>
       )}
-      <div className={pad ? 'p-4' : ''}>{children}</div>
+      <div className={pad ? (title != null ? 'px-4 pb-4 pt-2' : 'p-4') : ''}>{children}</div>
     </section>
+  )
+}
+
+/** Page heading: title, one line of description and optional actions on the right. */
+export function PageHeader({ title, sub, actions }: { title: string; sub?: ReactNode; actions?: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-end justify-between gap-3">
+      <div className="min-w-0">
+        <h1 className="text-[22px] font-bold tracking-tight text-ink">{title}</h1>
+        {sub != null && <p className="mt-0.5 text-[13px] text-ink2">{sub}</p>}
+      </div>
+      {actions}
+    </div>
   )
 }
 

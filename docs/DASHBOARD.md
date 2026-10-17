@@ -9,14 +9,19 @@ whose singleton ubus object makes a second UCI instance unreliable.
 
 ![Sign-in page](images/login.png)
 
-![Home: status bar, quick toolbox and readings](images/dashboard-home.png)
+![Home: top bar, readings and quick controls](images/dashboard-home.png)
 
-Seven navigation groups — bottom tab bar on phones, sidebar on desktop,
-light/dark theme (auto + manual), each group lazy-loaded:
+Seven navigation groups — a sidebar on desktop; on phones a bottom bar with Home,
+Signal, Network and Proxy, and **More** for Modem, DevUI and System. Light/dark theme
+(auto + manual) with the device screen's colours in dark mode; each group lazy-loaded.
+A top bar stays above every page: signal, speed, battery, load and CPU temperature from
+the home poll (no extra requests), and the **power menu**
+(restart or shut down the device, each confirmed first). On phones it also holds the
+language and theme switches.
 
 | Group | Contents |
 |---|---|
-| **Home** | signal, modem mode, throughput, battery, connection, device, data usage — backed by the single batched `/api/dashboard` poll; a quick toolbox (open the DevUI / restore the stock UI, network mode, TTL, charge limit, stop vendor processes, drop caches). A status bar above every page shows signal, speed, battery and load from the same poll |
+| **Home** | signal, modem mode, throughput, battery, carriers, connection, device, data usage — backed by the single batched `/api/dashboard` poll; quick controls that show what is in effect (network mode, TTL, charge limit and the active proxy, read once on opening and after each change), open the DevUI / restore the stock UI, stop vendor processes, drop caches |
 | **Signal** | per-carrier LTE/NR detail (PCI, ARFCN, RSRP/RSRQ/SINR) + network mode, band lock, one-tap cell lock from live cells |
 | **Network** | clients by Wi-Fi/USB-C/Ethernet with link details, per-band Wi-Fi configuration, Wi-Fi relay (see below), LAN/DHCP and DNS |
 | **Proxy** | **Active proxy** selector (Off / WireGuard / Clash, `/api/proxy`), then **Configure** either backend: WireGuard status, saved configurations and device routing; Clash overview with diagnostics, subscriptions, nodes, devices, connections, logs and advanced settings |

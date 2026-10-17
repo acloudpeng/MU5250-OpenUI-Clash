@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { powerAction } from '../../app/power'
 import { api } from '../../data/api'
 import { API_BASE } from '../../data/client'
 import { formatUptime } from '../../format'
@@ -199,16 +200,18 @@ export default function SettingsTab({ onLogout }: { onLogout: () => void }) {
   const [imei, setImei] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
 
-  const fetchAll = useCallback(async () => {
-    const [d, s, i] = await Promise.allSettled([api.device(), api.simInfo(), api.simImei()])
-    if (d.status === 'fulfilled') setDevice(d.value)
-    if (s.status === 'fulfilled') setSim(s.value)
-    if (i.status === 'fulfilled' && i.value) setImei((i.value as { imei?: string }).imei ?? '')
-  }, [])
-
   useEffect(() => {
-    fetchAll()
-  }, [fetchAll])
+    let live = true
+    void Promise.allSettled([api.device(), api.simInfo(), api.simImei()]).then(([d, s, i]) => {
+      if (!live) return
+      if (d.status === 'fulfilled') setDevice(d.value)
+      if (s.status === 'fulfilled') setSim(s.value)
+      if (i.status === 'fulfilled' && i.value) setImei((i.value as { imei?: string }).imei ?? '')
+    })
+    return () => {
+      live = false
+    }
+  }, [])
 
   async function restartAgent() {
     setBusy('restart')
@@ -223,30 +226,9 @@ export default function SettingsTab({ onLogout }: { onLogout: () => void }) {
   }
 
   async function runPowerAction(action: 'reboot' | 'shutdown') {
-    const ok = await confirm({
-      title: action === 'reboot' ? t('Reboot the device?') : t('Shut down the device?'),
-      body:
-        action === 'reboot'
-          ? t('All connections will drop for about 10-30 seconds.')
-          : t('The device powers off. Use the physical power button to turn it back on.'),
-      confirmLabel: action === 'reboot' ? t('Reboot') : t('Shut down'),
-      danger: true,
-    })
-    if (!ok) return
     setBusy(action)
-    try {
-      if (action === 'reboot') {
-        await api.reboot()
-        toast(t('Reboot command sent'))
-      } else {
-        await api.shutdown()
-        toast(t('Shutdown command sent'))
-      }
-    } catch (e) {
-      toastError(e, action === 'reboot' ? t('Failed to reboot device') : t('Failed to shutdown device'))
-    } finally {
-      setBusy(null)
-    }
+    await powerAction(action)
+    setBusy(null)
   }
 
   return (

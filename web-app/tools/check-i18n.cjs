@@ -19,12 +19,12 @@ const CODE_ATTRS = new Set([
   'className', 'key', 'type', 'id', 'name', 'value', 'defaultValue', 'href', 'role', 'inputMode', 'autoComplete',
   'enterKeyHint', 'pattern', 'variant', 'tone', 'size', 'target', 'rel', 'method', 'htmlFor', 'd', 'viewBox',
   'fill', 'stroke', 'strokeWidth', 'strokeLinecap', 'strokeLinejoin', 'src', 'dir', 'lang', 'accept', 'form',
-  'spellCheck', 'aria-hidden', 'aria-modal', 'aria-live', 'aria-current', 'aria-expanded', 'autoCapitalize', 'autoCorrect', 'step', 'min', 'max', 'wrap', 'align', 'mode', 'kind', 'active',
+  'spellCheck', 'aria-hidden', 'aria-modal', 'aria-live', 'aria-current', 'aria-expanded', 'aria-haspopup', 'autoCapitalize', 'autoCorrect', 'step', 'min', 'max', 'wrap', 'align', 'mode', 'kind', 'active',
 ])
 // Object keys that never hold interface text.
 const CODE_KEYS = new Set([
   'id', 'key', 'value', 'mode', 'kind', 'level', 'tone', 'variant', 'className', 'cls', 'type', 'method', 'path',
-  'url', 'color', 'icon', 'state', 'action', 'unit', 'format', 'field', 'band', 'tech', 'cmd', 'command',
+  'url', 'color', 'icon', 'state', 'action', 'unit', 'format', 'field', 'band', 'tech', 'cmd', 'command', 'paddingBottom',
 ])
 // Calls whose string arguments are code, not interface text.
 const CODE_CALLS = new Set([

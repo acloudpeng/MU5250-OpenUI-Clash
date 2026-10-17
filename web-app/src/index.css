@@ -3,32 +3,38 @@
 @tailwind utilities;
 
 :root {
-  --bg: 249 249 250;
+  --bg: 244 245 247;
   --surface: 255 255 255;
-  --surface-2: 243 243 245;
-  --line: 17 20 24;
-  --text: 22 24 28;
-  --text-2: 100 105 115;
-  --text-3: 150 155 165;
-  --accent: 9 111 214;
-  --ok: 21 158 72;
-  --warn: 200 108 6;
-  --danger: 214 48 48;
+  --surface-2: 240 242 245;
+  /* The chosen segment of a segmented control, raised above surface-2. */
+  --raised: 255 255 255;
+  --line: 15 23 42;
+  --text: 17 24 39;
+  --text-2: 75 85 99;
+  --text-3: 138 146 158;
+  --accent: 37 99 235;
+  --ok: 22 163 74;
+  --warn: 217 119 6;
+  --danger: 220 38 38;
+  --shadow: 15 23 42;
   color-scheme: light;
 }
 
+/* The device screen (DevUI) uses the same dark colours. */
 [data-theme='dark'] {
-  --bg: 9 11 14;
-  --surface: 17 20 25;
-  --surface-2: 27 31 38;
-  --line: 235 238 244;
-  --text: 230 232 236;
-  --text-2: 158 164 174;
-  --text-3: 104 110 120;
+  --bg: 11 13 17;
+  --surface: 21 25 32;
+  --surface-2: 29 34 43;
+  --raised: 48 56 69;
+  --line: 232 234 238;
+  --text: 232 234 238;
+  --text-2: 154 161 172;
+  --text-3: 104 112 124;
   --accent: 76 158 235;
-  --ok: 72 199 116;
-  --warn: 233 165 67;
-  --danger: 240 101 101;
+  --ok: 76 201 122;
+  --warn: 234 166 70;
+  --danger: 240 106 106;
+  --shadow: 0 0 0;
   color-scheme: dark;
 }
 
