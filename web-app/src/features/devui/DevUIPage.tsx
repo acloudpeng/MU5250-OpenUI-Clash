@@ -15,7 +15,7 @@ const pages: { id: DevUIPageId; title: string; description: string }[] = [
   { id: 'uplink', title: N_('Wi-Fi relay'), description: N_('Upstream Wi-Fi status, signal and traffic, with on / off control') },
   { id: 'wifi', title: N_('Wi-Fi'), description: N_('2.4 GHz & 5 GHz radio switches, SSID and connected client count') },
   { id: 'signal', title: N_('5G Signal'), description: N_('Live RSRP / SINR / band metrics and 5G SA / NSA / 4G mode switch') },
-  { id: 'usb', title: N_('USB & TTL'), description: N_('RNDIS / NCM / ECM USB mode, ADB toggle and TTL 64 / 65 / 128 lock') },
+  { id: 'usb', title: N_('USB & TTL'), description: N_('RNDIS / NCM / ECM USB mode and TTL 64 / 65 / 128') },
   { id: 'power', title: N_('Battery & Charge'), description: N_('Real-time voltage / current / health and 70% / 80% / 90% / 100% charge limits') },
   { id: 'booster', title: N_('Booster'), description: N_('One-tap ZTE bloatware cleanup and Linux pagecache drop for lower load') },
   { id: 'profiles', title: N_('Saved profiles'), description: N_('Switch between your saved VPN profiles') },

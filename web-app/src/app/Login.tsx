@@ -50,7 +50,7 @@ export default function Login({ onAuthed, lang, onToggleLang }: { onAuthed: () =
             <ISignal size={24} />
           </div>
           <h1 className="text-lg font-bold text-ink">ZTE U60 Pro</h1>
-          <p className="mt-0.5 text-[13px] text-ink2">{t('OpenUI with WireGuard & Clash · Sign in')}</p>
+          <p className="mt-0.5 text-[13px] text-ink2">{t('Advanced admin')}</p>
         </div>
 
         <form

@@ -180,7 +180,7 @@ export default function Shell({
             <ISignal size={17} />
           </div>
           <div className="min-w-0">
-            <p className="truncate text-[13px] font-bold text-ink">OpenUI + WG + Clash</p>
+            <p className="truncate text-[13px] font-bold text-ink">{t('Advanced admin')}</p>
             <p className="tnum truncate text-[11px] text-ink3">{window.location.hostname}</p>
           </div>
         </div>
@@ -236,7 +236,7 @@ export default function Shell({
 
         <main className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-shell px-4 pb-24 pt-4 lg:px-6 lg:pb-10 lg:pt-6">
-            {import.meta.env.MODE === 'demo' && <p className="mb-4 rounded-lg bg-amber-100 px-3 py-2 text-xs font-semibold text-amber-800">{t('Demo data · OpenUI with WireGuard & Clash · No device connected')}</p>}
+            {import.meta.env.MODE === 'demo' && <p className="mb-4 rounded-lg bg-amber-100 px-3 py-2 text-xs font-semibold text-amber-800">{t('Demo data · No device connected')}</p>}
             <StatusPillBar onNavigate={onNavigate} />
             <AlertBanner />
             <Suspense

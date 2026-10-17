@@ -14,7 +14,7 @@ export default {
   '5G Signal': '5G 信号',
   'Live RSRP / SINR / band metrics and 5G SA / NSA / 4G mode switch': '实时 RSRP / SINR / 频段指标与 5G SA / NSA / 4G 制式切换',
   'USB & TTL': 'USB 与 TTL',
-  'RNDIS / NCM / ECM USB mode, ADB toggle and TTL 64 / 65 / 128 lock': 'RNDIS / NCM / ECM USB 模式、ADB 开关及 TTL 64 / 65 / 128 锁定',
+  'RNDIS / NCM / ECM USB mode and TTL 64 / 65 / 128': 'RNDIS / NCM / ECM USB 模式及 TTL 64 / 65 / 128',
   'Battery & Charge': '电池与充电',
   'Real-time voltage / current / health and 70% / 80% / 90% / 100% charge limits': '实时电压 / 电流 / 健康度与 70% / 80% / 90% / 100% 充电上限',
   'Booster': '加速清理',

@@ -31,6 +31,7 @@ export function applyLang(lang: Lang = current) {
     // Private mode: the choice lasts for this page only.
   }
   document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en'
+  document.title = `${lang === 'zh' ? '高级后台' : 'Advanced admin'} · U60 Pro` // i18n-ignore: the title in each language
 }
 
 function fill(text: string, vars?: Vars) {
